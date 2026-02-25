@@ -21,8 +21,8 @@ struct Shader;
 struct Setting;
 
 namespace constant {
-    inline const Version current_version{ 0,0,0,0,0 };
-    inline const Version last_necessary_version{ 0,0,0,0,0 };
+    inline const Version current_version{ 0,0,0,0,1 };
+    inline const Version last_necessary_version{ 0,0,0,0,1 };
     inline constexpr unsigned int OpenGL_version_major{ 4 };
     inline constexpr unsigned int OpenGL_version_minor{ 6 };
     inline constexpr unsigned int message_window_width{ 800 };

@@ -6,4 +6,9 @@
 
 #include "init_f.h"
 
+enum class Data_pointer {
+	Version,
+	User_name = Version + 8
+};
+
 #endif

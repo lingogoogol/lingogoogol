@@ -16,6 +16,7 @@
 #include "window.h"
 #include "debug_f.h"
 #include "holder.h"
+#include "string_f.h"
 
 void init_setting() {
     object::setting = Setting{
@@ -64,14 +65,87 @@ void init_font() {
 }
 
 void init_data_file() {
-    object::logfile.open("123.txt");
     std::time_t time{ std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) };
+    char time_cstring[26]{};
+    ctime_s(time_cstring, sizeof(time_cstring), &time);
+    std::string time_string{};
+    for (int i{ 20 }; i < 24; i++)
+        time_string.push_back(time_cstring[i]);
+    time_string.push_back('.');
+    switch (time_cstring[4]) {
+    case 'J':
+        switch (time_cstring[5]) {
+        case 'a':
+            time_string.push_back('1');
+            break;
+        case 'u':
+            switch (time_cstring[6]) {
+            case 'n':
+                time_string.push_back('6');
+                break;
+            case 'l':
+                time_string.push_back('7');
+                break;
+            }
+            break;
+        }
+        break;
+    case 'F':
+        time_string.push_back('2');
+        break;
+    case 'M':
+        switch (time_cstring[6]) {
+        case 'r':
+            time_string.push_back('3');
+            break;
+        case 'y':
+            time_string.push_back('5');
+            break;
+        }
+        break;
+    case 'A':
+        switch (time_cstring[5]) {
+        case 'p':
+            time_string.push_back('4');
+            break;
+        case 'u':
+            time_string.push_back('8');
+            break;
+        }
+        break;
+    case 'S':
+        time_string.push_back('9');
+        break;
+    case 'O':
+        time_string.push_back('1');
+        time_string.push_back('0');
+        break;
+    case 'N':
+        time_string.push_back('1');
+        time_string.push_back('1');
+        break;
+    case 'D':
+        time_string.push_back('1');
+        time_string.push_back('2');
+        break;
+    }
+    time_string.push_back('.');
+    if (time_cstring[8] != ' ')
+        time_string.push_back(time_cstring[8]);
+    time_string.push_back(time_cstring[9]);
+    time_string.push_back(' ');
+    for (int i{ 11 }; i < 19; i++)
+        if (time_cstring[i] == ':')
+            time_string.push_back('.');
+        else
+            time_string.push_back(time_cstring[i]);
+    std::filesystem::create_directory(".\\logfile\\");
+    object::logfile.open(".\\logfile\\" + time_string + ".txt");
+
     std::fstream data_file{ ".\\data.nop",std::ios::out | std::ios::app };
     data_file.close();
     data_file.open(".\\data.nop", std::ios::in | std::ios::out | std::ios::binary | std::ios::ate);
-    int size_difference{ static_cast<int>(sizeof(std::uint_fast64_t)) - 8 };
     if (data_file.tellp() == 0) {
-        data_file.seekp(0, std::ios::beg);
         data_file << constant::current_version;
     }
     else {
@@ -79,86 +153,18 @@ void init_data_file() {
         data_file.seekg(0, std::ios::beg);
         data_file >> data_version;
         if (data_version < constant::last_necessary_version) {
-            auto window{ new Message_window<Message_window_type::Error>{"message",U"message11"} };
+            auto window{ new Message_window<Message_window_type::Error>{"message",
+                U"請先啟動版本" + to_u32string(constant::last_necessary_version.to_string())} };
             Copy_holder holder{ static_cast<Message_window_pv*>(window),
                 std::function<void(Message_window_pv*)>{ std::mem_fn(&Message_window_pv::destruct) } };
             object::shader.text = create_shader(constant::text_vertex_shader, constant::text_fragment_shader);
             object::message_window.push_back(holder);
         }
+        else {
+            data_file.seekg(0, std::ios::beg);
+            data_file << data_version;
+        }
     }
-    char time_cstring[26]{};
-    ctime_s(time_cstring, sizeof(time_cstring), &time);
-    std::string date{};
-    for (int i{ 20 }; i < 24; i++)
-        date.push_back(time_cstring[i]);
-    date.push_back('.');
-    switch (time_cstring[4]) {
-    case 'J':
-        switch (time_cstring[5]) {
-        case 'a':
-            date.push_back('1');
-            break;
-        case 'u':
-            switch (time_cstring[6]) {
-            case 'n':
-                date.push_back('6');
-                break;
-            case 'l':
-                date.push_back('7');
-                break;
-            }
-            break;
-        }
-        break;
-    case 'F':
-        date.push_back('2');
-        break;
-    case 'M':
-        switch (time_cstring[6]) {
-        case 'r':
-            date.push_back('3');
-            break;
-        case 'y':
-            date.push_back('5');
-            break;
-        }
-        break;
-    case 'A':
-        switch (time_cstring[5]) {
-        case 'p':
-            date.push_back('4');
-            break;
-        case 'u':
-            date.push_back('8');
-            break;
-        }
-        break;
-    case 'S':
-        date.push_back('9');
-        break;
-    case 'O':
-        date.push_back('1');
-        date.push_back('0');
-        break;
-    case 'N':
-        date.push_back('1');
-        date.push_back('1');
-        break;
-    case 'D':
-        date.push_back('1');
-        date.push_back('2');
-        break;
-    }
-    date.push_back('.');
-    if (time_cstring[8] != ' ')
-        date.push_back(time_cstring[8]);
-    date.push_back(time_cstring[9]);
-    std::string time_string{};
-    for (int i{ 11 }; i < 19; i++)
-        if (time_cstring[i] == ':')
-            time_string.push_back('.');
-        else
-            time_string.push_back(time_cstring[i]);
     glEnable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

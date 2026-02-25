@@ -10,7 +10,7 @@ GLFWwindow* create_window(std::string title, unsigned int width, unsigned int he
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, constant::OpenGL_version_major);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, constant::OpenGL_version_minor);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+	glfwWindowHint(GLFW_RESIZABLE, resizeable);
 	GLFWwindow* window{ glfwCreateWindow(width, height, title.data(), nullptr, nullptr) };
 	if (!window) {
 		object::logfile << "error: Failed to open window.\n";

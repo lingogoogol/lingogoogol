@@ -2,7 +2,9 @@
 #define VERSION_H
 
 #include <cstdint>
+#include <string>
 #include <array>
+#include <locale>
 
 #include "version_f.h"
 
@@ -24,6 +26,7 @@ public:
 	friend std::fstream& operator<<(std::fstream& fs, const Version<U1>& version);
 	template<int U1>
 	friend std::fstream& operator>>(std::fstream& fs, Version<U1>& version);
+	std::string to_string() const;
 private:
 	std::array<std::uint_fast64_t, T1> data{};
 };
@@ -132,6 +135,17 @@ std::fstream& operator>>(std::fstream& fs, Version<U1>& version) {
 		version[i] = input;
 	}
 	return fs;
+}
+
+template<int T1>
+std::string Version<T1>::to_string() const {
+	std::string s{};
+	for (int i{ 0 }; i < T1; i++) {
+		s.insert(s.size(), std::to_string(data[i]));
+		s.push_back('.');
+	}
+	s.pop_back();
+	return s;
 }
 
 #endif

@@ -32,7 +32,7 @@ public:
 private:
 	GLFWwindow* window{};
 	Text message{};
-	void process1(int index);
+	void process1();
 	virtual void destruct1();
 };
 
@@ -50,14 +50,14 @@ void Message_window<T1>::process(int index) {
 	if (!glfwWindowShouldClose(window)) {
 		if constexpr (T1 == Message_window_type::Error) {
 			while (!glfwWindowShouldClose(window))
-				process1(index);
+				process1();
 			for (int i{ 0 }; i < object::message_window.size(); i++)
 				object::message_window[i].~Copy_holder();
 			glfwTerminate();
 			std::exit(0);
 		}
 		else
-			process1(index);
+			process1();
 	}
 	else
 		object::message_window[index].~Copy_holder();
@@ -65,7 +65,7 @@ void Message_window<T1>::process(int index) {
 }
 
 template<Message_window_type T1>
-void Message_window<T1>::process1(int index) {
+void Message_window<T1>::process1() {
 	glfwPollEvents();
 	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

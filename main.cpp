@@ -1,4 +1,5 @@
 #include <iostream>
+#include <functional>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -15,10 +16,12 @@
 #include "holder.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    glfwMakeContextCurrent(window);
     glViewport(0, 0, width, height);
 }
 
-void mouse_button_callback_home(GLFWwindow* window, int button, int action, int mods) {
+void mouse_button_callback_home(GLFWwindow* window, int button, int action, int) {
+    glfwMakeContextCurrent(window);
     if (button == GLFW_MOUSE_BUTTON_LEFT)
         for (int i{ 0 }; i < object::button.size(); i++)
             if (object::button[i]->update_state_click(action))
@@ -26,6 +29,7 @@ void mouse_button_callback_home(GLFWwindow* window, int button, int action, int 
 }
 
 void cursor_pos_callback_home(GLFWwindow* window, double x, double y) {
+    glfwMakeContextCurrent(window);
     for (int i{ 0 }; i < object::button.size(); i++)
         if (object::button[i]->update_state_hover(static_cast<float>(x), static_cast<float>(y)))
             break;
@@ -33,6 +37,7 @@ void cursor_pos_callback_home(GLFWwindow* window, double x, double y) {
 }
 
 void cursor_pos_callback_world(GLFWwindow* window, double x, double y) {
+    glfwMakeContextCurrent(window);
     if (object::first_cursor) {
         object::last_cursor_pos_x = static_cast<float>(x);
         object::last_cursor_pos_y = static_cast<float>(y);
@@ -52,10 +57,12 @@ void cursor_pos_callback_world(GLFWwindow* window, double x, double y) {
     return;
 }
 
-void key_callback_world(GLFWwindow* window, int key, int scancode, int action, int mods) {
+void key_callback_world(GLFWwindow* window, int key, int, int action, int) {
+    glfwMakeContextCurrent(window);
     switch (key) {
     case GLFW_KEY_ESCAPE:
-        object::state = State::Home;
+        if (action == GLFW_PRESS)
+            object::state = State::Home;
         break;
     default:
         break;
