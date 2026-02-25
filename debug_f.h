@@ -3,8 +3,6 @@
 
 #include <string>
 
-#define DEBUG
-
 #ifdef DEBUG
 #define handle_error(...) handle_error1(__FILE__, __LINE__, __VA_ARGS__)
 #define check_GL_error(...) check_GL_error1(__FILE__, __LINE__, __VA_ARGS__)
