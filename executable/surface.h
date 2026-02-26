@@ -10,22 +10,23 @@
 #include "cell_f.h"
 #include "debug_f.h"
 #include "value_f.h"
+#include "object_f.h"
 
 class Surface_pv {
 public:
-	glm::mat4 view{};
 	glm::mat4 projection{};
-	Surface_pv();
 	Surface_pv(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
 		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3);
 	virtual ~Surface_pv();
 	void set_vertices(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3);
 	void set_texcoord(glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3);
+	void set_identity(Surface_pv** identity_param);
 	std::array<glm::vec3, 3>* get_vertices();
 	virtual void render() = 0;
 protected:
 	std::array<glm::vec3, 3> vertices{};
 	std::array<glm::vec2, 3> texcoord{};
+	Surface_pv** identity{};
 	unsigned int VAO{};
 	unsigned int VBO{};
 	unsigned int normal{};
@@ -34,28 +35,27 @@ protected:
 	unsigned int specular_strength{};
 	void allocate_VAO();
 	void current_VBO();
-	virtual void gen_normal() = 0;
 	virtual void gen_color() = 0;
+	virtual void gen_normal() = 0;
 	virtual void gen_shininess() = 0;
 	virtual void gen_specular_strength() = 0;
 };
 
 class Cell_surface_pv :public Surface_pv {
 public:
-	Cell_surface_pv();
 	Cell_surface_pv(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
-		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3);
+		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3, Cell_pv* parent_cell_param);
 	virtual ~Cell_surface_pv();
 	virtual void render();
 protected:
 	Cell_pv* parent_cell{};
+	Object* object_included{};
 };
 
 class Stone_surface final :public Cell_surface_pv {
 public:
-	Stone_surface();
 	Stone_surface(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
-		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3);
+		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3, Cell_pv* parent_cell_param);
 	virtual ~Stone_surface();
 protected:
 private:

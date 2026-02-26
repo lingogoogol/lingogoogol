@@ -3,3 +3,7 @@
 Object::Object() {
 	return;
 }
+
+void Object::render() {
+	return;
+}

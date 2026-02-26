@@ -2,7 +2,7 @@
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 	<Product Id='50765114-0A99-4C82-BB47-09E07EB31BE8'
 			 UpgradeCode='87351A1B-4413-407E-905C-F6BFC51A7B1A'
-			 Name='A Fun Game' Version='0.0.0.3' Manufacturer='lingogoogle' Language='1028'>
+			 Name='A Fun Game' Version='0.0.0.4' Manufacturer='lingogoogle' Language='1028'>
 		<Package Id='*' InstallerVersion='200' Compressed='yes' InstallScope='perMachine'/>
 		<Media Id='1' Cabinet='m1.cab' EmbedCab='yes'/>
 		<Icon Id='A_Fun_Game.ico_i' SourceFile='A Fun Game.ico'/>

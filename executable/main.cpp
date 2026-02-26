@@ -16,6 +16,8 @@
 #include "holder.h"
 #include "surface.h"
 #include "shader_f.h"
+#include "cell.h"
+#include "block.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glfwMakeContextCurrent(window);
@@ -131,6 +133,17 @@ void home() {
 }
 
 void world() {
+    for (int i{ 0 }; i < constant::load_block_side_length; i++) {
+        object::blocks.push_back(std::vector<std::vector<Copy_holder<Block*>>>{});
+        for (int j{ 0 }; j < constant::load_block_side_length; j++) {
+            object::blocks[i].push_back(std::vector<Copy_holder<Block*>>{});
+            for (int k{ 0 }; k < constant::load_block_side_length; k++) {
+                object::blocks[i][j].push_back(Copy_holder{ new Block{glm::ivec3{0,0,0}},
+                    std::function<void(Block*)>(std::mem_fn(&Block::destruct)) });
+                (*object::blocks[i][j][k])->update();
+            }
+        }
+    }
     glfwMakeContextCurrent(object::main_window);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -139,9 +152,9 @@ void world() {
     set_callback(key_callback_world, nullptr, cursor_pos_callback_world,
         nullptr, nullptr, nullptr);
     glfwSetInputMode(object::main_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    Stone_surface surface{ glm::vec3{0.0f,0.5f,1.0f},glm::vec3{-0.5f,-0.5f,1.0f},glm::vec3{0.5f,-0.5f,1.0f},
-        glm::vec2{0.5f,1.0f},glm::vec2{0.0f,0.0f},glm::vec2{1.0f,0.0f} };
-    surface.projection = glm::perspective(object::setting.angle_of_view,
+    /*Stone_surface surface{glm::vec3{0.0f,0.5f,1.0f},glm::vec3{-0.5f,-0.5f,1.0f},glm::vec3{0.5f,-0.5f,1.0f},
+        glm::vec2{0.5f,1.0f},glm::vec2{0.0f,0.0f},glm::vec2{1.0f,0.0f},&cell };*/
+    object::projection = glm::perspective(object::setting.angle_of_view,
         (float)object::setting.start_width / (float)object::setting.start_height, 0.1f, 100.0f);
     check_GL_error();
 
@@ -182,8 +195,6 @@ void world() {
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void*)(sizeof(float) * 2));
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
-
-    //unsigned int shader{ create_shader(constant::test_vertex, constant::test_fragment) };
     while (!glfwWindowShouldClose(object::main_window) && object::state == State::World) {
         glfwMakeContextCurrent(object::main_window);
         glfwPollEvents();
@@ -205,8 +216,9 @@ void world() {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        surface.view = glm::lookAt(object::camera_pos, object::camera_pos + object::camera_dir, object::camera_up);
-        surface.render();
+        object::view = glm::lookAt(object::camera_pos, object::camera_pos + object::camera_dir, object::camera_up);
+        //surface.render();
+        (*object::blocks[0][0][0])->render();
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

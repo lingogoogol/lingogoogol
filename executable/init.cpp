@@ -2,10 +2,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <time.h>
+#include <functional>
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -17,6 +16,7 @@
 #include "debug_f.h"
 #include "holder.h"
 #include "string_f.h"
+#include "math_f.h"
 
 void init_setting() {
     object::setting = Setting{
@@ -27,89 +27,15 @@ void init_setting() {
         1.0f,
         0.5f,
         0.001f,
-        { 0.1f, 0.1f, 0.1f },
+        { 0.5f, 0.5f, 0.5f },
         256
     };
     return;
 }
 
 void init_logfile() {
-    std::time_t time{ std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) };
-    char time_cstring[26]{};
-    ctime_s(time_cstring, sizeof(time_cstring), &time);
-    std::string time_string{};
-    for (int i{ 20 }; i < 24; i++)
-        time_string.push_back(time_cstring[i]);
-    time_string.push_back('.');
-    switch (time_cstring[4]) {
-    case 'J':
-        switch (time_cstring[5]) {
-        case 'a':
-            time_string.push_back('1');
-            break;
-        case 'u':
-            switch (time_cstring[6]) {
-            case 'n':
-                time_string.push_back('6');
-                break;
-            case 'l':
-                time_string.push_back('7');
-                break;
-            }
-            break;
-        }
-        break;
-    case 'F':
-        time_string.push_back('2');
-        break;
-    case 'M':
-        switch (time_cstring[6]) {
-        case 'r':
-            time_string.push_back('3');
-            break;
-        case 'y':
-            time_string.push_back('5');
-            break;
-        }
-        break;
-    case 'A':
-        switch (time_cstring[5]) {
-        case 'p':
-            time_string.push_back('4');
-            break;
-        case 'u':
-            time_string.push_back('8');
-            break;
-        }
-        break;
-    case 'S':
-        time_string.push_back('9');
-        break;
-    case 'O':
-        time_string.push_back('1');
-        time_string.push_back('0');
-        break;
-    case 'N':
-        time_string.push_back('1');
-        time_string.push_back('1');
-        break;
-    case 'D':
-        time_string.push_back('1');
-        time_string.push_back('2');
-        break;
-    }
-    time_string.push_back('.');
-    if (time_cstring[8] != ' ')
-        time_string.push_back(time_cstring[8]);
-    time_string.push_back(time_cstring[9]);
-    time_string.push_back(' ');
-    for (int i{ 11 }; i < 19; i++)
-        if (time_cstring[i] == ':')
-            time_string.push_back('.');
-        else
-            time_string.push_back(time_cstring[i]);
     std::filesystem::create_directory(".\\logfile\\");
-    object::logfile.open(".\\logfile\\" + time_string + ".txt");
+    object::logfile.open(".\\logfile\\" + get_time() + ".txt");
     return;
 }
 
@@ -160,11 +86,10 @@ void init_data_file() {
         data_file.seekg(0, std::ios::beg);
         data_file >> data_version;
         if (data_version < constant::last_necessary_version) {
-            auto window{ new Message_window<Message_window_type::Error>{"message",
-                U"請先啟動版本" + to_u32string(constant::last_necessary_version.to_string())} };
-            Copy_holder holder{ static_cast<Message_window_pv*>(window),
+            Copy_holder holder{ static_cast<Message_window_pv*>(
+                new Message_window<Message_window_type::Error>{"message",
+                U"請先啟動版本" + to_u32string(constant::last_necessary_version.to_string())}),
                 std::function<void(Message_window_pv*)>{ std::mem_fn(&Message_window_pv::destruct) } };
-            object::shader.text = create_shader(constant::text_vertex_shader, constant::text_fragment_shader);
             object::message_window.push_back(holder);
         }
         else {
@@ -172,9 +97,6 @@ void init_data_file() {
             data_file << data_version;
         }
     }
-    glEnable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     check_GL_error();
     return;
 }

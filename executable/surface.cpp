@@ -9,11 +9,6 @@
 #include "debug_f.h"
 #include "cell.h"
 
-Surface_pv::Surface_pv() {
-	allocate_VAO();
-	return;
-}
-
 Surface_pv::Surface_pv(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
 	glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3) {
 	vertices[0] = vertex1;
@@ -44,6 +39,11 @@ void Surface_pv::set_texcoord(glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec
 	texcoord[1] = texcoord2;
 	texcoord[2] = texcoord3;
 	current_VBO();
+	return;
+}
+
+void Surface_pv::set_identity(Surface_pv** identity_param) {
+	identity = identity_param;
 	return;
 }
 
@@ -80,14 +80,10 @@ void Surface_pv::current_VBO() {
 	return;
 }
 
-Cell_surface_pv::Cell_surface_pv() :Surface_pv{} {
-	return;
-}
-
 Cell_surface_pv::Cell_surface_pv(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
-	glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3) :
-	Surface_pv{ vertex1,vertex2,vertex3,
-	texcoord1,texcoord2,texcoord3 } {
+	glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3, Cell_pv* parent_cell_param) :
+	Surface_pv{ vertex1,vertex2,vertex3,texcoord1,texcoord2,texcoord3 },
+	parent_cell{ parent_cell_param } {
 	return;
 }
 
@@ -98,8 +94,8 @@ Cell_surface_pv::~Cell_surface_pv() {
 void Cell_surface_pv::render() {
 	glEnable(GL_DEPTH_TEST);
 	glUseProgram(object::shader.transparent_cell);
-	glUniformMatrix4fv(glGetUniformLocation(object::shader.transparent_cell, "view"), 1, GL_FALSE, glm::value_ptr(view));
-	glUniformMatrix4fv(glGetUniformLocation(object::shader.transparent_cell, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+	glUniformMatrix4fv(glGetUniformLocation(object::shader.transparent_cell, "view"), 1, GL_FALSE, glm::value_ptr(object::view));
+	glUniformMatrix4fv(glGetUniformLocation(object::shader.transparent_cell, "projection"), 1, GL_FALSE, glm::value_ptr(object::projection));
 	glUniform1i(glGetUniformLocation(object::shader.transparent_cell, "normal"), 0);
 	glUniform1i(glGetUniformLocation(object::shader.transparent_cell, "color"), 1);
 	glUniform1i(glGetUniformLocation(object::shader.transparent_cell, "shininess"), 2);
@@ -121,18 +117,10 @@ void Cell_surface_pv::render() {
 	return;
 }
 
-Stone_surface::Stone_surface() :Cell_surface_pv{} {
-	gen_normal();
-	gen_color();
-	gen_shininess();
-	gen_specular_strength();
-	return;
-}
-
 Stone_surface::Stone_surface(glm::vec3 vertex1, glm::vec3 vertex2, glm::vec3 vertex3,
-	glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3) :
+	glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3, Cell_pv* parent_cell_param) :
 	Cell_surface_pv{ vertex1,vertex2,vertex3,
-	texcoord1,texcoord2,texcoord3 } {
+	texcoord1,texcoord2,texcoord3,parent_cell_param } {
 	gen_normal();
 	gen_color();
 	gen_shininess();

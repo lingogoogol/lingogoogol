@@ -8,6 +8,7 @@
 class Object {
 public:
 	Object();
+	void render();
 private:
 	glm::vec3 pos{};
 };

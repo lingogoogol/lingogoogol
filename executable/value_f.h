@@ -6,6 +6,7 @@
 #include <array>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
@@ -16,13 +17,14 @@
 #include "tile_f.h"
 #include "version.h"
 #include "shader.h"
+#include "block_f.h"
 
 enum class State;
 
 struct Setting;
 
 namespace constant {
-    inline const Version current_version{ 0,0,0,0,3 };
+    inline const Version current_version{ 0,0,0,1,0 };
     inline const Version last_necessary_version{ 0,0,0,0,1 };
     inline constexpr unsigned int OpenGL_version_major{ 4 };
     inline constexpr unsigned int OpenGL_version_minor{ 6 };
@@ -34,6 +36,8 @@ namespace constant {
     inline constexpr unsigned int surface_tex_precision{ 2 };
     inline constexpr unsigned int tile_num_horizontal{ 4 };
     inline constexpr unsigned int tile_num_vertical{ 4 };
+    inline constexpr int block_side_length{ 16 };
+    inline constexpr int load_block_side_length{ 1 };
     inline const float pi_floor{ 3.141f };
     inline const float pi_ceil{ 3.142f };
     inline const std::string GLSL_version{ "460" };
@@ -264,6 +268,9 @@ namespace object {
     extern std::vector<Button*> button;
     extern std::vector<Copy_holder<Message_window_pv*>> message_window;
     extern std::array<std::array<Tile*, constant::tile_num_horizontal>, constant::tile_num_vertical> tiles;
+    extern std::vector<std::vector<std::vector<Copy_holder<Block*>>>> blocks;
+    extern glm::mat4 view;
+    extern glm::mat4 projection;
 }
 
 void init_setting();

@@ -4,5 +4,8 @@
 enum class Cell_material;
 
 class Cell_pv;
+class Stone_cell;
+
+Cell_pv* get_cell(glm::ivec3 pos);
 
 #endif

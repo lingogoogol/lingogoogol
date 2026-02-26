@@ -10,6 +10,7 @@
 #include "holder.h"
 #include "tile.h"
 #include "text.h"
+#include "block.h"
 
 namespace object {
     GLFWwindow* main_window{};
@@ -35,4 +36,7 @@ namespace object {
     std::vector<Button*> button{};
     std::vector<Copy_holder<Message_window_pv*>> message_window{};
     std::array<std::array<Tile*, constant::tile_num_horizontal>, constant::tile_num_vertical> tiles{};
+    std::vector<std::vector<std::vector<Copy_holder<Block*>>>> blocks{};
+    glm::mat4 view{};
+    glm::mat4 projection{};
 }
