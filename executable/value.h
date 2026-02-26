@@ -22,23 +22,6 @@ enum class State {
     World
 };
 
-struct Character {
-    int advance{};
-    int left_pos{};
-    int top_pos{};
-    int width{};
-    int height{};
-    unsigned int tex{};
-    unsigned int count{};
-};
-
-struct Shader {
-    unsigned int text{};
-    unsigned int button{};
-    unsigned int cell_surface{};
-    unsigned int object_surface{};
-};
-
 struct Setting {
     unsigned int start_width;
     unsigned int start_height;
@@ -47,9 +30,7 @@ struct Setting {
     float angle_of_view;
     float friction;
     float cursor_sensitivity;
-    glm::vec3 environment_color;
-    float shininess;
-    float specular_strength;
+    glm::vec3 ambient_color;
     int text_resolution;
 };
 

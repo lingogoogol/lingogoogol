@@ -4,6 +4,7 @@
 enum class Data_pointer;
 
 void init_setting();
+void init_logfile();
 void init_window();
 void init_shader();
 void init_font();

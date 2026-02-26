@@ -8,6 +8,16 @@
 #include "text_f.h"
 #include "math.h"
 
+struct Character {
+	int advance{};
+	int left_pos{};
+	int top_pos{};
+	int width{};
+	int height{};
+	unsigned int tex{};
+	unsigned int count{};
+};
+
 class Text {
 public:
 	glm::vec3 color{};

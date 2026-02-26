@@ -14,6 +14,8 @@
 #include "text.h"
 #include "debug_f.h"
 #include "holder.h"
+#include "surface.h"
+#include "shader_f.h"
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glfwMakeContextCurrent(window);
@@ -130,9 +132,9 @@ void home() {
 
 void world() {
     glfwMakeContextCurrent(object::main_window);
-    glEnable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
     object::first_cursor = true;
     set_callback(key_callback_world, nullptr, cursor_pos_callback_world,
         nullptr, nullptr, nullptr);
@@ -142,6 +144,46 @@ void world() {
     surface.projection = glm::perspective(object::setting.angle_of_view,
         (float)object::setting.start_width / (float)object::setting.start_height, 0.1f, 100.0f);
     check_GL_error();
+
+    unsigned int FBO{};
+    glGenFramebuffers(1, &FBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, FBO);
+    unsigned int pos_shininess{ apply_tex((float*)nullptr, GL_RGBA, object::setting.start_width, object::setting.start_height) };
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pos_shininess, 0);
+    unsigned int normal_specular_strength{ apply_tex((float*)nullptr, GL_RGBA, object::setting.start_width, object::setting.start_height) };
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, normal_specular_strength, 0);
+    unsigned int color{ apply_tex((float*)nullptr, GL_RGBA, object::setting.start_width, object::setting.start_height) };
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, color, 0);
+    unsigned int parent{ apply_tex((int*)nullptr, GL_RGBA, object::setting.start_width, object::setting.start_height) };
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, parent, 0);
+    unsigned int attachments[]{ GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
+    glDrawBuffers(4, attachments);
+    unsigned int depth{ apply_tex((float*)nullptr, GL_DEPTH_COMPONENT, object::setting.start_width, object::setting.start_height) };
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+
+    unsigned int VAO{};
+    glGenVertexArrays(1, &VAO);
+    glBindVertexArray(VAO);
+    unsigned int VBO{};
+    glGenBuffers(1, &VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    float data[]{
+        -1.0f, 1.0f, 0.0f, 1.0f,
+        -1.0f, -1.0f, 0.0f, 0.0f,
+        1.0f, -1.0f, 1.0f, 0.0f,
+        -1.0f, 1.0f, 0.0f, 1.0f,
+        1.0f, -1.0f, 1.0f, 0.0f,
+        1.0f, 1.0f, 1.0f, 1.0f
+    };
+    glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void*)(sizeof(float) * 2));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    //unsigned int shader{ create_shader(constant::test_vertex, constant::test_fragment) };
     while (!glfwWindowShouldClose(object::main_window) && object::state == State::World) {
         glfwMakeContextCurrent(object::main_window);
         glfwPollEvents();
@@ -159,11 +201,23 @@ void world() {
             object::camera_speed = glm::vec3(0, 0, 0);
         object::camera_pos += object::camera_speed * object::frame_period;
 
+        glBindFramebuffer(GL_FRAMEBUFFER, FBO);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         surface.view = glm::lookAt(object::camera_pos, object::camera_pos + object::camera_dir, object::camera_up);
-        surface.print();
+        surface.render();
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glUseProgram(object::shader.tile_ambient);
+        glBindVertexArray(VAO);
+        glUniform1i(glGetUniformLocation(object::shader.tile_ambient, "color"), 0);
+        glUniform3fv(glGetUniformLocation(object::shader.tile_ambient, "ambient_color"), 1, glm::value_ptr(object::setting.ambient_color));
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, color);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(object::main_window);
         for (int i{ 0 }; i < object::message_window.size(); i++)
@@ -176,6 +230,7 @@ void world() {
 int main() {
     object::state = State::Init;
     init_setting();
+    init_logfile();
     init_window();
     init_shader();
     init_font();

@@ -10,12 +10,12 @@ enum class Cell_material {
 	Stone
 };
 
-class Cell {
-	Cell();
-	Cell(Cell_material material_param, glm::ivec3 pos_param);
+class Cell_pv {
 public:
-	bool belonged_to_world{};
-	Object* belonged_object{};
+	Cell_pv();
+	Cell_pv(Cell_material material_param, glm::ivec3 pos_param);
+	const glm::ivec3* get_pos();
+protected:
 	Cell_material material{};
 	glm::ivec3 pos{};
 };

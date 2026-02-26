@@ -8,6 +8,8 @@
 
 #include "value.h"
 #include "holder.h"
+#include "tile.h"
+#include "text.h"
 
 namespace object {
     GLFWwindow* main_window{};
@@ -32,4 +34,5 @@ namespace object {
     State state{};
     std::vector<Button*> button{};
     std::vector<Copy_holder<Message_window_pv*>> message_window{};
+    std::array<std::array<Tile*, constant::tile_num_horizontal>, constant::tile_num_vertical> tiles{};
 }

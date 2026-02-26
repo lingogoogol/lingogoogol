@@ -2,6 +2,7 @@
 #define CELL_F_H
 
 enum class Cell_material;
-class Cell;
+
+class Cell_pv;
 
 #endif

@@ -3,6 +3,8 @@
 
 #include <string>
 
+struct Shader;
+
 unsigned int create_shader(std::string vertex, std::string fragment);
 
 #endif
