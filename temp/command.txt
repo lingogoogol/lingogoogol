@@ -1,0 +1,1 @@
+output/compilercpp "source/temp/compiler" "source/temp/compiler.exe" "source/temp/logfile.txt"

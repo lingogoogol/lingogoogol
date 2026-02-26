@@ -87,7 +87,9 @@ auto link(const std::string& configuration, const std::filesystem::path& filenam
     add_args(command, cst::linker_args);
     add_arg(command, "/ILK:\"" + cst::ilk_dir + basename.string() + ".ilk\"");
     add_arg(command, "/PDB:\"" + cst::pdbl_dir + basename.string() + ".pdb\"");
-    add_arg(command, "/OUT:\"" + cst::exe_dir + basename.string() + ".exe\"");
+    std::string exe_path{ "\"" + cst::exe_dir + basename.string() + ".exe\"" };
+    add_arg(command, "/OUT:" + exe_path);
+    std::filesystem::remove(exe_path);
 
     if (configuration == "debug") {
         add_args(command, cst::debug_linker_args);
