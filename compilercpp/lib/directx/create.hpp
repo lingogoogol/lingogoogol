@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "../header/Windows.h"
 #include "../header/wrl_client.h"
@@ -37,10 +38,19 @@ auto create_window(ATOM window_class, const std::wstring& name, DWORD style
 , LONG width, LONG height, HINSTANCE instance) -> HWND {
     RECT rect{ 0, 0, width, height };
     AdjustWindowRect(&rect, style, false);
-    LONG width_adjusted{ rect.right - rect.left };
-    LONG height_adjusted{ rect.bottom - rect.top };
+    int width_adjusted{ rect.right - rect.left };
+    int height_adjusted{ rect.bottom - rect.top };
+    POINT origin{ 0, 0 };
+    HMONITOR primary_monitor{ MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY) };
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof monitor_info;
+    GetMonitorInfoW(primary_monitor, &monitor_info);
+    int width_screen{ monitor_info.rcWork.right - monitor_info.rcWork.left };
+    int height_screen{ monitor_info.rcWork.bottom - monitor_info.rcWork.top };
     return CreateWindowW((LPCWSTR)window_class, name.data(), style
-    , 0, 0, width_adjusted, height_adjusted, NULL, NULL, instance, NULL);
+    , (width_screen - width_adjusted) / 2
+    , (height_screen - height_adjusted) / 2
+    , width_adjusted, height_adjusted, NULL, NULL, instance, NULL);
 }
 
 auto create_adapter(Microsoft::WRL::ComPtr<IDXGIFactory5> factory)

@@ -147,7 +147,7 @@ auto CALLBACK WndProc(HWND window, UINT message, WPARAM param_1, LPARAM param_2)
         command_list->ResourceBarrier(1, &barrier);
         D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle{};
         RTV_handle.ptr = state->m_RTV_heap->GetCPUDescriptorHandleForHeapStart().ptr + state->m_RTV_size * state->m_current_buffer_index;
-        FLOAT clear_color[4]{ 0.0f, 1.0f, 0.0f, 1.0f };
+        FLOAT clear_color[4]{ 0.0f, 0.0f, 0.0f, 1.0f };
         command_list->ClearRenderTargetView(RTV_handle, clear_color, 0, nullptr);
         barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -195,7 +195,7 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     , reinterpret_cast<HCURSOR>(LoadImageW(NULL, IDC_ARROW, IMAGE_CURSOR
     , GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR), LR_SHARED))) };
     HWND window{ create_window(window_class, L"compilercpp"
-    , WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, window_width, window_height, instance) };
+    , WS_POPUP, window_width, window_height, instance) };
     SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
     Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter{ create_adapter(factory) };
     Microsoft::WRL::ComPtr<ID3D12Device2> device{ create_device(adapter) };
