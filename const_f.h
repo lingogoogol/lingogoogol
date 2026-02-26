@@ -8,8 +8,8 @@
 #include "lib.h"
 
 namespace constant {
-    inline const Version current_version{ 0,0,0,1,6 };
-    inline const Version last_necessary_version{ 0,0,0,0,1 };
+    inline const Version current_version{ 0,0,0,2.0 };
+    inline const Version last_necessary_version{ 0,0,0,0,0 };
     inline constexpr int OpenGL_version_major{ 4 };
     inline constexpr int OpenGL_version_minor{ 6 };
     inline constexpr int main_window_width{ 800 };

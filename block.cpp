@@ -1,5 +1,6 @@
 #include "block.h"
 #include "cell.h"
+#include "data.h"
 
 Block::Block(glm::ivec3 pos_param) :pos{ pos_param } {
 	for (int i{ 0 }; i < constant::cell_num; i++)

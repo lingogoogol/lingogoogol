@@ -68,4 +68,48 @@ inline GLFWwindow* create_window(std::string title, unsigned int width, unsigned
     return window;
 }
 
+inline int get_window_width(GLFWwindow* window) {
+    int window_width{};
+    glfwGetWindowSize(window, &window_width, nullptr);
+    return window_width;
+}
+
+inline int get_window_height(GLFWwindow* window) {
+    int window_height{};
+    glfwGetWindowSize(window, nullptr, &window_height);
+    return window_height;
+}
+
+inline double get_cursor_x(GLFWwindow* window) {
+    double cursor_x{};
+    glfwGetCursorPos(window, &cursor_x, nullptr);
+    return cursor_x;
+}
+
+inline void set_cursor_x(GLFWwindow* window, double x) {
+    glfwSetCursorPos(window, x, get_window_height(window) - get_cursor_y(window));
+    return;
+}
+
+inline double get_cursor_y(GLFWwindow* window) {
+    double cursor_y{};
+    glfwGetCursorPos(window, nullptr, &cursor_y);
+    return static_cast<double>(get_window_height(window)) - cursor_y;
+}
+
+inline void set_cursor_y(GLFWwindow* window, double y) {
+    glfwSetCursorPos(window, get_cursor_x(window), get_window_height(window) - y);
+    return;
+}
+
+inline void set_callback(GLFWwindow* window, GLFWkeyfun key_callback, GLFWcharfun char_callback,
+    GLFWcursorposfun cursor_pos_callback, GLFWmousebuttonfun mouse_button_callback, GLFWscrollfun scroll_callback) {
+    glfwSetKeyCallback(window, key_callback);
+    glfwSetCharCallback(window, char_callback);
+    glfwSetCursorPosCallback(window, cursor_pos_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+    return;
+}
+
 #endif

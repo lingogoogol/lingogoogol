@@ -2,6 +2,7 @@
 #define LIBRARY_MATH_H
 
 #include <vector>
+#include <array>
 
 #include <glm/glm.hpp>
 
@@ -42,6 +43,7 @@ public:
 	glm::vec3 coefficient{};
 	float constant{};
 	Plane(glm::vec3 point1, glm::vec3 point2, glm::vec3 point3);
+	Plane(std::array<glm::vec3, 3> points);
 };
 
 class Line {
@@ -50,6 +52,7 @@ public:
 	glm::vec3 dir{};
 	Line(glm::vec3 origin_param, glm::vec3 point);
 	glm::vec3 foot_of_perpendicular(glm::vec3 point);
+	float meet_plane(Plane plane);
 };
 
 template<typename T1, typename T2>

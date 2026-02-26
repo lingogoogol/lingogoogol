@@ -24,5 +24,6 @@ template<typename T1, int T2>
 std::u32string to_string32(T1 d, int precision);
 std::u32string to_string32(std::string s);
 std::string get_time();
+void wait(double seconds);
 
 #endif

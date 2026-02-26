@@ -5,10 +5,11 @@
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
 
-#include "data_f.h"
+#include "data.h"
 #include "surface.h"
 #include "lib.h"
 #include "cell.h"
+#include "transform_f.h"
 
 Surface_pv::Surface_pv(std::array<glm::vec3, 3> vertices_param,
 	std::array<glm::vec2, 3> texcoords_param, World_data* data_param) :
@@ -154,6 +155,31 @@ Stone_surface::~Stone_surface() {
 	return;
 }
 
+void Stone_surface::select() {
+	unsigned char tex_data[16]{
+		255,255,255,255,255,255,255,255,
+		255,255,255,255,255,255,255,255
+	};
+	color = create_tex(tex_data, GL_RGBA,
+		constant::surface_tex_precision, constant::surface_tex_precision);
+	return;
+}
+
+void Stone_surface::unselect() {
+	gen_color();
+	return;
+}
+
+bool Stone_surface::get_property(Property property) {
+	switch (property) {
+	case Property::Selectable:
+		return true;
+	default:
+		handle_error(U"未知的表面屬性。");
+		return false;
+	}
+}
+
 void Stone_surface::gen_normal() {
 	float tex_data[12]{
 		0.0f,0.0f,1.0f,0.0f,0.0f,1.0f,
@@ -189,16 +215,4 @@ void Stone_surface::gen_specular_strength() {
 	};
 	specular_strength = create_tex(tex_data, GL_RED,
 		constant::surface_tex_precision, constant::surface_tex_precision);
-}
-
-Cell_pv* get_included_cell(const std::array<glm::vec3, 3>& vertices, World_data* data) {
-	glm::vec3 cell_pos_f{ vertices[0] };
-	for (int i{ 1 }; i < 3; i++)
-		for (int j{ 0 }; j < 3; j++)
-			if (vertices[i][j] < cell_pos_f[j])
-				cell_pos_f[j] = vertices[i][j];
-	glm::ivec3 cell_pos_i{};
-	for (int i{ 0 }; i < 3; i++)
-		cell_pos_i[i] = static_cast<int>(std::floor(cell_pos_f[i]));
-	return get_cell(cell_pos_i, data);
 }

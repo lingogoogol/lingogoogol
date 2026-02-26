@@ -17,8 +17,10 @@
 #include "lib.h"
 #include "tile_f.h"
 #include "block_f.h"
+#include "surface_f.h"
 
 enum class State {
+    Waiting,
     Home,
     Environment,
     World
@@ -77,6 +79,8 @@ public:
     float friction{};
     float cursor_sensitivity{};
     glm::vec3 ambient_color{};
+    double select_length{};
+    Surface_pv* selected_surface{};
     float last_cursor_pos_x{};
     float last_cursor_pos_y{};
     glm::vec3 camera_pos{};

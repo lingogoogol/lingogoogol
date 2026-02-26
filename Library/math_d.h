@@ -5,16 +5,39 @@
 #include <time.h>
 #include <chrono>
 
+#include <glm/glm.hpp>
+
 #include "math.h"
 
 inline Plane::Plane(glm::vec3 point1, glm::vec3 point2, glm::vec3 point3) :
-    coefficient{ (point2 - point1) * (point3 - point1) }, constant{ glm::dot(coefficient, point1) } {
+    coefficient{ glm::cross(point2 - point1, point3 - point1) }, constant{ glm::dot(coefficient, point1) } {
+    return;
+}
+
+inline Plane::Plane(std::array<glm::vec3, 3> points) : Plane{ points[0],points[1],points[2] } {
     return;
 }
 
 inline Line::Line(glm::vec3 origin_param, glm::vec3 point) :
     origin{ origin_param }, dir{ glm::normalize(point - origin_param) } {
     return;
+}
+
+inline glm::vec3 Line::foot_of_perpendicular(glm::vec3 point) {
+    return origin + dir * glm::dot(point - origin, dir) / glm::dot(dir, dir);
+}
+
+inline float Line::meet_plane(Plane plane) {
+    float r_count{ glm::dot(plane.coefficient,dir) };
+    float constant{ plane.constant - glm::dot(plane.coefficient,origin) };
+    if (r_count == 0.0f) {
+        if (constant == 0.0f)
+            return std::numeric_limits<float>::infinity();
+        else
+            return std::numeric_limits<float>::quiet_NaN();
+    }
+    else
+        return constant / r_count;
 }
 
 inline std::int_fast8_t to_intfast8(char8_t ch) {
@@ -89,10 +112,6 @@ inline std::u32string to_string32(std::string s8) {
     for (int i{ 0 }; i < s8.size(); i++)
         s32.push_back(static_cast<char32_t>(s8[i]));
     return s32;
-}
-
-inline glm::vec3 Line::foot_of_perpendicular(glm::vec3 point) {
-    return origin + dir * glm::dot(point - origin, dir) / glm::dot(dir, dir);
 }
 
 inline std::string get_time() {
@@ -171,6 +190,14 @@ inline std::string get_time() {
         else
             string.push_back(cstring[i]);
     return string;
+}
+
+inline void wait(double seconds) {
+    double end{ glfwGetTime() + seconds };
+    while (glfwGetTime() < end) {
+        glfwPollEvents();
+    }
+    return;
 }
 
 #endif

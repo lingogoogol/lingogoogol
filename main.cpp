@@ -15,6 +15,9 @@
 #include "cell.h"
 #include "block.h"
 #include "tile.h"
+#include "transform_f.h"
+
+#pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glfwMakeContextCurrent(window);
@@ -33,11 +36,9 @@ void mouse_button_callback_home(GLFWwindow* window, int button, int action, int)
 void cursor_pos_callback_home(GLFWwindow* window, double x, double y) {
     glfwMakeContextCurrent(window);
     Home_data* data{ static_cast<Home_data*>(glfwGetWindowUserPointer(window)) };
-    int window_height{};
-    glfwGetWindowSize(window, nullptr, &window_height);
     for (int i{ 0 }; i < data->button.size(); i++)
         if (data->button[i]->update_state_hover(static_cast<float>(x),
-            static_cast<float>(window_height) - static_cast<float>(y), window))
+            static_cast<float>(get_window_height(window)) - static_cast<float>(y), window))
             break;
     return;
 }
@@ -45,21 +46,23 @@ void cursor_pos_callback_home(GLFWwindow* window, double x, double y) {
 void cursor_pos_callback_world(GLFWwindow* window, double x, double y) {
     glfwMakeContextCurrent(window);
     World_data* data{ static_cast<World_data*>(glfwGetWindowUserPointer(window)) };
-    if (data->first_cursor) {
-        data->last_cursor_pos_x = static_cast<float>(x);
-        data->last_cursor_pos_y = static_cast<float>(y);
-        data->first_cursor = false;
+    if (data->state != State::Waiting) {
+        if (data->first_cursor) {
+            data->last_cursor_pos_x = static_cast<float>(x);
+            data->last_cursor_pos_y = static_cast<float>(y);
+            data->first_cursor = false;
+        }
+        float cursor_offset_x{ (static_cast<float>(x) - data->last_cursor_pos_x) * data->cursor_sensitivity };
+        float cursor_offset_y{ (data->last_cursor_pos_y - static_cast<float>(y)) * data->cursor_sensitivity };
+        data->yaw += cursor_offset_x;
+        data->pitch += cursor_offset_y;
+        if (data->pitch > (constant::pi_floor / 2.0f))
+            data->pitch = (constant::pi_floor / 2.0f);
+        if (data->pitch < -(constant::pi_floor / 2.0f))
+            data->pitch = -(constant::pi_floor / 2.0f);
+        data->camera_dir = glm::normalize(glm::vec3{ cos(data->yaw) * cos(data->pitch),
+            sin(data->pitch), sin(data->yaw) * cos(data->pitch) });
     }
-    float cursor_offset_x{ (static_cast<float>(x) - data->last_cursor_pos_x) * data->cursor_sensitivity };
-    float cursor_offset_y{ (data->last_cursor_pos_y - static_cast<float>(y)) * data->cursor_sensitivity };
-    data->yaw += cursor_offset_x;
-    data->pitch += cursor_offset_y;
-    if (data->pitch > (constant::pi_floor / 2.0f))
-        data->pitch = (constant::pi_floor / 2.0f);
-    if (data->pitch < -(constant::pi_floor / 2.0f))
-        data->pitch = -(constant::pi_floor / 2.0f);
-    data->camera_dir = glm::normalize(glm::vec3{ cos(data->yaw) * cos(data->pitch),
-        sin(data->pitch), sin(data->yaw) * cos(data->pitch) });
     data->last_cursor_pos_x = static_cast<float>(x);
     data->last_cursor_pos_y = static_cast<float>(y);
     return;
@@ -73,32 +76,20 @@ void key_callback_world(GLFWwindow* window, int key, int, int action, int) {
         if (action == GLFW_PRESS)
             data->state = State::Home;
         break;
+    case GLFW_KEY_F3:
+        if (action == GLFW_PRESS) {
+            glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            State state{ data->state };
+            data->state = State::Waiting;
+            wait(2.0);
+            data->state = state;
+            glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            data->first_cursor = true;
+        }
+        break;
     default:
         break;
     }
-    return;
-}
-
-void handle_input_world(World_data* data) {
-    if (glfwGetKey(data->main_window, GLFW_KEY_A) == GLFW_PRESS)
-        data->camera_speed -= glm::normalize(glm::cross(data->camera_dir, data->camera_up)) * data->acceleration * data->frame_period;
-    if (glfwGetKey(data->main_window, GLFW_KEY_D) == GLFW_PRESS)
-        data->camera_speed += glm::normalize(glm::cross(data->camera_dir, data->camera_up)) * data->acceleration * data->frame_period;
-    if (glfwGetKey(data->main_window, GLFW_KEY_S) == GLFW_PRESS)
-        data->camera_speed -= data->camera_dir * data->acceleration * data->frame_period;
-    if (glfwGetKey(data->main_window, GLFW_KEY_W) == GLFW_PRESS)
-        data->camera_speed += data->camera_dir * data->acceleration * data->frame_period;
-    return;
-}
-
-void set_callback(GLFWkeyfun key_callback, GLFWcharfun char_callback, GLFWcursorposfun cursor_pos_callback,
-    GLFWmousebuttonfun mouse_button_callback, GLFWscrollfun scroll_callback, GLFWdropfun drop_callback, Data_pv* data) {
-    glfwSetKeyCallback(data->main_window, key_callback);
-    glfwSetCharCallback(data->main_window, char_callback);
-    glfwSetCursorPosCallback(data->main_window, cursor_pos_callback);
-    glfwSetMouseButtonCallback(data->main_window, mouse_button_callback);
-    glfwSetScrollCallback(data->main_window, scroll_callback);
-    glfwSetDropCallback(data->main_window, drop_callback);
     return;
 }
 
@@ -106,17 +97,15 @@ void home(Data_pv* data_global) {
     auto data{ static_cast<Home_data*>(data_global) };
     data->setup();
     glfwMakeContextCurrent(data->main_window);
+    set_callback(data->main_window, nullptr, nullptr,
+        cursor_pos_callback_home, mouse_button_callback_home, nullptr);
     glEnable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    set_callback(nullptr, nullptr, cursor_pos_callback_home,
-        mouse_button_callback_home, nullptr, nullptr, data);
     glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    int main_window_width{};
-    int main_window_height{};
-    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
-    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(main_window_width),
-        0.0f, static_cast<float>(main_window_height)) };
+    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(get_window_width(data->main_window)),
+        0.0f, static_cast<float>(get_window_height(data->main_window))) };
     auto world_text{ new Text{U"歡迎！",64.0f,{0.0f,1.0f,1.0f},transform_mat} };
     auto environment_text{ new Text{U"環境評估",32.0f,{0.0f,1.0f,1.0f},transform_mat} };
     world_text->set_pos({ 400.0f,300.0f,0.5f });
@@ -140,6 +129,9 @@ void home(Data_pv* data_global) {
     data->button.push_back(world_button);
     data->button.push_back(environment_button);
     check_GL_error();
+    for (int i{ 0 }; i < data->button.size(); i++)
+        data->button[i]->update_state_hover(static_cast<float>(get_cursor_x(data->main_window)),
+            static_cast<float>(get_cursor_y(data->main_window)), data->main_window);
     while (!glfwWindowShouldClose(data->main_window) && data->state == State::Home) {
         glfwMakeContextCurrent(data->main_window);
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -171,22 +163,20 @@ void home(Data_pv* data_global) {
 
 void environment(Data_pv* data_global) {
     Data_pv* data{ data_global };
-    set_callback(nullptr, nullptr, cursor_pos_callback_home,
-        mouse_button_callback_home, nullptr, nullptr, data);
+    set_callback(data->main_window, nullptr, nullptr,
+        cursor_pos_callback_home, mouse_button_callback_home, nullptr);
+    glDepthFunc(GL_LEQUAL);
     auto pointer{ new char8_t*[16384]{} };
     std::int_fast64_t size_i{ 0 };
-    int main_window_width{};
-    int main_window_height{};
-    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
-    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(
-        main_window_width),0.0f,static_cast<float>(main_window_height)) };
+    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(get_window_width(data->main_window)),
+        0.0f,static_cast<float>(get_window_height(data->main_window))) };
     Text size_t{ U"約0位元組",50.0f,{0.0f,0.0f,0.0f},transform_mat};
     Text progress_t{U"",30.0f,{0.0f,0.0f,0.0f},transform_mat};
-    Text home_text{ U"取消",48.0f,{0.0f,1.0f,1.0f},transform_mat};
+    Text home_text{ U"取消",32.0f,{0.0f,1.0f,1.0f},transform_mat};
     size_t.set_pos({ 400.0f,300.0f,0.5f });
     progress_t.set_pos({ 400.0f,250.0f,0.5f });
     home_text.set_pos({ 700.0f,50.0f,0.5f });
-    auto home_button{ new Button{128.0f,64.0f,transform_mat,
+    auto home_button{ new Button{150.0f,50.0f,transform_mat,
         {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
         [data, &home_text](Button& button) {
             home_text.set_text(U"取消中…");
@@ -199,6 +189,9 @@ void environment(Data_pv* data_global) {
     } };
     home_button->set_pos({ 700.0f,50.0f,0.0f });
     data->button.push_back(home_button);
+    for (int i{ 0 }; i < data->button.size(); i++)
+        data->button[i]->update_state_hover(static_cast<float>(get_cursor_x(data->main_window)),
+            static_cast<float>(get_cursor_y(data->main_window)), data->main_window);
     int index{ 0 };
     for (int i{ 1048576 }; i > 1048575; i--) {
         try {
@@ -231,11 +224,9 @@ void environment(Data_pv* data_global) {
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glfwPollEvents();
-        if (index > 1) {
-            float f{ static_cast<float>(i) / (index - 1) * 100 };
+        if (index > 1)
             progress_t.set_text(to_string32(
                 to_string8<float, 10>(static_cast<float>(i) / (index - 1) * 100, 2)) + U"%");
-        }
         size_t.render(data->shader->text);
         progress_t.render(data->shader->text);
         home_text.render(data->shader->text);
@@ -258,6 +249,64 @@ void environment(Data_pv* data_global) {
     return;
 }
 
+Surface_pv* select(World_data* data) {
+    double length{ 0.0 };
+    glm::vec3 point{ data->camera_pos };
+    while (length < data->select_length) {
+        if (point_at_edge(point) && length != 0.0) {
+            glm::vec3 coord{ to_coord(point) };
+            Cell_pv* cell{ get_cell(coord, data) };
+            if (!cell)
+                return nullptr;
+            const std::vector<Surface_pv*>& surfaces{ cell->get_include_surfaces() };
+            for (int i{ 0 }; i < surfaces.size(); i++)
+                if (surfaces[i]->get_property(Property::Selectable) &&
+                    point_at_edge_meet_surface(point, surfaces[i])) {
+                    return surfaces[i];
+                }
+        }
+        glm::ivec3 detect_coord{ to_coord(point) };
+        for (int i{ 0 }; i < 3; i++)
+            if (point[i] == 0.0f && data->camera_dir[i] < 0.0f)
+                detect_coord[i] -= 1;
+        Cell_pv* cell{ get_cell(detect_coord, data) };
+        if (!cell)
+            return nullptr;
+        const std::vector<Surface_pv*>& surfaces{ cell->get_include_surfaces() };
+        glm::vec3 next_point{ to_cell_side(point, data->camera_dir) };
+        float min_length{ std::numeric_limits<float>::infinity() };
+        Surface_pv* return_surface{};
+        for (int i{ 0 }; i < surfaces.size(); i++) {
+            Line line{ point, next_point };
+            float current_length{ line.meet_plane(Plane{surfaces[i]->get_vertices()}) };
+            if (current_length == std::numeric_limits<float>::infinity() ||
+                current_length == std::numeric_limits<float>::quiet_NaN())
+                continue;
+            glm::vec3 intersection{ point + data->camera_dir * current_length };
+            const std::array<glm::vec3, 3>& vertices{ surfaces[i]->get_vertices() };
+            float dot_product1{ glm::dot(glm::normalize(vertices[1] - vertices[0]),glm::normalize(vertices[2] - vertices[0])) };
+            float dot_product2{ glm::dot(glm::normalize(vertices[0] - vertices[1]),glm::normalize(vertices[2] - vertices[1])) };
+            if (surfaces[i]->get_property(Property::Selectable) &&
+                current_length >= 0.0f &&
+                current_length < min_length &&
+                length + current_length > 0.0f &&
+                length + current_length < data->select_length &&
+                glm::dot(glm::normalize(intersection - vertices[0]), glm::normalize(vertices[1] - vertices[0])) >= dot_product1 &&
+                glm::dot(glm::normalize(intersection - vertices[0]), glm::normalize(vertices[2] - vertices[0])) >= dot_product1 &&
+                glm::dot(glm::normalize(intersection - vertices[1]), glm::normalize(vertices[0] - vertices[1])) >= dot_product2 &&
+                glm::dot(glm::normalize(intersection - vertices[1]), glm::normalize(vertices[2] - vertices[1])) >= dot_product2) {
+                min_length = current_length;
+                return_surface = surfaces[i];
+            }
+        }
+        if (return_surface)
+            return return_surface;
+        point = next_point;
+        length = glm::length(point - data->camera_pos);
+    }
+    return nullptr;
+}
+
 void world(Data_pv* data_global) {
     auto data{ static_cast<World_data*>(data_global) };
     data->setup();
@@ -276,15 +325,12 @@ void world(Data_pv* data_global) {
         }
     }
     glfwMakeContextCurrent(data->main_window);
-    set_callback(key_callback_world, nullptr, cursor_pos_callback_world,
-        nullptr, nullptr, nullptr, data);
+    set_callback(data->main_window, key_callback_world, nullptr,
+        cursor_pos_callback_world, nullptr, nullptr);
+    glDepthFunc(GL_LEQUAL);
     glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    int main_window_width{};
-    int main_window_height{};
-    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
-    data->projection = glm::perspective(data->angle_of_view,
-        static_cast<float>(main_window_width) / static_cast<float>(main_window_height), 0.1f, 100.0f);
-    check_GL_error();
+    data->projection = glm::perspective(data->angle_of_view, static_cast<float>(get_window_width(
+        data->main_window)) / static_cast<float>(get_window_height(data->main_window)), 0.1f, 100.0f);
     int main_framebuffer_width{};
     int main_framebuffer_height{};
     glfwGetFramebufferSize(data->main_window, &main_framebuffer_width, &main_framebuffer_height);
@@ -296,7 +342,6 @@ void world(Data_pv* data_global) {
         data->current_time = static_cast<float>(glfwGetTime());
         data->frame_period = data->current_time - data->last_time;
         data->last_time = data->current_time;
-        handle_input_world(data);
         float speed{ glm::length(data->camera_speed) };
         float deceleration{ data->friction * data->frame_period };
         if (speed > deceleration)
@@ -304,6 +349,27 @@ void world(Data_pv* data_global) {
         else if (speed <= deceleration)
             data->camera_speed = { 0, 0, 0 };
         data->camera_pos += data->camera_speed * data->frame_period;
+
+        if (glfwGetKey(data->main_window, GLFW_KEY_A) == GLFW_PRESS)
+            data->camera_speed -= glm::normalize(glm::cross(data->camera_dir,
+                data->camera_up)) * data->acceleration * data->frame_period;
+        if (glfwGetKey(data->main_window, GLFW_KEY_D) == GLFW_PRESS)
+            data->camera_speed += glm::normalize(glm::cross(data->camera_dir,
+                data->camera_up)) * data->acceleration * data->frame_period;
+        if (glfwGetKey(data->main_window, GLFW_KEY_S) == GLFW_PRESS)
+            data->camera_speed -= data->camera_dir * data->acceleration * data->frame_period;
+        if (glfwGetKey(data->main_window, GLFW_KEY_W) == GLFW_PRESS)
+            data->camera_speed += data->camera_dir * data->acceleration * data->frame_period;
+
+        Surface_pv* selected_surface{ select(data) };
+        if (selected_surface != data->selected_surface) {
+            if (data->selected_surface)
+                data->selected_surface->unselect();
+            data->selected_surface = selected_surface;
+            if (data->selected_surface)
+                data->selected_surface->select();
+        }
+
         glBindFramebuffer(GL_FRAMEBUFFER, FBO);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

@@ -13,6 +13,10 @@
 #include "data_f.h"
 #include "object_f.h"
 
+enum class Property {
+	Selectable
+};
+
 class Surface_pv {
 public:
 	glm::mat4 projection{};
@@ -26,6 +30,9 @@ public:
 	void set_identity(Surface_pv** identity_param);
 	const std::array<glm::vec3, 3>& get_vertices();
 	virtual void render() = 0;
+	virtual void select() = 0;
+	virtual void unselect() = 0;
+	virtual bool get_property(Property property) = 0;
 protected:
 	World_data* data{};
 	std::array<glm::vec3, 3> vertices{};
@@ -68,6 +75,9 @@ public:
 		glm::vec2 texcoord1, glm::vec2 texcoord2, glm::vec2 texcoord3,
 		Cell_pv* parent_cell_param, World_data* data_param);
 	virtual ~Stone_surface();
+	virtual void select();
+	virtual void unselect();
+	virtual bool get_property(Property property);
 protected:
 private:
 	virtual void gen_normal();

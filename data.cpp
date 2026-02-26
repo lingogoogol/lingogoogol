@@ -17,9 +17,9 @@ Data_pv::Data_pv() :
 	implement::get_data()->font_file = &font_file;
 	implement::get_data()->chars = &character;
 	implement::get_data()->main_window = &main_window;
-	logfile->open(".\\logfile\\" + get_time() + ".txt");
+	logfile->open(".\\logfiles\\" + get_time() + ".txt");
 	glfwInit();
-	main_window = create_window("a fun game", constant::main_window_width, constant::main_window_height, false);
+	main_window = create_window("Game", constant::main_window_width, constant::main_window_height, false);
 	glfwSetWindowUserPointer(main_window, this);
 	shader->text = create_shader(implement::text_vertex_shader, implement::text_fragment_shader);
 	shader->button = create_shader(constant::button_vertex_shader, constant::button_fragment_shader);
@@ -33,7 +33,7 @@ Data_pv::Data_pv() :
 	//shader->opaque_object = create_shader(constant::opaque_object_vertex_shader, constant::opaque_object_fragment_shader);
 	FT_Library ft{};
 	if (FT_Init_FreeType(&ft))
-		handle_error(U"error: Failed to initialize FreeType.\n");
+		handle_error(U"Failed to initialize FreeType.\n");
 	if (FT_New_Face(ft, "C:\\Windows\\Fonts\\msjh.ttc", 0, &font_file))
 		handle_error(U"Failed to create new FreeType face.\n");
 	FT_Set_Pixel_Sizes(font_file, 0, text_resolution);
@@ -82,6 +82,8 @@ void World_data::setup() {
 	friction = 0.5f;
 	cursor_sensitivity = 0.001f;
 	ambient_color = { 0.2f,0.2f,0.2f };
+	select_length = 5.0;
+	selected_surface = {};
 	last_cursor_pos_x = {};
 	last_cursor_pos_y = {};
 	camera_pos = { 0.0f,0.0f,0.0f };

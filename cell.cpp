@@ -7,7 +7,8 @@
 #include "block.h"
 #include "lib.h"
 #include "surface.h"
-#include "data_f.h"
+#include "data.h"
+#include "transform_f.h"
 
 Cell_pv::Cell_pv(glm::ivec3 pos_param, Block* parent_block_param, Cell_pv** identity_param) :
 	pos{ pos_param }, parent_block{ parent_block_param }, identity{ identity_param } {
@@ -318,45 +319,4 @@ Cell_type Stone_cell::get_type() {
 
 void Stone_cell::broke() {
 	return;
-}
-
-Cell_pv* get_cell(glm::ivec3 pos, World_data* data) {
-	glm::ivec3 block{ to_block(pos) };
-	glm::ivec3 coord_in_block{ to_coord_in_block(pos) };
-	glm::ivec3 first_block_pos{ (*data->blocks[0][0][0])->get_pos() };
-	std::size_t index_y{ static_cast<std::size_t>(block[0]) - static_cast<std::size_t>(first_block_pos[0]) };
-	std::size_t index_x{ static_cast<std::size_t>(block[1]) - static_cast<std::size_t>(first_block_pos[1]) };
-	std::size_t index_z{ static_cast<std::size_t>(block[2]) - static_cast<std::size_t>(first_block_pos[2]) };
-	if (index_y >= constant::block_num ||
-		index_x >= constant::block_num ||
-		index_z >= constant::block_num)
-		return nullptr;
-	else
-		return (*data->blocks[index_y][index_x][index_z])->get_child_cells()
-		[coord_in_block.y][coord_in_block.x][coord_in_block.z];
-}
-
-glm::vec3 to_cell_side(glm::vec3 begin, glm::vec3 dir) {
-	glm::vec3 coefficient{};
-	for (int i{ 0 }; i < 3; i++)
-		coefficient[i] = dir[i] == 0 ? std::numeric_limits<float>::infinity() :
-		(((dir[i] > 0 ? std::floor(begin[i] + 1) : std::ceil(begin[i] - 1)) - begin[i]) / dir[i]);
-	float dist_to_cell_side{ std::min(coefficient.x, std::min(coefficient.y, coefficient.z)) };
-	for (int i{ 0 }; i < 3; i++)
-		begin[i] = coefficient[i] == dist_to_cell_side ? (dir[i] > 0 ? std::floor(begin[i] + 1) :
-			std::ceil(begin[i] - 1)) : (begin[i] + dir[i] * dist_to_cell_side);
-	return begin;
-};
-
-glm::ivec3 to_block(glm::ivec3 coord) {
-	for (int i{ 0 }; i < 3; i++)
-		coord[i] = coord[i] / constant::cell_num - (coord[i] >= 0 ? 0 :
-			(coord[i] % constant::cell_num == 0 ? 0 : 1));
-	return coord;
-}
-
-glm::ivec3 to_coord_in_block(glm::ivec3 coord) {
-	for (int i{ 0 }; i < 3; i++)
-		coord[i] = coord[i] % constant::cell_num + (coord[i] >= 0 ? 0 : 1);
-	return coord;
 }
