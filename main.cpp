@@ -120,23 +120,23 @@ void home(Data_pv* data_global) {
     auto world_text{ new Text{U"歡迎！",64.0f,{0.0f,1.0f,1.0f},transform_mat} };
     auto environment_text{ new Text{U"環境評估",32.0f,{0.0f,1.0f,1.0f},transform_mat} };
     world_text->set_pos({ 400.0f,300.0f,0.5f });
-    environment_text->set_pos({ 400.0f,200.0f,0.5f });
+    environment_text->set_pos({ 700.0f,50.0f,0.5f });
     data->text.push_back(world_text);
     data->text.push_back(environment_text);
     auto world_button{ new Button{200.0f,100.0f,transform_mat,
         {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
-        [data]() {
+        [data](Button&) {
             data->state = State::World;
         }
     } };
-    auto environment_button{ new Button{100.0f,50.0f,transform_mat,
+    auto environment_button{ new Button{150.0f,50.0f,transform_mat,
         {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
-        [data]() {
+        [data](Button&) {
             data->state = State::Environment;
         }
     } };
     world_button->set_pos({ 400.0f,300.0f,0.0f });
-    environment_button->set_pos({ 400.0f,200.0f,0.0f });
+    environment_button->set_pos({ 700.0f,50.0f,0.0f });
     data->button.push_back(world_button);
     data->button.push_back(environment_button);
     check_GL_error();
@@ -188,8 +188,13 @@ void environment(Data_pv* data_global) {
     home_text.set_pos({ 700.0f,50.0f,0.5f });
     auto home_button{ new Button{128.0f,64.0f,transform_mat,
         {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
-        [data]() {
-            data->state = State::Home;
+        [data, &home_text](Button& button) {
+            home_text.set_text(U"取消中…");
+            std::vector<Button*>::iterator i{std::find(data->button.begin(), data->button.end(), &button)};
+            data->button.erase(i);
+            State& state{ data->state };
+            delete &button;
+            state = State::Home;
         }
     } };
     home_button->set_pos({ 700.0f,50.0f,0.0f });
@@ -209,12 +214,13 @@ void environment(Data_pv* data_global) {
                 size_t.render(data->shader->text);
                 progress_t.render(data->shader->text);
                 home_text.render(data->shader->text);
-                home_button->render(data->shader->button);
+                for (int j{ 0 }; j < data->button.size(); j++)
+                    data->button[j]->render(data->shader->button);
                 glfwSwapBuffers(data->main_window);
             }
         }
         catch (std::bad_alloc&) {}
-        progress_t.set_text(to_string32(to_string8(static_cast<float>(1048576 - i) /
+        progress_t.set_text(to_string32(to_string8<float, 10>(static_cast<float>(1048576 - i) /
             (1048576 - 1048575) * 100, 2)) + U"%");
     }
     for (int i{ 0 }; i < index; i++) {
@@ -225,13 +231,16 @@ void environment(Data_pv* data_global) {
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glfwPollEvents();
-        if (index > 1)
+        if (index > 1) {
+            float f{ static_cast<float>(i) / (index - 1) * 100 };
             progress_t.set_text(to_string32(
-                to_string8(static_cast<float>(i) / (index - 1) * 100, 2)) + U"%");
+                to_string8<float, 10>(static_cast<float>(i) / (index - 1) * 100, 2)) + U"%");
+        }
         size_t.render(data->shader->text);
         progress_t.render(data->shader->text);
         home_text.render(data->shader->text);
-        home_button->render(data->shader->button);
+        for (int j{ 0 }; j < data->button.size(); j++)
+            data->button[j]->render(data->shader->button);
         glfwSwapBuffers(data->main_window);
     }
     home_text.set_text(U"確定");
@@ -242,12 +251,10 @@ void environment(Data_pv* data_global) {
         glfwPollEvents();
         size_t.render(data->shader->text);
         home_text.render(data->shader->text);
-        home_button->render(data->shader->button);
+        for (int i{ 0 }; i < data->button.size(); i++)
+            data->button[i]->render(data->shader->button);
         glfwSwapBuffers(data->main_window);
     }
-    std::vector<Button*>::iterator button_iterator{ std::find(data->button.begin(), data->button.end(), home_button) };
-    delete *button_iterator;
-    data->button.erase(button_iterator);
     return;
 }
 

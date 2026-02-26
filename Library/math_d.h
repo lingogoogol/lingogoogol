@@ -17,72 +17,59 @@ inline Line::Line(glm::vec3 origin_param, glm::vec3 point) :
     return;
 }
 
-inline std::string to_string8(float f, int precision) {
-    int digit{ 0 };
-    while (f / std::pow(10, digit) >= 1)
-        digit += 1;
-    if (digit > 0)
-        digit--;
-    std::string s8{};
-    if (f < 0)
-        s8.push_back('-');
-    while (digit >= 0) {
-        int div{ static_cast<int>(std::trunc(f / std::pow(10, digit))) };
-        f -= static_cast<float>(std::pow(10, digit)) * div;
-        s8 += std::to_string(std::abs(div));
-        digit--;
-    }
-    float least{ static_cast<float>(std::pow(10, -precision)) / 2 };
-    if (std::abs(f) >= least) {
-        s8.push_back('.');
-        while (std::abs(f) >= least && digit > -precision) {
-            int div{ static_cast<int>(std::trunc(f / std::pow(10, digit))) };
-            f -= static_cast<float>(std::pow(10, digit)) * div;
-            s8 += std::to_string(std::abs(div));
-            digit--;
-        }
-        int div{ static_cast<int>(std::trunc(f / std::pow(10, digit))) };
-        f -= static_cast<float>(std::pow(10, digit)) * div;
-        if (std::abs(f) >= least)
-            div++;
-        if (div != 0)
-            s8 += std::to_string(std::abs(div));
-    }
-    return s8;
+inline std::int_fast8_t to_intfast8(char8_t ch) {
+    return static_cast<std::int_fast8_t>(ch - '0');
 }
 
-inline std::string to_string8(double d, int precision) {
-    int digit{ 0 };
-    while (d / std::pow(10, digit) >= 1)
-        digit += 1;
-    if (digit > 0)
-        digit--;
-    std::string s8{};
-    if (d < 0)
-        s8.push_back('-');
-    while (digit >= 0) {
-        int div{ static_cast<int>(std::trunc(d / std::pow(10, digit))) };
-        d -= std::pow(10, digit) * div;
-        s8 += std::to_string(std::abs(div));
-        digit--;
+inline char8_t to_char8(int i) {
+    return static_cast<char8_t>('0' + i);
+}
+
+template<typename T1, int T2>
+inline std::string to_string8(T1 in, int precision) {
+    int pos{ 0 };
+    while (in / std::pow(T2, pos) >= 1)
+        pos++;
+    if (pos > 0)
+        pos--;
+    std::string s{};
+    if (in < 0) {
+        s.push_back('-');
+        in = -in;
     }
-    double least{ std::pow(10, -precision) / 2 };
-    if (std::abs(d) >= least) {
-        s8.push_back('.');
-        while (std::abs(d) >= least && digit > -precision) {
-            int div{ static_cast<int>(std::trunc(d / std::pow(10, digit))) };
-            d -= std::pow(10, digit) * div;
-            s8 += std::to_string(std::abs(div));
-            digit--;
+    T1 least{ static_cast<T1>(std::pow(T2, -precision)) / 2 };
+    while ((in >= least || pos >= 0) && pos >= -precision) {
+        if (pos == -1)
+            s.push_back('.');
+        int div{ static_cast<int>(std::trunc(in / std::pow(T2, pos))) };
+        in -= static_cast<T1>(std::pow(T2, pos)) * div;
+        s.push_back(to_char8(div));
+        pos--;
+    }
+    if (in >= least) {
+        bool after_point{ precision > 0 };
+        for (int i{ static_cast<int>(s.size()) - 1 }; i >= 0; i--) {
+            char ch{ s[i] };
+            if (ch == '.')
+                after_point = false;
+            else if (ch != '0' + T2 - 1) {
+                s[i]++;
+                break;
+            }
+            else if (i == 0) {
+                s[i] = '0';
+                s.insert(0, 1, '1');
+            }
+            else if (s[static_cast<std::size_t>(i) - 1] == '-') {
+                s[i] = '0';
+                s.insert(1, 1, '1');
+                break;
+            }
+            else
+                s.pop_back();
         }
-        int div{ static_cast<int>(std::trunc(d / std::pow(10, digit))) };
-        d -= std::pow(10, digit) * div;
-        if (std::abs(d) >= least)
-            div++;
-        if (div != 0)
-            s8 += std::to_string(std::abs(div));
     }
-    return s8;
+    return s;
 }
 
 inline std::string to_string8(std::u32string s32) {
@@ -92,14 +79,9 @@ inline std::string to_string8(std::u32string s32) {
     return s8;
 }
 
-inline std::u32string to_string32(float f, int precision) {
-    std::u32string s32{};
-    return s32;
-}
-
-inline std::u32string to_string32(double d, int precision) {
-    std::u32string s32{};
-    return s32;
+template<typename T1, int T2>
+inline std::u32string to_string32(T1 in, int precision) {
+     return std::u32string{};
 }
 
 inline std::u32string to_string32(std::string s8) {
