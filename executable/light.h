@@ -5,34 +5,29 @@
 
 class Light_pv {
 public:
+	glm::vec3 pos{};
 	glm::vec3 color{};
-	Light_pv();
-	Light_pv(glm::vec3 color_param);
+	Light_pv(glm::vec3 pos_param, glm::vec3 color_param);
 };
 
 class Point_light final :public Light_pv {
 public:
-	glm::vec3 pos{};
-	Point_light();
-	Point_light(glm::vec3 pos, glm::vec3 color);
+	Point_light(glm::vec3 pos_param, glm::vec3 color_param);
 };
 
 class Dir_light final :public Light_pv {
 public:
 	glm::vec3 dir{};
-	Dir_light();
-	Dir_light(glm::vec3 dir, glm::vec3 color);
+	Dir_light(glm::vec3 pos_param, glm::vec3 dir_param, glm::vec3 color_param);
 };
 
-class Spot_light final :public Light_pv {
+class Spotlight final :public Light_pv {
 public:
-	glm::vec3 pos{};
 	glm::vec3 dir{};
 	float inner_cone{};
 	float outer_cone{};
-	Spot_light();
-	Spot_light(glm::vec3 pos_param, glm::vec3 dir_param,
-		float inner_cone_param, float outer_cone_param, glm::vec3 color);
+	Spotlight(glm::vec3 pos_param, glm::vec3 dir_param,
+		float inner_cone_param, float outer_cone_param, glm::vec3 color_param);
 };
 
 #endif

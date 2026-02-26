@@ -1,9 +1,11 @@
 #include <glad/glad.h>
 
 #include "value_f.h"
+#include "debug_f.h"
 #include "shader.h"
+#include "string_f.h"
 
-unsigned int create_shader(std::string vertex, std::string fragment) {
+unsigned int create_shader(std::string vertex, std::string fragment, Data_pv* data) {
     unsigned int vertex_shader{ glCreateShader(GL_VERTEX_SHADER) };
     const char* shader_code{ &(vertex[0]) };
     glShaderSource(vertex_shader, 1, &shader_code, NULL);
@@ -13,7 +15,7 @@ unsigned int create_shader(std::string vertex, std::string fragment) {
     glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         glGetShaderInfoLog(vertex_shader, constant::error_message_max_size, NULL, error_message);
-        object::logfile << "error:" << error_message;
+        handle_error(to_u32string(error_message), data);
     }
     unsigned int fragment_shader{ glCreateShader(GL_FRAGMENT_SHADER) };
     shader_code = &(fragment[0]);
@@ -22,7 +24,7 @@ unsigned int create_shader(std::string vertex, std::string fragment) {
     glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         glGetShaderInfoLog(fragment_shader, constant::error_message_max_size, NULL, error_message);
-        object::logfile << "error: " << error_message;
+        handle_error(to_u32string(error_message), data);
     }
     unsigned int shader{ glCreateProgram() };
     glAttachShader(shader, vertex_shader);
@@ -31,7 +33,7 @@ unsigned int create_shader(std::string vertex, std::string fragment) {
     glGetProgramiv(shader, GL_LINK_STATUS, &success);
     if (!success) {
         glGetProgramInfoLog(shader, constant::error_message_max_size, NULL, error_message);
-        object::logfile << "error: " << error_message;
+        handle_error(to_u32string(error_message), data);
     }
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);

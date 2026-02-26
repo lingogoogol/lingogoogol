@@ -6,11 +6,6 @@
 #include "value.h"
 #include "button.h"
 
-Button::Button() {
-	allocate_VAO();
-	return;
-}
-
 Button::Button(float width_param, float height_param, glm::mat4 transform_mat_param,
 	glm::vec3 normal_color_param, glm::vec3 hovered_color_param, glm::vec3 clicked_color_param,
 	State state_param, std::function<void()> func_param) :
@@ -28,20 +23,23 @@ void Button::set_pos(glm::vec3 pos_param) {
 	return;
 }
 
-void Button::print() {
-	glUseProgram(object::shader.button);
-	glUniform3fv(glGetUniformLocation(object::shader.button, "color"), 1, glm::value_ptr(button_state == Button_state::Normal ? normal_color :
+void Button::render(Data_pv* data) {
+	glEnable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glUseProgram(data->shader.button);
+	glUniform3fv(glGetUniformLocation(data->shader.button, "color"), 1, glm::value_ptr(button_state == Button_state::Normal ? normal_color :
 		(button_state == Button_state::Hovered ? hovered_color : clicked_color)));
-	glUniformMatrix4fv(glGetUniformLocation(object::shader.button, "transform_mat"), 1, GL_FALSE, glm::value_ptr(transform_mat));
+	glUniformMatrix4fv(glGetUniformLocation(data->shader.button, "transform_mat"), 1, GL_FALSE, glm::value_ptr(transform_mat));
 	glBindVertexArray(VAO);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 	glBindVertexArray(0);
 	return;
 }
 
-bool Button::update_state_hover(float x, float y) {
+bool Button::update_state_hover(float x, float y, Data_pv* data) {
 	if (x >= left && x < right && y >= bottom && y < top)
-		if (glfwGetMouseButton(object::main_window, GLFW_MOUSE_BUTTON_LEFT))
+		if (glfwGetMouseButton(data->main_window, GLFW_MOUSE_BUTTON_LEFT))
 			button_state = Button_state::Clicked;
 		else
 			button_state = Button_state::Hovered;
@@ -50,12 +48,12 @@ bool Button::update_state_hover(float x, float y) {
 	return button_state != Button_state::Normal;
 }
 
-bool Button::update_state_click(int action) {
+bool Button::update_state_click(int action, Data_pv* data) {
 	if (button_state != Button_state::Normal)
 		if (action == GLFW_PRESS)
 			button_state = Button_state::Clicked;
 		else if (action == GLFW_RELEASE) {
-			object::state = state;
+			data->state = state;
 			func();
 		}
 	return button_state != Button_state::Normal;

@@ -32,14 +32,13 @@ public:
 	glm::vec3 clicked_color{};
 	State state{};
 	std::function<void()> func{};
-	Button();
 	Button(float width_param, float height_param, glm::mat4 transform_mat_param,
 		glm::vec3 normal_color_param, glm::vec3 hovered_color_param, glm::vec3 clicked_color_param,
 		State state_param, std::function<void(void)> func_param = []() {});
 	void set_pos(glm::vec3 pos_param);
-	void print();
-	bool update_state_hover(float x, float y);
-	bool update_state_click(int action);
+	void render(Data_pv* data);
+	bool update_state_hover(float x, float y, Data_pv* data);
+	bool update_state_click(int action, Data_pv* data);
 private:
 	glm::vec3 pos{ 0.0f,0.0f,0.0f };
 	Alignment horizontal_alignment{ Alignment::Middle };

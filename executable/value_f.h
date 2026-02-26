@@ -1,43 +1,34 @@
 #ifndef VALUE_F_H
 #define VALUE_F_H
 
-#include <map>
-#include <vector>
-#include <array>
+#include <string>
 
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <ft2build.h>
-#include FT_FREETYPE_H
 
-#include "button_f.h"
-#include "text_f.h"
-#include "window_f.h"
-#include "holder_f.h"
-#include "tile_f.h"
 #include "version.h"
-#include "shader.h"
-#include "block_f.h"
 
 enum class State;
 
 struct Setting;
+struct Data_pv;
+struct Init_data;
+struct Home_data;
+struct World_data;
 
 namespace constant {
-    inline const Version current_version{ 0,0,0,1,0 };
+    inline const Version current_version{ 0,0,0,1,1 };
     inline const Version last_necessary_version{ 0,0,0,0,1 };
-    inline constexpr unsigned int OpenGL_version_major{ 4 };
-    inline constexpr unsigned int OpenGL_version_minor{ 6 };
-    inline constexpr unsigned int message_window_width{ 800 };
-    inline constexpr unsigned int message_window_height{ 300 };
+    inline constexpr int OpenGL_version_major{ 4 };
+    inline constexpr int OpenGL_version_minor{ 6 };
+    inline constexpr int message_window_width{ 800 };
+    inline constexpr int message_window_height{ 300 };
     inline const float message_text_height{ 50.0f };
     inline const glm::vec3 message_text_color{ 0.0f,0.0f,0.0f };
-    inline constexpr unsigned int error_message_max_size{ 1024 };
-    inline constexpr unsigned int surface_tex_precision{ 2 };
-    inline constexpr unsigned int tile_num_horizontal{ 4 };
-    inline constexpr unsigned int tile_num_vertical{ 4 };
-    inline constexpr int block_side_length{ 16 };
-    inline constexpr int load_block_side_length{ 1 };
+    inline constexpr int error_message_max_size{ 1024 };
+    inline constexpr int surface_tex_precision{ 2 };
+    inline constexpr int tile_num{ 1 };
+    inline constexpr int cell_num{ 16 };
+    inline constexpr int block_num{ 1 };
     inline const float pi_floor{ 3.141f };
     inline const float pi_ceil{ 3.142f };
     inline const std::string GLSL_version{ "460" };
@@ -115,12 +106,12 @@ namespace constant {
         "    parent = ivec4(0, parent_cell);\n"
         "}\n"
     };
-    inline const std::string transparent_object_vertex_shader{
+    /*inline const std::string transparent_object_vertex_shader{
         "#version " + GLSL_version + " core\n"
-    };//haven't done
+    };
     inline const std::string transparent_object_fragment_shader{
         "#version " + GLSL_version + " core\n"
-    };//haven't done
+    };*/
     inline const std::string tile_vertex_shader{
         "#version " + GLSL_version + " core\n"
         "layout (location = 0) in vec2 screen_pos;\n"
@@ -141,7 +132,7 @@ namespace constant {
         "    color_out = vec4(ambient_color, 1.0) * texture(color, texcoord_frag);\n"
         "}\n"
     };
-    inline const std::string tile_dir_fragment_shader{
+    /*inline const std::string tile_dir_fragment_shader{
         "#version " + GLSL_version + " core\n"
         "struct Dir_light {\n"
         "    vec3 dir;\n"
@@ -163,45 +154,35 @@ namespace constant {
         "    vec3 specular_color = point_light.color * pow(max(dot(reflect(-light_dir, normal_frag), camera_dir), 0.0), shininess) * specular_strength;\n"
         "    color = vec4((ambient_color + diffuse_color + specular_color), 1.0) * texture(tex, texcoord_frag);\n"
         "}\n"
-    };//haven't done
+    };*/
     inline const std::string tile_point_fragment_shader{
         "#version " + GLSL_version + " core\n"
-        "struct Dir_light {\n"
-        "    vec3 dir;\n"
-        "    vec3 color;\n"
-        "};\n"
         "struct Point_light {\n"
         "    vec3 pos;\n"
         "    vec3 color;\n"
         "};\n"
-        "struct Spotlight {\n"
-        "    vec3 pos;\n"
-        "    vec3 dir;\n"
-        "    vec3 color;\n"
-        "    float phi;\n"
-        "    float theta;\n"
-        "};\n"
-        "in vec3 screen_pos_frag;\n"
         "in vec2 texcoord_frag;\n"
         "out vec4 color_out;\n"
-        "uniform sampler2D pos;\n"
+        "uniform sampler2D pos_shininess;\n"
+        "uniform sampler2D normal_specular_strength;\n"
         "uniform sampler2D color;\n"
-        "uniform sampler2D normal_shininess;\n"
-        "uniform sampler2D ambient_color_specular_strength;\n"
-        "uniform Dir_light dir_light;\n"
-        "uniform Point_light[16] point_light;\n"
-        "uniform Spotlight[16] spotlight;\n"
+        "uniform Point_light light;\n"
         "uniform vec3 camera_pos;\n"
         "uniform vec3 camera_dir;\n"
         "void main() {\n"
-        "    vec3 light_dir = normalize(point_light.pos - pos_frag);\n"
-        "    vec3 camera_dir = normalize(camera_pos - pos_frag);\n"
-        "    vec3 diffuse_color = point_light.color * max(dot(normal_frag, light_dir), 0.0);\n"
-        "    vec3 specular_color = point_light.color * pow(max(dot(reflect(-light_dir, normal_frag), camera_dir), 0.0), shininess) * specular_strength;\n"
-        "    color = vec4((ambient_color + diffuse_color + specular_color), 1.0) * texture(tex, texcoord_frag);\n"
+        "    vec3 pos = texture(pos_shininess, texcoord_frag).rgb;\n"
+        "    vec3 normal = texture(normal_specular_strength, texcoord_frag).rgb;\n"
+        "    float shininess = texture(pos_shininess, texcoord_frag).a;\n"
+        "    float specular_strength = texture(normal_specular_strength, texcoord_frag).a;\n"
+        "    vec3 light_dir = normalize(light.pos - pos);\n"
+        "    vec3 camera_dir = normalize(camera_pos - pos);\n"
+        "    vec3 diffuse_color = light.color * max(dot(normal, light_dir), 0.0);\n"
+        "    vec3 specular_color = light.color * pow(max(dot(reflect(-light_dir, normal),\n"
+        "        camera_dir), 0.0), shininess) * specular_strength;\n"
+        "    color_out = vec4(diffuse_color + specular_color, 1.0) * texture(color, texcoord_frag);\n"
         "}\n"
-    };//haven't done
-    inline const std::string tile_spot_fragment_shader{
+    };
+    /*inline const std::string tile_spot_fragment_shader{
         "#version " + GLSL_version + " core\n"
         "struct Dir_light {\n"
         "    vec3 dir;\n"
@@ -237,42 +218,11 @@ namespace constant {
         "    vec3 specular_color = point_light.color * pow(max(dot(reflect(-light_dir, normal_frag), camera_dir), 0.0), shininess) * specular_strength;\n"
         "    color = vec4((ambient_color + diffuse_color + specular_color), 1.0) * texture(tex, texcoord_frag);\n"
         "}\n"
-    };//haven't done
-    inline const std::string opaque_cell_vertex_shader{};//haven't done
-    inline const std::string opaque_cell_fragment_shader{};//haven't done
-    inline const std::string opaque_object_vertex_shader{};//haven't done
-    inline const std::string opaque_object_fragment_shader{};//haven't done
+    };
+    inline const std::string opaque_cell_vertex_shader{};
+    inline const std::string opaque_cell_fragment_shader{};
+    inline const std::string opaque_object_vertex_shader{};
+    inline const std::string opaque_object_fragment_shader{};*/
 }
-
-namespace object {
-    extern GLFWwindow* main_window;
-    extern std::ofstream logfile;
-    extern float current_time;
-    extern float last_time;
-    extern float frame_period;
-    extern bool first_cursor;
-    extern float last_cursor_pos_x;
-    extern float last_cursor_pos_y;
-    extern glm::vec3 camera_pos;
-    extern glm::vec3 camera_dir;
-    extern glm::vec3 camera_up;
-    extern glm::vec3 camera_speed;
-    extern float yaw;
-    extern float pitch;
-    extern Shader shader;
-    extern Setting setting;
-    extern FT_Face font_file;
-    extern std::map<char32_t, Character> character;
-    extern std::vector<Text*> text;
-    extern State state;
-    extern std::vector<Button*> button;
-    extern std::vector<Copy_holder<Message_window_pv*>> message_window;
-    extern std::array<std::array<Tile*, constant::tile_num_horizontal>, constant::tile_num_vertical> tiles;
-    extern std::vector<std::vector<std::vector<Copy_holder<Block*>>>> blocks;
-    extern glm::mat4 view;
-    extern glm::mat4 projection;
-}
-
-void init_setting();
 
 #endif

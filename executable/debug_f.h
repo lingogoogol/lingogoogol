@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "value_f.h"
+
 #define DEBUG
 
 #ifndef DEBUG
@@ -12,7 +14,7 @@
 #define handle_error(...) handle_error1(__FILE__, __LINE__, __VA_ARGS__)
 #define check_GL_error(...) check_GL_error1(__FILE__, __LINE__, __VA_ARGS__)
 
-void handle_error1(const char* file, int line, std::u32string message);
-void check_GL_error1(const char* file, int line);
+void handle_error1(const char* file, int line, std::u32string message, Data_pv* data);
+void check_GL_error1(const char* file, int line, Data_pv* data);
 
 #endif

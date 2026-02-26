@@ -4,6 +4,6 @@
 class Light_pv;
 class Point_light;
 class Dir_light;
-class Spot_light;
+class Spotlight;
 
 #endif

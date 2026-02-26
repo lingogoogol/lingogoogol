@@ -3,11 +3,10 @@
 
 enum class Data_pointer;
 
-void init_setting();
-void init_logfile();
-void init_window();
-void init_shader();
-void init_font();
-void init_data_file();
+void init_logfile(Init_data* data);
+void init_window(Init_data* data);
+void init_shader(Init_data* data);
+void init_font(Init_data* data);
+void init_data_file(Init_data* data);
 
 #endif

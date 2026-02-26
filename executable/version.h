@@ -7,6 +7,7 @@
 #include <locale>
 
 #include "version_f.h"
+#include "string_f.h"
 
 template<int T1>
 class Version {
@@ -26,7 +27,8 @@ public:
 	friend std::fstream& operator<<(std::fstream& fs, const Version<U1>& version);
 	template<int U1>
 	friend std::fstream& operator>>(std::fstream& fs, Version<U1>& version);
-	std::string to_string() const;
+	std::string to_u8string() const;
+	std::u32string to_u32string() const;
 private:
 	std::array<std::uint_fast64_t, T1> data{};
 };
@@ -138,7 +140,7 @@ std::fstream& operator>>(std::fstream& fs, Version<U1>& version) {
 }
 
 template<int T1>
-std::string Version<T1>::to_string() const {
+std::string Version<T1>::to_u8string() const {
 	std::string s{};
 	for (int i{ 0 }; i < T1; i++) {
 		s.insert(s.size(), std::to_string(data[i]));
@@ -146,6 +148,11 @@ std::string Version<T1>::to_string() const {
 	}
 	s.pop_back();
 	return s;
+}
+
+template<int T1>
+std::u32string Version<T1>::to_u32string() const {
+	return ::to_u32string(to_u8string());
 }
 
 #endif

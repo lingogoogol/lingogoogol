@@ -33,14 +33,14 @@ glm::vec3 to_cell_side(glm::vec3 begin, glm::vec3 dir) {
 
 glm::ivec3 to_block(glm::ivec3 coord) {
     for (int i{ 0 }; i < 3; i++)
-        coord[i] = coord[i] / constant::block_side_length - (coord[i] >= 0 ? 0 : 
-            (coord[i] % constant::block_side_length == 0 ? 0 : 1));
+        coord[i] = coord[i] / constant::cell_num - (coord[i] >= 0 ? 0 : 
+            (coord[i] % constant::cell_num == 0 ? 0 : 1));
     return coord;
 }
 
 glm::ivec3 to_coord_in_block(glm::ivec3 coord) {
     for (int i{ 0 }; i < 3; i++)
-        coord[i] = coord[i] % constant::block_side_length + (coord[i] >= 0 ? 0 : 1);
+        coord[i] = coord[i] % constant::cell_num + (coord[i] >= 0 ? 0 : 1);
     return coord;
 }
 

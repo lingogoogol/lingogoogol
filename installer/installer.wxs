@@ -2,7 +2,7 @@
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 	<Product Id='50765114-0A99-4C82-BB47-09E07EB31BE8'
 			 UpgradeCode='87351A1B-4413-407E-905C-F6BFC51A7B1A'
-			 Name='A Fun Game' Version='0.0.0.4' Manufacturer='lingogoogle' Language='1028'>
+			 Name='A Fun Game' Version='0.0.0.5' Manufacturer='lingogoogle' Language='1028'>
 		<Package Id='*' InstallerVersion='200' Compressed='yes' InstallScope='perMachine'/>
 		<Media Id='1' Cabinet='m1.cab' EmbedCab='yes'/>
 		<Icon Id='A_Fun_Game.ico_i' SourceFile='A Fun Game.ico'/>
@@ -12,6 +12,11 @@
 			        <Component Id='A_Fun_Game.exe_f_c' Guid='68EA0ED3-030F-46FA-821C-6316EA947B7A'>
 				        <File Id='A_Fun_Game.exe_f' DiskId='1' Source='A Fun Game.exe' KeyPath='yes'/>
 			        </Component>
+				    <Directory Id='logfile_d' Name='logfile'>
+						<Component Id='logfile_d_c' Guid='DFB4C142-1BB1-4B21-A12B-A733E7D1D7D1' KeyPath='yes'>
+							<CreateFolder/>
+						</Component>
+					</Directory>
 				</Directory>
 			</Directory>
 			<Directory Id='ProgramMenuFolder'>
@@ -29,6 +34,7 @@
 		<Feature Id='required_f' Level='1'>
 			<ComponentRef Id='A_Fun_Game.exe_f_c'/>
 			<ComponentRef Id='A_Fun_Game.exe_s_c'/>
+			<ComponentRef Id='logfile_d_c'/>
 		</Feature>
 	</Product>
 </Wix>

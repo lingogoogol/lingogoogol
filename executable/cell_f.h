@@ -1,11 +1,14 @@
 #ifndef CELL_F_H
 #define CELL_F_H
 
-enum class Cell_material;
+#include "value_f.h"
+
+enum class Cell_type;
 
 class Cell_pv;
+class Air_cell;
 class Stone_cell;
 
-Cell_pv* get_cell(glm::ivec3 pos);
+Cell_pv* get_cell(glm::ivec3 pos, World_data* data);
 
 #endif

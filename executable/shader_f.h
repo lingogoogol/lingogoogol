@@ -5,6 +5,6 @@
 
 struct Shader;
 
-unsigned int create_shader(std::string vertex, std::string fragment);
+unsigned int create_shader(std::string vertex, std::string fragment, Data_pv* data);
 
 #endif

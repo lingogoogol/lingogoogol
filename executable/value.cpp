@@ -1,42 +1,48 @@
-#include <fstream>
-#include <map>
-#include <vector>
-
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
-
 #include "value.h"
-#include "holder.h"
-#include "tile.h"
-#include "text.h"
-#include "block.h"
+#include "surface.h"
 
-namespace object {
-    GLFWwindow* main_window{};
-    std::ofstream logfile{};
-    float current_time{};
-    float last_time{};
-    float frame_period{};
-    bool first_cursor{ true };
-    float last_cursor_pos_x{};
-    float last_cursor_pos_y{};
-    glm::vec3 camera_pos{ 0.0f, 0.0f, 0.0f };
-    glm::vec3 camera_dir{ 0.0f, 0.0f, 1.0f };
-    glm::vec3 camera_up{ 0.0f, 1.0f, 0.0f };
-    glm::vec3 camera_speed{};
-    float yaw{ constant::pi_floor / 2.0f };
-    float pitch{ 0.0f };
-    Shader shader{};
-    Setting setting{};
-    FT_Face font_file{};
-    std::map<char32_t, Character> character{};
-    std::vector<Text*> text{};
-    State state{};
-    std::vector<Button*> button{};
-    std::vector<Copy_holder<Message_window_pv*>> message_window{};
-    std::array<std::array<Tile*, constant::tile_num_horizontal>, constant::tile_num_vertical> tiles{};
-    std::vector<std::vector<std::vector<Copy_holder<Block*>>>> blocks{};
-    glm::mat4 view{};
-    glm::mat4 projection{};
+Data_pv::Data_pv():
+	text_resolution{ 256 }, main_window{}, logfile{ new std::ofstream{} }, current_time{}, last_time{},
+	frame_period{}, shader{}, font_file{}, character{}, text{}, state{}, button{}, message_window{},
+	view{}, projection{}, main_window_width{}, main_window_height{} {
+	return;
+}
+
+Data_pv::~Data_pv() {
+	return;
+}
+
+void Init_data::setup() {
+	start_width = 800;
+	start_height = 600;
+	return;
+}
+
+void Home_data::setup() {
+	return;
+}
+
+void World_data::setup() {
+	first_cursor = true;
+	acceleration = 3.0f;
+	max_speed = 2.5f;
+	angle_of_view = 1.0f;
+	friction = 0.5f;
+	cursor_sensitivity = 0.001f;
+	ambient_color = { 0.2f,0.2f,0.2f };
+	last_cursor_pos_x = {};
+	last_cursor_pos_y = {};
+	camera_pos = { 0.0f,0.0f,0.0f };
+	camera_dir = { 0.0f,0.0f,1.0f };
+	camera_up = { 0.0f,1.0f,0.0f };
+	camera_speed = { 0.0f,0.0f,0.0f };
+	yaw = constant::pi_floor / 2.0f;
+	pitch = 0.0f;
+	tiles = {};
+	blocks = {};
+	pos_shininess = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height, this);
+	normal_specular_strength = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height, this);
+	color = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height, this);
+	parent = create_tex((int*)nullptr, GL_RGBA, main_window_width, main_window_height, this);
+	return;
 }

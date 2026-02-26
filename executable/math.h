@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "math_f.h"
+#include "concept.h"
 
 enum class Alignment {
 	Small,
@@ -19,6 +20,11 @@ public:
 	Vector();
 	T1& operator[](T2 index);
 	const T1& operator[](T2 index) const;
+};
+
+class Universal {
+	template<typename T1>
+	operator T1();
 };
 
 template<typename T1, typename T2>
@@ -68,6 +74,11 @@ T1 operator++(T1& operand, int) {
 	return copy;
 }
 
+template<typename T1>
+Universal::operator T1() {
+	return T1{};
+}
+
 template<typename T1, typename T2>
 Pair(T1, T2)->Pair<T1, T2>;
 
@@ -84,6 +95,19 @@ Pair<T1, T2>::Pair(T1 first_param, T2 second_param) :first{ first_param }, secon
 template<typename T1, typename T2>
 bool Pair<T1, T2>::operator==(Pair<T1, T2> pair) {
 	return first == pair.first && second == pair.second;
+}
+
+template<typename T1, typename... T2>
+int mem_num1(T2... universal) {
+	if constexpr (initializeble<T1, universal...>)
+		return mem_num1(universal..., Universal);
+	else
+		return sizeof...(T2) - 1;
+}
+
+template<typename T1>
+int mem_num() {
+	return mem_num1<T1>(Universal{});
 }
 
 #endif

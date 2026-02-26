@@ -6,12 +6,15 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
+#include "value_f.h"
+
 enum class Message_window_type;
 
 class Message_window_pv;
 template<Message_window_type T1>
 class Message_window;
 
-GLFWwindow* create_window(std::string title, unsigned int width, unsigned int height, bool resizeable);
+GLFWwindow* create_window(std::string title, unsigned int width, unsigned int height,
+	bool resizeable, Data_pv* data);
 
 #endif
