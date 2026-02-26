@@ -121,7 +121,7 @@ auto text_primitive_t::set_color(color_t color) -> void {
     return;
 }
 
-auto text_primitive_t::get_size() -> size_2D {
+auto text_primitive_t::get_render_size() -> size_2D {
     DWRITE_TEXT_METRICS metric{};
     m_layout->GetMetrics(&metric);
     return size_2D{ static_cast<std::uint64_t>(metric.width), static_cast<std::uint64_t>(metric.height) };

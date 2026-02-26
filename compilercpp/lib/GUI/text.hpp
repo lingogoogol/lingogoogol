@@ -33,6 +33,7 @@ public:
     auto get_clip_pos() -> pos_2D;
     auto get_clip_size() -> size_2D;
     auto set_color(color_t color) -> void;
+    auto get_render_size() -> size_2D;
 
     auto show() -> void override;
     auto hide() -> void override;
@@ -83,6 +84,10 @@ auto text_t::set_color(color_t color) -> void {
         m_primitive->set_color(m_color);
     }
     return;
+}
+
+auto text_t::get_render_size() -> size_2D {
+    return text_primitive_t{ m_engine, m_text, m_text_pos, m_text_size, m_clip_pos, m_clip_size, m_font_size, m_color, m_alignment }.get_render_size();
 }
 
 auto text_t::show() -> void {

@@ -118,6 +118,22 @@ rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, f
     return;
 }
 
+auto rect_primitive_t::set_pos(pos_2D pos) -> void {
+    m_pos = pos;
+    m_engine->flush();
+    upload_vertex_data();
+    m_engine->redraw();
+    return;
+}
+
+auto rect_primitive_t::set_size(size_2D size) -> void {
+    m_size = size;
+    m_engine->flush();
+    upload_vertex_data();
+    m_engine->redraw();
+    return;
+}
+
 auto rect_primitive_t::set_color(color_t color) -> void {
     m_color = color;
     m_engine->flush();

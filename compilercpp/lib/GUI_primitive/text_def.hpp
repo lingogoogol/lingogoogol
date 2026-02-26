@@ -41,7 +41,7 @@ public:
     , pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment);
     
     auto set_color(color_t color) -> void;
-    auto get_size() -> size_2D;
+    auto get_render_size() -> size_2D;
     auto render() -> void;
 };
 

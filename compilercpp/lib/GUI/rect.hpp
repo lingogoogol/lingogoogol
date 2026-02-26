@@ -19,7 +19,9 @@ public:
     rect_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color);
 
     auto get_pos() -> pos_2D;
+    auto set_pos(pos_2D pos) -> void;
     auto get_size() -> size_2D;
+    auto set_size(size_2D size) -> void;
     auto set_color(color_t color) -> void;
     
     auto inside(pos_2D pos) -> bool;
@@ -35,8 +37,24 @@ auto rect_t::get_pos() -> pos_2D {
     return m_pos;
 }
 
+auto rect_t::set_pos(pos_2D pos) -> void {
+    m_pos = pos;
+    if (m_primitive) {
+        m_primitive->set_pos(pos);
+    }
+    return;
+}
+
 auto rect_t::get_size() -> size_2D {
     return m_size;
+}
+
+auto rect_t::set_size(size_2D size) -> void {
+    m_size = size;
+    if (m_primitive) {
+        m_primitive->set_size(size);
+    }
+    return;
 }
 
 auto rect_t::set_color(color_t color) -> void {
