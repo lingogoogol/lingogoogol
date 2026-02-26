@@ -30,19 +30,21 @@ private:
     std::uint64_t m_length{ 0 };
     size_1D m_last_margin{ 0 };
     std::map<std::uint64_t, bool> m_ghost{};
+    depth_range_t m_depth_range{};
 
     auto move_child(std::uint64_t begin, std::uint64_t end, size_2D offset) -> void;
 protected:
     template<typename t_object, bool t_ghost, typename... t_arg>
-    auto add_object_impl(t_arg&&... arg) -> std::uint64_t;
+    auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
     auto child_set_size(std::uint64_t id, size_2D size) -> void override;
 public:
     constexpr static bool hard = t_hard;
 
     GUI_div_impl_t() = default;
-    GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false);
-    GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways
+    GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false);
+    GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, div_create_from_member, size_1D object_size_sideways
     , size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large = false);
+    auto init(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false) -> void;
 
     auto get_pos() const -> pos_2D override;
     auto set_pos(pos_2D pos) -> void override;
@@ -63,13 +65,13 @@ public:
     auto hide_impl(bool base) -> void override;
 
     template<typename t_object, typename t_self, typename... t_arg>
-    auto add_object(this t_self&& self, t_arg&&... arg) -> std::uint64_t;
+    auto add_object(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
     template<typename t_object, typename t_self, typename... t_arg>
-    auto add_object_ghost(this t_self&& self, t_arg&&... arg) -> std::uint64_t;
+    auto add_object_ghost(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
     template<typename t_object, typename t_self, typename... t_arg>
-    auto add_object_ghost_weak(this t_self&& self, t_arg&&... arg) -> std::weak_ptr<t_object>;
+    auto add_object_ghost_weak(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::weak_ptr<t_object>;
     template<typename t_object, typename t_self, typename... t_arg>
-    auto add_object_ghost_shared(this t_self&& self, t_arg&&... arg) -> std::shared_ptr<t_object>;
+    auto add_object_ghost_shared(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::shared_ptr<t_object>;
     auto remove_object(std::uint64_t id) -> void;
     auto clear_state() -> void;
 };
@@ -161,9 +163,9 @@ auto GUI_div_impl_t<t_y, t_hard>::move_child(std::uint64_t begin, std::uint64_t 
 
 template<bool t_y, bool t_hard>
 template<typename t_object, bool t_ghost, typename... t_arg>
-auto GUI_div_impl_t<t_y, t_hard>::add_object_impl(t_arg&&... arg) -> std::uint64_t {
+auto GUI_div_impl_t<t_y, t_hard>::add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
     std::unique_lock lock{ m_mutex };
-    GUI_object_t* object{ new t_object{ get_engine(), get_depth_tracker(), pos_2D{ 0, 0 }, std::forward<t_arg&&>(arg)... } };
+    GUI_object_t* object{ new t_object{ get_engine(), get_depth_tracker(), depth_range, pos_2D{ 0, 0 }, std::forward<t_arg>(arg)... } };
     std::int64_t object_pos_forward{}, object_pos_sideways{};
     std::int64_t margin_missed{ std::max(object->get_margin().x - m_last_margin.x, static_cast<std::int64_t>(0)) };
     std::int64_t margin_actual{ m_current.m_object.size() ? std::max(m_last_margin.x, object->get_margin().x) : 0 };
@@ -274,17 +276,30 @@ auto GUI_div_impl_t<t_y, t_hard>::add_object_impl(t_arg&&... arg) -> std::uint64
 }
 
 template<bool t_y, bool t_hard>
-GUI_div_impl_t<t_y, t_hard>::GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker
+GUI_div_impl_t<t_y, t_hard>::GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range
 , pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large)
-: GUI_div_t{ engine, depth_tracker }, m_pos{ pos }, m_size{ size }, m_margin{ margin }
+: GUI_div_t{ engine, depth_tracker }, m_pos{ pos }, m_size{ size }, m_margin{ margin }, m_depth_range{ depth_range }
 , m_alignment_forward{ t_y ? static_cast<std::uint8_t>(alignment.y) : static_cast<std::uint8_t>(alignment.x) }
 , m_alignment_sideways{ t_y ? static_cast<std::uint8_t>(alignment.x) : static_cast<std::uint8_t>(alignment.y) }, m_from_large{ from_large } {}
 
 template<bool t_y, bool t_hard>
-GUI_div_impl_t<t_y, t_hard>::GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways
+GUI_div_impl_t<t_y, t_hard>::GUI_div_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, div_create_from_member, size_1D object_size_sideways
 , size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large)
-: GUI_div_impl_t{ engine, depth_tracker, pos, size_2D{ t_y ? object_size_sideways.x + (t_hard ? object_margin.x * 2 : 0) : size_forward.x
+: GUI_div_impl_t{ engine, depth_tracker, depth_range, pos, size_2D{ t_y ? object_size_sideways.x + (t_hard ? object_margin.x * 2 : 0) : size_forward.x
 , t_y ? size_forward.x : object_size_sideways.x + (t_hard ? object_margin.x * 2 : 0) }, t_hard ? size_1D{ 0 } : object_margin, alignment, from_large } {}
+
+template<bool t_y, bool t_hard>
+auto GUI_div_impl_t<t_y, t_hard>::init(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large) -> void {
+    GUI_div_t::init(engine, depth_tracker);
+    m_pos = pos;
+    m_size = size;
+    m_margin = margin;
+    m_depth_range = depth_range;
+    m_alignment_forward = t_y ? static_cast<std::uint8_t>(alignment.y) : static_cast<std::uint8_t>(alignment.x);
+    m_alignment_sideways = t_y ? static_cast<std::uint8_t>(alignment.x) : static_cast<std::uint8_t>(alignment.y);
+    m_from_large = from_large;
+    return;
+}
 
 template<bool t_y, bool t_hard>
 auto GUI_div_impl_t<t_y, t_hard>::get_pos() const -> pos_2D {
@@ -430,29 +445,29 @@ auto GUI_div_impl_t<t_y, t_hard>::hide_impl(bool base) -> void {
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
-auto GUI_div_impl_t<t_y, t_hard>::add_object(this t_self&& self, t_arg&&... arg) -> std::uint64_t {
-    return self.add_object_impl<t_object, false>(std::forward<t_arg&&>(arg)...);
+auto GUI_div_impl_t<t_y, t_hard>::add_object(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
+    return self.add_object_impl<t_object, false>(depth_range, std::forward<t_arg>(arg)...);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
-auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost(this t_self&& self, t_arg&&... arg) -> std::uint64_t {
-    return self.add_object_impl<t_object, true>(std::forward<t_arg&&>(arg)...);
+auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
+    return self.add_object_impl<t_object, true>(depth_range, std::forward<t_arg>(arg)...);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
-auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_weak(this t_self&& self, t_arg&&... arg) -> std::weak_ptr<t_object> {
+auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_weak(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::weak_ptr<t_object> {
     std::unique_lock lock{ self.m_mutex };
-    std::uint64_t id{ self.add_object_ghost<t_object>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t id{ self.add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
     return self.get_object_weak<t_object>(id);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
-auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_shared(this t_self&& self, t_arg&&... arg) -> std::shared_ptr<t_object> {
+auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_shared(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::shared_ptr<t_object> {
     std::unique_lock lock{ self.m_mutex };
-    std::uint64_t id{ self.add_object_ghost<t_object>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t id{ self.add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
     return self.get_object_shared<t_object>(id);
 }
 
@@ -625,6 +640,7 @@ using divy_soft_t = GUI_div_impl_t<true, false>;
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //size_2D size,
 //size_1D margin,
@@ -633,6 +649,7 @@ using divy_soft_t = GUI_div_impl_t<true, false>;
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //div_create_from_member,
 //size_1D object_size_sideways,
@@ -646,24 +663,24 @@ template<bool t_y, bool t_hard>
 class GUI_div_flex_impl_t: public GUI_div_impl_t<t_y, t_hard> {
 protected:
     template<typename t_object, bool t_ghost, typename... t_arg>
-    auto add_object_impl(t_arg&&... arg) -> std::uint64_t;
+    auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
     auto child_set_size(std::uint64_t id, size_2D size) -> void override;
 
     template<bool t_y, bool t_hard>
     friend class GUI_div_impl_t;
 public:
     GUI_div_flex_impl_t() = default;
-    GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker
+    GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range
     , pos_2D pos, size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large = false);
-    GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member
+    GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, div_create_from_member
     , size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large = false);
 };
 
 template<bool t_y, bool t_hard>
 template<typename t_object, bool t_ghost, typename... t_arg>
-auto GUI_div_flex_impl_t<t_y, t_hard>::add_object_impl(t_arg&&... arg) -> std::uint64_t {
+auto GUI_div_flex_impl_t<t_y, t_hard>::add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
     std::unique_lock lock{ this->m_mutex };
-    std::uint64_t out{ GUI_div_impl_t<t_y, t_hard>::template add_object_impl<t_object, t_ghost>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t out{ GUI_div_impl_t<t_y, t_hard>::template add_object_impl<t_object, t_ghost>(depth_range, std::forward<t_arg>(arg)...) };
     this->set_div_size(size_2D{ t_y ? this->get_div_size().x : this->len().x, t_y ? this->len().x : this->get_div_size().y });
     return out;
 }
@@ -677,17 +694,18 @@ auto GUI_div_flex_impl_t<t_y, t_hard>::child_set_size(std::uint64_t id, size_2D 
 }
 
 template<bool t_y, bool t_hard>
-GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos
+GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos
 , size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large)
-: GUI_div_impl_t<t_y, t_hard>{ engine, depth_tracker, pos, size_2D{ t_y ? size_sideways.x : 0, t_y ? 0 : size_sideways.x }, margin, alignment, from_large } {}
+: GUI_div_impl_t<t_y, t_hard>{ engine, depth_tracker, depth_range, pos, size_2D{ t_y ? size_sideways.x : 0, t_y ? 0 : size_sideways.x }, margin, alignment, from_large } {}
 
 template<bool t_y, bool t_hard>
-GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member
+GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, div_create_from_member
 , size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large)
-: GUI_div_impl_t<t_y, t_hard>{ engine, depth_tracker, pos, div_create_from_member{}, object_size_sideways, object_margin, size_1D{ 0 }, alignment, from_large } {}
+: GUI_div_impl_t<t_y, t_hard>{ engine, depth_tracker, depth_range, pos, div_create_from_member{}, object_size_sideways, object_margin, size_1D{ 0 }, alignment, from_large } {}
 
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //size_1D size_sideways,
 //size_1D margin,
@@ -696,6 +714,7 @@ GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tr
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //div_create_from_member,
 //size_1D object_size_sideways,
@@ -706,6 +725,7 @@ using divx_flex_soft_t = GUI_div_flex_impl_t<false, false>;
 
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //size_1D size_sideways,
 //size_1D margin,
@@ -714,6 +734,7 @@ using divx_flex_soft_t = GUI_div_flex_impl_t<false, false>;
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //div_create_from_member,
 //size_1D object_size_sideways,
@@ -724,6 +745,7 @@ using divx_flex_hard_t = GUI_div_flex_impl_t<false, true>;
 
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //size_1D size_sideways,
 //size_1D margin,
@@ -732,6 +754,7 @@ using divx_flex_hard_t = GUI_div_flex_impl_t<false, true>;
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //div_create_from_member,
 //size_1D object_size_sideways,
@@ -742,6 +765,7 @@ using divy_flex_soft_t = GUI_div_flex_impl_t<true, false>;
 
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //size_1D size_sideways,
 //size_1D margin,
@@ -750,6 +774,7 @@ using divy_flex_soft_t = GUI_div_flex_impl_t<true, false>;
 //
 //engine_t* engine,
 //depth_tracker_t* depth_tracker,
+//depth_range_t* depth_range,
 //pos_2D pos,
 //div_create_from_member,
 //size_1D object_size_sideways,

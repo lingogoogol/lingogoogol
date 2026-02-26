@@ -34,7 +34,7 @@ template<typename t_type>
 template<typename... u_arg>
 virt_t<t_type>::virt_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos
 , size_2D size, size_1D margin, size_2D displacement, u_arg&&... arg)
-: m_obj{ std::make_shared<t_type>(engine, depth_tracker, pos + displacement, std::forward<u_arg&&>(arg)...) }
+: m_obj{ std::make_shared<t_type>(engine, depth_tracker, pos + displacement, std::forward<u_arg>(arg)...) }
 , m_pos{ pos }, m_size{ size }, m_margin{ margin }, m_displacement{ displacement } {}
 
 template<typename t_type>

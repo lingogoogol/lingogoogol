@@ -9,10 +9,10 @@ class pipeline_state_t {
 public:
     pipeline_state_t() = default;
     pipeline_state_t(const root_signature_t& root_signature, const input_layout_t& input_layout
-    , DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format);
+    , DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format, std::string name);
 
     auto init(const root_signature_t& root_signature, const input_layout_t& input_layout
-    , DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format) -> void;
+    , DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format, std::string name) -> void;
     auto vertex_shader_set(const shader_bytecode_t& bytecode) -> void;
     auto pixel_shader_set(const shader_bytecode_t& bytecode) -> void;
     auto domain_shader_set(const shader_bytecode_t& bytecode) -> void;
@@ -23,16 +23,17 @@ public:
 private:
     D3D12_GRAPHICS_PIPELINE_STATE_DESC m_desc{};
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_interface{};
+    std::string m_name{};
 };
 
 pipeline_state_t::pipeline_state_t(const root_signature_t& root_signature, const input_layout_t& input_layout
-, DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format) {
-    init(root_signature, input_layout, render_target_format, depth_stencil_format);
+, DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format, std::string name) {
+    init(root_signature, input_layout, render_target_format, depth_stencil_format, name);
     return;
 }
 
 auto pipeline_state_t::init(const root_signature_t& root_signature, const input_layout_t& input_layout
-, DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format) -> void {
+, DXGI_FORMAT render_target_format, DXGI_FORMAT depth_stencil_format, std::string name) -> void {
     m_desc.pRootSignature = root_signature.interface_get().Get();
     m_desc.BlendState.AlphaToCoverageEnable = false;
     m_desc.BlendState.IndependentBlendEnable = false;
@@ -84,6 +85,8 @@ auto pipeline_state_t::init(const root_signature_t& root_signature, const input_
     m_desc.CachedPSO.pCachedBlob = nullptr;
     m_desc.CachedPSO.CachedBlobSizeInBytes = 0;
     m_desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+    m_name = name;
     return;
 }
 
@@ -114,6 +117,7 @@ auto pipeline_state_t::geometry_shader_set(const shader_bytecode_t& bytecode) ->
 
 auto pipeline_state_t::create(Microsoft::WRL::ComPtr<ID3D12Device> device) -> void {
     hresult(device->CreateGraphicsPipelineState(&m_desc, IID_PPV_ARGS(&m_interface)));
+    D3D12_set_name(m_interface, m_name + ".m_interface");
     return;
 }
 

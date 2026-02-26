@@ -79,7 +79,7 @@ auto setting_t::set_member(t_in&& in) -> void {
         member = new t_member{};
         m_data[t_member::type] = member;
     }
-    member->set_data(std::forward<t_in&&>(in));
+    member->set_data(std::forward<t_in>(in));
     return;
 }
 

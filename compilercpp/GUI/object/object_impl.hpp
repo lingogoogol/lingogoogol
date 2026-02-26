@@ -4,6 +4,20 @@
 #include "object_def.hpp"
 #include "div_def.hpp"
 
+GUI_object_t::GUI_object_t(const GUI_object_t& in):
+    m_status{ in.m_status.load() },
+    m_size_callback{ in.m_size_callback },
+    m_name{ in.m_name }
+{}
+
+GUI_object_t::GUI_object_t(std::string name): m_name{ name } {}
+
+auto GUI_object_t::operator=(const GUI_object_t& in) -> GUI_object_t& {
+    m_status = in.m_status.load();
+    m_size_callback = in.m_size_callback;
+    return *this;
+}
+
 auto GUI_object_t::set_size(size_2D size) -> void {
     std::unique_lock lock{ m_mutex };
     if (m_size_callback) {

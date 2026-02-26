@@ -10,7 +10,7 @@
 class root_signature_t {
 public:
     root_signature_t() = default;
-    root_signature_t(D3D12_ROOT_SIGNATURE_FLAGS flag);
+    root_signature_t(D3D12_ROOT_SIGNATURE_FLAGS flag, std::string name);
 
     auto flag_set(D3D12_ROOT_SIGNATURE_FLAGS flag) -> void;
     template<typename t_descriptor_table>
@@ -31,9 +31,10 @@ private:
     std::vector<D3D12_ROOT_PARAMETER1> m_parameter{};
     std::vector<D3D12_STATIC_SAMPLER_DESC> m_static_sampler{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_interface{};
+    std::string m_name{};
 };
 
-root_signature_t::root_signature_t(D3D12_ROOT_SIGNATURE_FLAGS flag): m_flag{ flag } {}
+root_signature_t::root_signature_t(D3D12_ROOT_SIGNATURE_FLAGS flag, std::string name): m_flag{ flag }, m_name{ name } {}
 
 auto root_signature_t::flag_set(D3D12_ROOT_SIGNATURE_FLAGS flag) -> void {
     m_flag = flag;
@@ -43,7 +44,7 @@ auto root_signature_t::flag_set(D3D12_ROOT_SIGNATURE_FLAGS flag) -> void {
 template<typename t_descriptor_table>
 auto root_signature_t::descriptor_table_add(t_descriptor_table&& descriptor_table
 , D3D12_SHADER_VISIBILITY shader_visibility) -> std::uint32_t {
-    m_descriptor_table.push_back(std::forward<t_descriptor_table&&>(descriptor_table));
+    m_descriptor_table.push_back(std::forward<t_descriptor_table>(descriptor_table));
     D3D12_ROOT_PARAMETER1 parameter{};
     parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     parameter.DescriptorTable = m_descriptor_table.back().desc_get();
@@ -106,6 +107,7 @@ auto root_signature_t::serialize(Microsoft::WRL::ComPtr<ID3D12Device> device) ->
     Microsoft::WRL::ComPtr<ID3DBlob> error_blob{};
     hresult(D3D12SerializeVersionedRootSignature(&desc, &blob, &error_blob));
     hresult(device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_interface)));
+    D3D12_set_name(m_interface, m_name + ".m_interface");
     return;
 }
 

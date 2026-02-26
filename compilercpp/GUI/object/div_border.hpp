@@ -181,7 +181,7 @@ private:
     size_1D m_margin{};
 protected:
     template<typename t_object, bool t_ghost, typename... t_arg>
-    auto add_object_impl(t_arg&&... arg) -> std::uint64_t;
+    auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
 
     template<bool t_y, bool t_hard>
     friend class GUI_div_impl_t;
@@ -206,9 +206,9 @@ public:
 
 template<bool t_y, bool t_hard>
 template<typename t_object, bool t_ghost, typename... t_arg>
-auto div_flex_border_impl_t<t_y, t_hard>::add_object_impl(t_arg&&... arg) -> std::uint64_t {
+auto div_flex_border_impl_t<t_y, t_hard>::add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
     std::unique_lock lock{ this->m_mutex };
-    std::uint64_t out{ GUI_div_flex_impl_t<t_y, t_hard>::template add_object_impl<t_object, t_ghost>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t out{ GUI_div_flex_impl_t<t_y, t_hard>::template add_object_impl<t_object, t_ghost>(depth_range, std::forward<t_arg>(arg)...) };
     m_border.set_size(GUI_div_flex_impl_t<t_y, t_hard>::get_size() + size_2D{ GUI_div_flex_impl_t<t_y, t_hard>::get_margin().x * 2
     , GUI_div_flex_impl_t<t_y, t_hard>::get_margin().x * 2 } + size_2D{ m_border.get_border_size().x * 2, m_border.get_border_size().x * 2 });
     return out;

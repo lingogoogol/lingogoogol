@@ -4,6 +4,10 @@
 #include "SRV_def.hpp"
 #include "descriptor_heap_def.hpp"
 
+auto SRV_t::descriptor_heap_get() const -> const descriptor_heap_t& {
+    return *m_descriptor_heap;
+}
+
 auto SRV_t::descriptor_heap_index_get() const -> std::uint64_t {
     return m_descriptor_heap_index;
 }

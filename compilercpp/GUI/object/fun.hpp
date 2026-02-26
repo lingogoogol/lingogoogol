@@ -5,7 +5,7 @@
 
 #include "state.hpp"
 
-auto restore_state(state_t* state, std::uint64_t previous_state) -> void {
+/*auto restore_state(state_t* state, std::uint64_t previous_state) -> void {
     state->restore_state(previous_state);
     state->remove_state(previous_state);
     return;
@@ -41,6 +41,6 @@ auto get_input_restore(state_t* state, std::wstring prompt, std::wstring* out) -
     state->clear_state();
     get_input(state, prompt, out, std::bind(restore_state, state, previous_state));
     return;
-}
+}*/
 
 #endif

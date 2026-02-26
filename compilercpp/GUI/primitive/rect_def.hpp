@@ -49,6 +49,7 @@ private:
     bool m_texture_enable{};
     pos_2D m_clip_pos{};
     size_2D m_clip_size{};
+    std::string m_name{};
 
     constexpr static std::size_t vertex_data_len{ 4 };
     constexpr static std::size_t vertex_data_solid_size{ sizeof(vertex_data_solid_t) * vertex_data_len };
@@ -62,12 +63,12 @@ public:
     , Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void;
 
     rect_primitive_t() = default;
-    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth);
-    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size);
-    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color);
-    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV);
+    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, std::string name);
+    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size, std::string name);
+    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color, std::string name);
+    rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV, std::string name);
     rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
-    , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y);
+    , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name);
     
     auto set_pos(pos_2D pos) -> void;
     auto set_size(size_2D size) -> void;

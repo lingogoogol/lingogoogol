@@ -3,6 +3,5 @@
 
 #include "engine_def.hpp"
 #include "rect_impl.hpp"
-#include "text_impl.hpp"
 
 #endif

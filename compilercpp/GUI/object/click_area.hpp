@@ -36,7 +36,7 @@ private:
 public:
     click_area_t() = default;
     click_area_t(const click_area_t& in);
-    click_area_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+    click_area_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size
     , std::function<void(pos_2D)> mouse_move_callback, std::function<void(void)> mouse_leave_callback
     , std::function<void(pos_2D)> mouse_left_click_callback, std::function<void(pos_2D)> mouse_left_release_callback, std::function<void(void)> callback);
     auto operator=(const click_area_t& in) -> click_area_t&;
@@ -51,13 +51,13 @@ public:
     auto hide_impl(bool base) -> void override;
 };
 
-click_area_t::click_area_t(const click_area_t& in): click_area_t{ in.m_engine, in.m_depth_tracker, in.m_pos, in.m_size, in.m_depth
+click_area_t::click_area_t(const click_area_t& in): click_area_t{ in.m_engine, in.m_depth_tracker, depth_range_t{ in.m_depth,in.m_depth }, in.m_pos, in.m_size
 , in.m_mouse_move_callback, in.m_mouse_leave_callback, in.m_mouse_left_click_callback, in.m_mouse_left_release_callback, in.m_callback} {}
 
-click_area_t::click_area_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+click_area_t::click_area_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size
 , std::function<void(pos_2D)> mouse_move_callback, std::function<void(void)> mouse_leave_callback
 , std::function<void(pos_2D)> mouse_left_click_callback, std::function<void(pos_2D)> mouse_left_release_callback, std::function<void(void)> callback)
-: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth{ depth }
+: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth{ depth_range.near }
 , m_mouse_move_callback{ mouse_move_callback }, m_mouse_leave_callback{ mouse_leave_callback }
 , m_mouse_left_click_callback{ mouse_left_click_callback }, m_mouse_left_release_callback{ mouse_left_release_callback }, m_callback{ callback } {}
 

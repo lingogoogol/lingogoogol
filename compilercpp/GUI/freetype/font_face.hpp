@@ -18,6 +18,8 @@ public:
     auto descender_get() const -> std::int16_t;
     //height = ascender - descender.
     auto height_get() const -> std::int16_t;
+    auto family_get() const -> std::string;
+    auto style_get() const -> std::string;
 private:
     static freetype_t* m_freetype;
 
@@ -60,6 +62,20 @@ auto font_face_t::descender_get() const -> std::int16_t {
 
 auto font_face_t::height_get() const -> std::int16_t {
     return m_handle->ascender - m_handle->descender;
+}
+
+auto font_face_t::family_get() const -> std::string {
+    if (m_handle->family_name) {
+        return m_handle->family_name;
+    }
+    return std::string{};
+}
+
+auto font_face_t::style_get() const -> std::string {
+    if (m_handle->style_name) {
+        return m_handle->style_name;
+    }
+    return std::string{};
 }
 
 #endif

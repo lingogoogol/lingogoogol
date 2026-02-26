@@ -22,7 +22,7 @@ private:
 
 template<typename t_descriptor_table>
 descriptor_table_t::descriptor_table_t(t_descriptor_table&& descriptor_table)
-: m_range{ std::forward<t_descriptor_table&&>(descriptor_table).m_range } {}
+: m_range{ std::forward<t_descriptor_table>(descriptor_table).m_range } {}
 
 auto descriptor_table_t::range_add(D3D12_DESCRIPTOR_RANGE_TYPE type
 , std::uint32_t offset, std::uint32_t reg_space, std::uint32_t reg_base, std::uint32_t count) -> void {

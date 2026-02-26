@@ -71,9 +71,10 @@ auto create_adapter(Microsoft::WRL::ComPtr<IDXGIFactory5> factory)
     return out;
 }
 
-auto create_device(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter) -> Microsoft::WRL::ComPtr<ID3D12Device2> {
+auto create_device(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter, std::string name) -> Microsoft::WRL::ComPtr<ID3D12Device2> {
     Microsoft::WRL::ComPtr<ID3D12Device2> out{};
     hresult(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&out)));
+    D3D12_set_name(out, name);
     return out;
 }
 
@@ -91,7 +92,7 @@ auto create_info_queue(Microsoft::WRL::ComPtr<ID3D12Device2> device) -> Microsof
     return out;
 }
 
-auto create_V_heap(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT count) -> Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> {
+auto create_V_heap(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT count, std::string name) -> Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> out{};
     D3D12_DESCRIPTOR_HEAP_DESC description{};
     description.Type = type;
@@ -99,6 +100,7 @@ auto create_V_heap(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_DESCRIPTO
     description.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     description.NodeMask = 0;
     hresult(device->CreateDescriptorHeap(&description, IID_PPV_ARGS(&out)));
+    D3D12_set_name(out, name);
     return out;
 }
 
@@ -107,6 +109,7 @@ auto create_RT(Microsoft::WRL::ComPtr<IDXGISwapChain4> swap_chain, UINT count) -
     out.resize(count);
     for (UINT i{ 0 }; i < count; ++i) {
         hresult(swap_chain->GetBuffer(i, IID_PPV_ARGS(&(out[i]))));
+        D3D12_set_name(out[i], "swap chain's buffer[index = " + std::to_string(i) + "]");
     }
     return out;
 }
@@ -171,7 +174,7 @@ auto create_resource_desc_buffer(std::uint64_t size, D3D12_RESOURCE_FLAGS flags)
     return desc;
 }
 
-auto create_resource_upload(Microsoft::WRL::ComPtr<ID3D12Device> device, std::uint64_t size)
+auto create_resource_upload(Microsoft::WRL::ComPtr<ID3D12Device> device, std::uint64_t size, std::string name)
 -> Microsoft::WRL::ComPtr<ID3D12Resource> {
     Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
     D3D12_HEAP_PROPERTIES upload_heap_properties{ create_upload_heap_property() };
@@ -179,6 +182,7 @@ auto create_resource_upload(Microsoft::WRL::ComPtr<ID3D12Device> device, std::ui
     //Resources in the upload heap must be created with D3D12_RESOURCE_STATE_GENERIC_READ and cannot be changed away from this.
     hresult(device->CreateCommittedResource(&upload_heap_properties, D3D12_HEAP_FLAG_NONE
     , &upload_resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resource)));
+    D3D12_set_name(resource, name);
     return resource;
 }
 

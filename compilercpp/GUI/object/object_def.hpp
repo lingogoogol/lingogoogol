@@ -4,6 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <atomic>
+#include <string>
 
 #include "div_decl.hpp"
 
@@ -20,11 +21,13 @@ public:
     constexpr static status_t showing{ 3 };
 protected:
     mutable std::recursive_mutex m_mutex{};
+    std::string m_name{};
 private:
     status_atomic_t m_status{};
     std::function<void(size_2D)> m_size_callback{};
 public:
     GUI_object_t() = default;
+    GUI_object_t(std::string name);
     GUI_object_t(const GUI_object_t& in);
     virtual ~GUI_object_t() = default;
 
@@ -48,13 +51,5 @@ protected:
     auto hide_end(bool base) -> void;
     auto status() const -> status_t;
 };
-
-GUI_object_t::GUI_object_t(const GUI_object_t& in): m_status{ in.m_status.load() }, m_size_callback{ in.m_size_callback } {}
-
-auto GUI_object_t::operator=(const GUI_object_t& in) -> GUI_object_t& {
-    m_status = in.m_status.load();
-    m_size_callback = in.m_size_callback;
-    return *this;
-}
 
 #endif

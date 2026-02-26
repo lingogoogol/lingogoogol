@@ -10,6 +10,7 @@ class SRV_t {
 public:
     SRV_t() = default;
 
+    auto descriptor_heap_get() const -> const descriptor_heap_t&;
     auto descriptor_heap_index_get() const -> std::uint64_t;
     auto handle_CPU_get() const -> D3D12_CPU_DESCRIPTOR_HANDLE;
     auto handle_GPU_get() const -> D3D12_GPU_DESCRIPTOR_HANDLE;

@@ -56,8 +56,8 @@ rect_border_t::rect_border_t(engine_t* engine, depth_tracker_t* depth_tracker, p
 , color_t content_color, size_1D border_size, color_t border_color, depth_range_t depth_range)
 : m_border_size{ border_size }, m_depth_range{ depth_range } {
     float depth_distance{ (m_depth_range.far - m_depth_range.near) / 2 };
-    m_outer_rect = rect_t{ engine, depth_tracker, pos, size, m_depth_range.far - depth_distance, border_color };
-    m_inner_rect = rect_t{ engine, depth_tracker, compute_inner_pos(), compute_inner_size(), m_depth_range.far - depth_distance * 2, content_color };
+    m_outer_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near, m_depth_range.far - depth_distance }, pos, size, border_color };
+    m_inner_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near, m_depth_range.far - depth_distance * 2 }, compute_inner_pos(), compute_inner_size(), content_color };
     return;
 }
 

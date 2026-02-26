@@ -8,7 +8,7 @@
 
 #include "../primitive/engine_def.hpp"
 
-class menu_t: public GUI_object_t {
+/*class menu_t: public GUI_object_t {
 private:
     struct option_t {
         text_block_t m_text{};
@@ -136,6 +136,6 @@ auto menu_t::add_option(std::wstring text, std::function<void(pos_2D)> callback)
     , std::bind(&menu_t::menu_mouse_left_release_callback, this, m_option.size(), std::placeholders::_1)
     , std::bind(callback, pos_2D{ option_pos.x + m_option_size.x, option_pos.y }) } });
     return;
-}
+}*/
 
 #endif

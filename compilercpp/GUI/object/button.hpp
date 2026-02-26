@@ -25,7 +25,7 @@ private:
     auto button_template_mouse_left_release_callback(pos_2D pos) -> void;
 public:
     button_template_t() = default;
-    button_template_t(engine_t* engine, depth_tracker_t* depth_tracker, std::function<void(void)> callback, t_type* object);
+    button_template_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, std::function<void(void)> callback, t_type* object);
 
     auto get_pos() const -> pos_2D override;
     auto set_pos(pos_2D pos) -> void override;
@@ -61,8 +61,8 @@ auto button_template_t<t_type>::button_template_mouse_left_release_callback(pos_
 }
 
 template<typename t_type>
-button_template_t<t_type>::button_template_t(engine_t* engine, depth_tracker_t* depth_tracker, std::function<void(void)> callback, t_type* object)
-: m_engine{ engine }, m_click_area{ engine, depth_tracker, object->get_pos(), object->get_size(), object->depth_range_get().near, std::bind(&button_template_t<t_type>::button_template_mouse_move_callback, this, std::placeholders::_1)
+button_template_t<t_type>::button_template_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, std::function<void(void)> callback, t_type* object)
+: m_engine{ engine }, m_click_area{ engine, depth_tracker, depth_range, object->get_pos(), object->get_size(), std::bind(&button_template_t<t_type>::button_template_mouse_move_callback, this, std::placeholders::_1)
 , std::bind(&button_template_t<t_type>::button_template_mouse_leave_callback, this), std::bind(&button_template_t<t_type>::button_template_mouse_left_click_callback, this, std::placeholders::_1)
 , std::bind(&button_template_t<t_type>::button_template_mouse_left_release_callback, this, std::placeholders::_1), callback }
 , m_object{ object } {}
@@ -106,6 +106,18 @@ auto button_template_t<t_type>::hide_impl(bool base) -> void {
     return;
 }
 
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::function<void(void)> callback,
+//u_arg&&... arg
+//v
+//engine,
+//depth_tracker,
+//depth_range,
+//pos,
+//arg...
 template<typename t_type>
 class button_t: public t_type {
 private:
@@ -113,7 +125,7 @@ private:
 public:
     button_t() = default;
     template<typename... u_arg>
-    button_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::function<void(void)> callback, u_arg&&... arg);
+    button_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, std::function<void(void)> callback, u_arg&&... arg);
 
     auto set_pos(pos_2D pos) -> void override;
 
@@ -123,8 +135,8 @@ public:
 
 template<typename t_type>
 template<typename... u_arg>
-button_t<t_type>::button_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::function<void(void)> callback, u_arg&&... arg)
-: t_type{ engine, depth_tracker, pos, std::forward<u_arg>(arg)... }, m_button{ engine, depth_tracker, callback, static_cast<t_type*>(this) } {}
+button_t<t_type>::button_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, std::function<void(void)> callback, u_arg&&... arg)
+: t_type{ engine, depth_tracker, depth_range, pos, std::forward<u_arg>(arg)... }, m_button{ engine, depth_tracker, depth_range, callback, static_cast<t_type*>(this) } {}
 
 template<typename t_type>
 auto button_t<t_type>::set_pos(pos_2D pos) -> void {
@@ -154,6 +166,21 @@ auto button_t<t_type>::hide_impl(bool base) -> void {
     return;
 }
 
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::string text,
+//color_t color,
+//u_arg&&... arg
+//v
+//engine,
+//depth_tracker,
+//depth_range,
+//pos,
+//text,
+//color,
+//arg...
 template<typename t_text>
 class button_text_impl_t: public t_text {
 private:
@@ -161,7 +188,7 @@ private:
 public:
     button_text_impl_t() = default;
     template<typename... u_arg>
-    button_text_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth, color_t color, u_arg&&... arg);
+    button_text_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, std::string text, color_t color, u_arg&&... arg);
 
     auto depth_range_get() const -> depth_range_t;
 
@@ -173,8 +200,8 @@ public:
 
 template<typename t_text>
 template<typename... u_arg>
-button_text_impl_t<t_text>::button_text_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth, color_t color, u_arg&&... arg)
-: t_text{ engine, depth_tracker, pos, depth, color, std::forward<u_arg>(arg)... }, m_color{ color } {}
+button_text_impl_t<t_text>::button_text_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, std::string text, color_t color, u_arg&&... arg)
+: t_text{ engine, depth_tracker, depth_range, pos, text, color, std::forward<u_arg>(arg)... }, m_color{ color } {}
 
 template<typename t_text>
 auto button_text_impl_t<t_text>::depth_range_get() const -> depth_range_t {
@@ -205,8 +232,22 @@ auto button_text_impl_t<t_text>::button_left_release(pos_2D) -> void {
     return;
 }
 
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::function<void(void)> callback, float depth, color_t color, u_arg&&... arg
-//->engine, depth_tracker, pos, depth, color, std::forward<u_arg>(arg)...
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::function<void(void)> callback,
+//std::string text,
+//color_t color,
+//u_arg&&... arg
+//v
+//engine,
+//depth_tracker,
+//depth_range,
+//pos,
+//text,
+//color,
+//arg...
 template<typename t_text>
 using button_text_t = button_t<button_text_impl_t<t_text>>;
 
@@ -214,11 +255,11 @@ class button_classic_impl_t: public GUI_object_t {
 private:
     engine_t* m_engine{};
     rect_border_t m_rect{};
-    text_block_t m_text{};
+    text_line_t m_text{};
 public:
     button_classic_impl_t() = default;
-    button_classic_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, color_t content_color, size_1D border_size, color_t border_color
-    , std::wstring display_text, depth_range_t depth_range);
+    button_classic_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos
+    , std::string display_text, size_2D size, color_t content_color, size_1D border_size, color_t border_color);
 
     auto get_pos() const -> pos_2D override;
     auto set_pos(pos_2D pos) -> void override;
@@ -235,11 +276,11 @@ public:
     auto hide_impl(bool base) -> void override;
 };
 
-button_classic_impl_t::button_classic_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, color_t content_color, size_1D border_size, color_t border_color
-, std::wstring display_text, depth_range_t depth_range)
+button_classic_impl_t::button_classic_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos
+, std::string display_text, size_2D size, color_t content_color, size_1D border_size, color_t border_color)
 : m_engine{ engine }, m_rect{ engine, depth_tracker, pos, size, content_color, border_size, border_color, depth_range }
-, m_text{ m_engine, depth_tracker, m_rect.content_get_pos(), m_rect.content_get_size(), display_text, m_rect.content_get_pos(), m_rect.content_get_size()
-, size_1D{ 0x10 }, std_white, alignment_2D{ alignment_x::center, alignment_y::center } } {}
+, m_text{ m_engine, depth_tracker, depth_range, m_rect.content_get_pos(), display_text, m_rect.content_get_size()
+, size_1D{ 0x10 }, font_preference_t::default_get(), std_white, alignment_2D{ alignment_x::center, alignment_y::center } } {}
 
 auto button_classic_impl_t::get_pos() const -> pos_2D {
     return m_rect.get_pos();
@@ -317,8 +358,8 @@ public:
     static color_t border_color;
     static size_1D margin;
 
-    button_classic_std_impl_t();
-    button_classic_std_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::wstring display_text, depth_range_t depth_range);
+    button_classic_std_impl_t() = default;
+    button_classic_std_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, std::string display_text);
 
     auto get_margin() const -> size_1D override;
 };
@@ -329,19 +370,31 @@ size_1D button_classic_std_impl_t::border_size{ std_line_size };
 color_t button_classic_std_impl_t::border_color{ std_white };
 size_1D button_classic_std_impl_t::margin{ std_margin };
 
-button_classic_std_impl_t::button_classic_std_impl_t(): button_classic_std_impl_t{ nullptr, nullptr, pos_2D{ 0x0, 0x0 }, L"", depth_range_t{ 0.0f, 1.0f } } {}
-
-button_classic_std_impl_t::button_classic_std_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos
-, std::wstring display_text, depth_range_t depth_range)
-: button_classic_impl_t{ engine, depth_tracker, pos, size, content_color, size_1D{ 0x2 }, border_color, display_text, depth_range } {}
+button_classic_std_impl_t::button_classic_std_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos
+, std::string display_text)
+: button_classic_impl_t{ engine, depth_tracker, depth_range, pos, display_text, size, content_color, size_1D{ 0x2 }, border_color } {}
 
 auto button_classic_std_impl_t::get_margin() const -> size_1D {
     return margin;
 }
 
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::function<void(void)> callback, size_2D size, color_t content_color, size_1D border_size, color_t border_color, std::wstring display_text, depth_range_t depth_range
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::function<void(void)> callback,
+//std::string display_text,
+//size_2D size,
+//color_t content_color,
+//size_1D border_size,
+//color_t border_color
 using button_classic_t = button_t<button_classic_impl_t>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, std::function<void(void)> callback, std::wstring display_text, depth_range_t depth_range
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::function<void(void)> callback,
+//std::string display_text
 using button_classic_std_t = button_t<button_classic_std_impl_t>;
 
 #endif

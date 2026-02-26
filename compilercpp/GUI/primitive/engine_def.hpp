@@ -11,7 +11,6 @@
 
 #include "engine_decl.hpp"
 #include "rect_def.hpp"
-#include "text_def.hpp"
 
 #include "../../lib/stu.hpp"
 #include "../directx/command_queue.hpp"
@@ -42,8 +41,6 @@ private:
     UINT m_frame_index{};
     std::recursive_mutex m_rect_mutex{};
     std::set<rect_primitive_t*> m_rect_primitive{};
-    std::recursive_mutex m_text_mutex{};
-    std::set<text_primitive_t*> m_text_primitive{};
 
     template<typename... t_arg>
     struct callback_set {
@@ -58,6 +55,7 @@ private:
     callback_set<pos_2D, size_1D> m_mouse_scroll{};
     callback_set<std::uint16_t> m_key_down{};
     callback_set<wchar_t> m_charw{};
+    std::string m_name{};
     
     auto track_mouse_event() -> void;
     template<typename t_callback_set, typename t_caller, typename... t_in>
@@ -69,7 +67,7 @@ private:
     static auto call_callback_char(std::function<void(wchar_t)>* callback, WPARAM wparam) -> void;
     static auto CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT;
 public:
-    engine_t(HINSTANCE instance, size_2D window_size);
+    engine_t(HINSTANCE instance, size_2D window_size, std::string name);
     engine_t(const engine_t&) = delete;
     ~engine_t();
     auto operator=(const engine_t&) = delete;
@@ -87,11 +85,10 @@ public:
     auto device_get() const -> Microsoft::WRL::ComPtr<ID3D12Device2>;
     auto command_queue_get() -> command_queue_t&;
 
-    auto add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t*;
+    auto add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t*;
+    auto add_rect(pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
+    , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name) -> rect_primitive_t*;
     auto remove_rect(rect_primitive_t* in) -> void;
-    auto add_text(std::wstring content, pos_2D text_pos, size_2D text_size
-    , pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment, bool wrap) -> text_primitive_t*;
-    auto remove_text(text_primitive_t* in) -> void;
 
     auto add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;
     auto remove_mouse_move(std::function<void(pos_2D)>* in) -> void;
@@ -173,7 +170,7 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
         BeginPaint(window, &paint_info);
         Microsoft::WRL::ComPtr<ID3D12Resource> RT_current{ ptr->m_RT[ptr->m_frame_index] };
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list{ ptr->m_command_queue.create_list() };
-        push_transition_barrier(command_list, RT_current, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        push_transition_barrier(command_list, RT_current, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_RENDER_TARGET);
         D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle{ create_V_handle(ptr->m_RTV_heap->GetCPUDescriptorHandleForHeapStart()
         , ptr->m_RTV_size, ptr->m_frame_index) };
         clear_RT(command_list, RTV_handle, { 0.0f, 0.0f, 0.0f, 1.0f });
@@ -191,14 +188,8 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
         std::unique_lock rect_lock{ ptr->m_rect_mutex };
         rect_primitive_t::render(ptr->m_rect_primitive, command_list);
         rect_lock.unlock();
+        push_transition_barrier(command_list, RT_current, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COMMON);
         ptr->m_command_queue.execute_list(command_list);
-        text_primitive_t::render_begin(ptr->m_frame_index);
-        std::unique_lock text_lock{ ptr->m_text_mutex };
-        for (auto i{ ptr->m_text_primitive.begin() }; i != ptr->m_text_primitive.end(); ++i) {
-            (*i)->render();
-        }
-        text_lock.unlock();
-        text_primitive_t::render_end(ptr->m_frame_index);
 
         ptr->m_buffer_fence_value[ptr->m_frame_index] = ptr->m_command_queue.set_fence();
         HRESULT present_result{ ptr->m_swap_chain->Present(0, ptr->m_tearing_supported ? DXGI_PRESENT_ALLOW_TEARING : 0) };
@@ -249,13 +240,13 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
     }
 }
 
-engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ window_size } {
+engine_t::engine_t(HINSTANCE instance, size_2D window_size, std::string name): m_window_size{ window_size } {
     Microsoft::WRL::ComPtr<IDXGIFactory5> factory{ create_factory(true) };
     m_tearing_supported = check_tearing_support(factory);
     Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter{ create_adapter(factory) };
-    m_device = create_device(adapter);
+    m_device = create_device(adapter, name + ".m_device");
     m_info_queue = create_info_queue(m_device);
-    m_command_queue.init(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+    m_command_queue.init(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT, name + ".m_command_queue");
     
     ATOM window_class{ create_window_class(L"window_class", &window_proc, instance
     , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED))
@@ -266,7 +257,7 @@ engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ wind
     SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     m_swap_chain = m_command_queue.create_swap_chain(factory, m_window, static_cast<UINT>(m_window_size.x)
     , static_cast<UINT>(m_window_size.y), DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_USAGE_RENDER_TARGET_OUTPUT, buffer_count, m_tearing_supported);
-    m_RTV_heap = create_V_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, buffer_count);
+    m_RTV_heap = create_V_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, buffer_count, name + ".m_RTV_heap");
     m_RTV_size = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     m_RT = create_RT(m_swap_chain, buffer_count);
     create_RTV(m_device, m_RT, m_RTV_size, m_RTV_heap);
@@ -289,14 +280,14 @@ engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ wind
     DS_clear_value.DepthStencil.Depth = 1.0f;
     m_device->CreateCommittedResource(&heap_property, D3D12_HEAP_FLAG_NONE, &DS_resource_description
     , D3D12_RESOURCE_STATE_DEPTH_WRITE, &DS_clear_value, IID_PPV_ARGS(&m_DS));
-    m_DSV_heap = create_V_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
+    D3D12_set_name(m_DS, name + ".m_DS");
+    m_DSV_heap = create_V_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, name + ".m_DSV_heap");
     D3D12_DEPTH_STENCIL_VIEW_DESC DSV_description{};
     DSV_description.Format = DXGI_FORMAT_D32_FLOAT;
     DSV_description.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     DSV_description.Flags = D3D12_DSV_FLAG_NONE;
     DSV_description.Texture2D.MipSlice = 0;
     m_device->CreateDepthStencilView(m_DS.Get(), &DSV_description, m_DSV_heap->GetCPUDescriptorHandleForHeapStart());
-    text_primitive_t::init(m_device, m_command_queue.get(), m_window, m_RT);
     rect_primitive_t::init(m_device, m_window_size);
 
     m_frame_index = m_swap_chain->GetCurrentBackBufferIndex();
@@ -315,7 +306,6 @@ engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ wind
 
 engine_t::~engine_t() {
     flush();
-    text_primitive_t::uninit();
     rect_primitive_t::uninit();
     log_info_queue();
     return;
@@ -385,8 +375,18 @@ auto engine_t::command_queue_get() -> command_queue_t& {
     return m_command_queue;
 }
 
-auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t* {
-    rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color } };
+auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t* {
+    rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color, name } };
+    std::unique_lock lock{ m_rect_mutex };
+    m_rect_primitive.emplace(out);
+    redraw();
+    return out;
+}
+
+auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
+, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name) -> rect_primitive_t* {
+    rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth
+    , clip_pos, clip_size, SRV, texture_pos, texture_axis_x, texture_axis_y, name } };
     std::unique_lock lock{ m_rect_mutex };
     m_rect_primitive.emplace(out);
     redraw();
@@ -396,24 +396,6 @@ auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color) ->
 auto engine_t::remove_rect(rect_primitive_t* in) -> void {
     std::unique_lock lock{ m_rect_mutex };
     m_rect_primitive.erase(in);
-    flush();
-    delete in;
-    redraw();
-    return;
-}
-
-auto engine_t::add_text(std::wstring content, pos_2D text_pos, size_2D text_size
-, pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment, bool wrap) -> text_primitive_t* {
-    text_primitive_t* out{ new text_primitive_t{ this, content, text_pos, text_size, clip_pos, clip_size, size_font, color, alignment, wrap } };
-    std::unique_lock lock{ m_text_mutex };
-    m_text_primitive.emplace(out);
-    redraw();
-    return out;
-}
-
-auto engine_t::remove_text(text_primitive_t* in) -> void {
-    std::unique_lock lock{ m_text_mutex };
-    m_text_primitive.erase(in);
     flush();
     delete in;
     redraw();

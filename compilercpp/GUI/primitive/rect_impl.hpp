@@ -62,7 +62,7 @@ auto rect_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2
     solid_input_layout.element_vertex_add("POS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
     solid_input_layout.element_vertex_add("COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
     m_solid_pipeline_state.init(m_solid_root_signature, solid_input_layout
-    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
+    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT, "rect_primitive_t::m_solid_pipeline_state");
     shader_bytecode_t solid_vertex_shader{ 256, 1 };
     m_solid_pipeline_state.vertex_shader_set(solid_vertex_shader);
     shader_bytecode_t solid_pixel_shader{ 256, 2 };
@@ -80,7 +80,7 @@ auto rect_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2
     texture_input_layout.element_vertex_add("Texcoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0);
     texture_input_layout.element_vertex_add("s_texture_index", 0, DXGI_FORMAT_R32_UINT, 0);
     m_texture_pipeline_state.init(m_texture_root_signature, texture_input_layout
-    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
+    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT, "rect_primitive_t::m_texture_pipeline_state");
     shader_bytecode_t texture_vertex_shader{ 256, 3 };
     m_texture_pipeline_state.vertex_shader_set(texture_vertex_shader);
     shader_bytecode_t texture_pixel_shader{ 256, 4 };
@@ -113,33 +113,33 @@ auto rect_primitive_t::render(const std::set<rect_primitive_t*>& rect
     return;
 }
 
-rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth)
-: rect_primitive_t{ engine, pos, size, depth, pos, size } {}
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, std::string name)
+: rect_primitive_t{ engine, pos, size, depth, pos, size, name } {}
 
-rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size)
-: m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_clip_pos{ clip_pos }, m_clip_size{ clip_size } {}
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size, std::string name)
+: m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_clip_pos{ clip_pos }, m_clip_size{ clip_size }, m_name{ name } {}
 
-rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color)
-: rect_primitive_t{ engine, pos, size, depth } {
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color, std::string name)
+: rect_primitive_t{ engine, pos, size, depth, name } {
     m_texture_enable = false;
     m_color = color;
-    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size));
+    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size), name + ".m_vertex_buffer");
     upload_vertex_data();
     return;
 }
 
-rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV)
-: rect_primitive_t{ engine, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV, std::string name)
+: rect_primitive_t{ engine, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y }, name } {}
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
-, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y)
-: rect_primitive_t{ engine, pos, size, depth, clip_pos, clip_size } {
+, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name)
+: rect_primitive_t{ engine, pos, size, depth, clip_pos, clip_size, name } {
     m_texture_enable = true;
     m_SRV = &SRV;
     m_texture_pos = texture_pos;
     m_texture_axis_x = texture_axis_x;
     m_texture_axis_y = texture_axis_y;
-    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size));
+    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size), name + ".m_vertex_buffer");
     upload_vertex_data();
     return;
 }
@@ -207,11 +207,14 @@ auto rect_primitive_t::render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> 
     scissor_rect.bottom = static_cast<LONG>(m_engine->get_window_size().y - m_clip_pos.y);
     scissor_rect.top = static_cast<LONG>(m_engine->get_window_size().y - (m_clip_pos.y + m_clip_size.y));
     if (m_texture_enable) {
-        command_list->SetGraphicsRootDescriptorTable(0, m_SRV->handle_GPU_get());
+        ID3D12DescriptorHeap* descriptor_heap{ m_SRV->descriptor_heap_get().interface_get().Get() };
+        command_list->SetDescriptorHeaps(1, &descriptor_heap);
+        command_list->SetGraphicsRootDescriptorTable(0, m_SRV->descriptor_heap_get().descriptor_handle_GPU_get(0));
     }
     command_list->RSSetScissorRects(1, &scissor_rect);
     command_list->IASetVertexBuffers(0, 1, &m_vertex_buffer_view);
     command_list->DrawInstanced(4, 1, 0, 0);
+    m_engine->log_info_queue();
     return;
 }
 

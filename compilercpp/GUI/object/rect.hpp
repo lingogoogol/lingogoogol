@@ -14,7 +14,7 @@ private:
     std::uint64_t m_depth_id{};
     pos_2D m_pos{};
     size_2D m_size{};
-    float m_depth{};
+    depth_range_t m_depth_range{};
     color_t m_color{};
     const SRV_t* m_SRV{};
     pos_2D m_texture_pos{};
@@ -26,12 +26,12 @@ private:
     size_2D m_clip_size{};
 public:
     rect_t() = default;
-    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth);
-    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size
     , pos_2D clip_pos, size_2D clip_size);
-    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, color_t color);
-    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, const SRV_t& SRV);
-    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, pos_2D clip_pos
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, color_t color);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, const SRV_t& SRV);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, pos_2D clip_pos
     , size_2D clip_size, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y);
 
     auto get_pos() const -> pos_2D override;
@@ -50,27 +50,27 @@ public:
     auto hide_impl(bool base) -> void override;
 };
 
-rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth)
-: rect_t{ engine, depth_tracker, pos, size, depth, pos, size } {}
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size)
+: rect_t{ engine, depth_tracker, depth_range, pos, size, pos, size } {}
 
-rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size
 , pos_2D clip_pos, size_2D clip_size)
-: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth{ depth }
+: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth_range{ depth_range }
 , m_clip_pos{ clip_pos }, m_clip_size{ clip_size } {}
 
-rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, color_t color)
-: rect_t{ engine, depth_tracker, pos, size, depth } {
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, color_t color)
+: rect_t{ engine, depth_tracker, depth_range, pos, size } {
     m_color = color;
     m_texture_enable = false;
     return;
 }
 
-rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, const SRV_t& SRV)
-: rect_t{ engine, depth_tracker, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, const SRV_t& SRV)
+: rect_t{ engine, depth_tracker, depth_range, pos, size, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
 
-rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, pos_2D clip_pos
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, pos_2D clip_pos
 , size_2D clip_size, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y)
-: rect_t{ engine, depth_tracker, pos, size, depth, clip_pos, clip_size } {
+: rect_t{ engine, depth_tracker, depth_range, pos, size, clip_pos, clip_size } {
     m_SRV = &SRV;
     m_texture_pos = texture_pos;
     m_texture_axis_x = texture_axis_x;
@@ -159,13 +159,20 @@ auto rect_t::show_impl(bool base) -> void {
     auto engine{ m_engine };
     auto pos{ m_pos };
     auto size{ m_size };
-    auto depth{ m_depth };
+    auto depth_range{ m_depth_range };
     auto color{ m_color };
     lock.unlock();
-    auto primitive{ engine->add_rect(pos, size, depth, color) };
+    rect_primitive_t* primitive{};
+    if (m_texture_enable) {
+        engine->add_rect(pos, size, depth_range.near, m_clip_pos, m_clip_size
+        , *m_SRV, m_texture_pos, m_texture_axis_x, m_texture_axis_y, m_name + ".m_primitive");
+    }
+    else {
+        engine->add_rect(pos, size, depth_range.near, color, m_name + ".m_primitive");
+    }
     lock.lock();
     m_primitive = primitive;
-    m_depth_id = m_depth_tracker->add(m_pos, m_size, m_depth, true);
+    m_depth_id = m_depth_tracker->add(m_pos, m_size, m_depth_range.near, true);
     show_end(base);
     return;
 }
@@ -190,7 +197,7 @@ public:
     static size_1D margin;
     
     std_line_impl_t();
-    std_line_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D length, color_t color, float depth);
+    std_line_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_1D length, color_t color);
 
     auto get_margin() const -> size_1D override;
 };
@@ -204,17 +211,17 @@ template<bool is_y>
 std_line_impl_t<is_y>::std_line_impl_t(): std_line_impl_t{ nullptr, nullptr, pos_2D{ 0, 0 }, size_1D{ 0 }, 0.0f } {}
 
 template<bool is_y>
-std_line_impl_t<is_y>::std_line_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D length, color_t color, float depth)
-: rect_t{ engine, depth_tracker, pos, size_2D{ is_y ? width.x : length.x, is_y ? length.x : width.x }, depth, color } {}
+std_line_impl_t<is_y>::std_line_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_1D length, color_t color)
+: rect_t{ engine, depth_tracker, depth_range, pos, size_2D{ is_y ? width.x : length.x, is_y ? length.x : width.x }, color } {}
 
 template<bool is_y>
 auto std_line_impl_t<is_y>::get_margin() const -> size_1D {
     return margin;
 }
 
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D length, color_t color, float depth
+//engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_1D length, color_t color
 using std_linex_t = std_line_impl_t<false>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D length, color_t color, float depth
+//engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_1D length, color_t color
 using std_liney_t = std_line_impl_t<true>;
 
 #endif

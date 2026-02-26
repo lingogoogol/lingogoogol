@@ -1,44 +1,7 @@
 {
 	"folders": [
 		{
-			"name": "lgo",
-			"path": "../lgo"
-		},
-		{
-			"name": "workspace",
-			"path": "."
-		},
-		{
-			"name": "game",
-			"path": "../game"
-		},
-		{
-			"name": "storage",
-			"path": "../storage"
-		},
-		{
-			"name": "compilercpp",
-			"path": "../compilercpp"
-		},
-		{
-			"name": "other",
-			"path": "../other"
-		},
-		{
-			"name": "test",
-			"path": "../test"
-		},
-		{
-			"name": "temp",
-			"path": "../temp"
-		},
-		{
-			"name": "bug",
-			"path": "../bug"
-		},
-		{
-			"name": "math",
-			"path": "../math"
+			"path": ".."
 		}
 	],
 	"settings": {
@@ -60,7 +23,8 @@
 		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
 		"editor.unicodeHighlight.includeStrings": false,
 		"explorer.autoReveal": false,
-		"terminal.integrated.cwd": "../../"
+		"terminal.integrated.cwd": "../",
+		"window.zoomLevel": 1
 	},
 	"tasks": {
 		"version": "2.0.0",
@@ -79,7 +43,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -99,7 +63,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -119,7 +83,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -139,7 +103,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -159,7 +123,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -177,7 +141,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -195,7 +159,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -213,7 +177,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -231,7 +195,7 @@
 					"show_command"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -246,7 +210,7 @@
 					"${file}"
 				],
 				"options": {
-					"cwd": "${cwd}/../../"
+					"cwd": "${cwd}/../"
 				},
 				"group": {
 					"kind": "build"
@@ -261,8 +225,8 @@
 				"name": "Debug",
 				"type": "cppvsdbg",
 				"request": "launch",
-				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
-				"cwd": "${cwd}/",
+				"program": "${cwd}/../output/${fileBasenameNoExtension}.exe",
+				"cwd": "${cwd}/../",
 				"args": [
 					"source/temp/setting"
 				],
@@ -275,7 +239,7 @@
 				"type": "cppvsdbg",
 				"request": "launch",
 				"program": "C:\\lingogoogol\\programming\\output\\HW12.exe",
-				"cwd": "${cwd}",
+				"cwd": "${cwd}/../",
 				"args": [
 					"source/temp/setting"
 				],
@@ -288,7 +252,7 @@
 				"type": "cppvsdbg",
 				"request": "launch",
 				"program": "C:\\lingogoogol\\programming\\output\\HW12.exe",
-				"cwd": "${cwd}",
+				"cwd": "${cwd}/../",
 				"args": [
 					"source/temp/setting"
 				],

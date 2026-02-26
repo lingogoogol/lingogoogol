@@ -155,7 +155,7 @@ struct loading_folder_t {
 	std::string m_name{};
 	std::uint64_t m_size{};
 	std::uint64_t m_progress{ 0 };
-	std::shared_ptr<std_text_line_scroll_t> m_progress_bar{};
+	std::shared_ptr<text_line_scroll_std_t> m_progress_bar{};
 };
 
 struct loading_file_t {
@@ -169,14 +169,14 @@ struct loading_file_t {
 	std::string m_last_id{ "null" };
 	std::string m_last_last{};
 	std::uint64_t m_last_size{};
-	std::shared_ptr<std_text_line_scroll_t> m_progress_bar{};
+	std::shared_ptr<text_line_scroll_std_t> m_progress_bar{};
 	std::shared_ptr<loading_folder_t> m_folder{};
 	loading_t* m_loading{};
 };
 
 struct delete_file_t {
 	std::string m_id{};
-	std::shared_ptr<std_text_line_scroll_t> m_progress_bar{};
+	std::shared_ptr<text_line_scroll_std_t> m_progress_bar{};
 	loading_t* m_loading{};
 };
 
@@ -442,7 +442,7 @@ auto file_upload(curl_multipart_t& multipart, blob_empty_queue_t& empty_blob, lo
 	uploading.m_name = file.string();
 	if (progress_bar_div) {
 		std::unique_lock<std::mutex> lock{ mutex };
-		uploading.m_progress_bar = progress_bar_div->add_object_shared<std_text_line_scroll_t>(0.0f, std_blue_light, L"檔案：0B/?B " + file.wstring(), size_1D{ 0x100 });
+		uploading.m_progress_bar = progress_bar_div->add_object_shared<text_line_scroll_std_t>(depth_range_t{0.0f,0.0f}, "檔案：0B/?B " + file.string(), std_blue_light, size_1D{ 0x100 });
 		lock.unlock();
 	}
 	uploading.m_size = std::filesystem::file_size(file);
@@ -466,7 +466,7 @@ auto file_upload(curl_multipart_t& multipart, blob_empty_queue_t& empty_blob, lo
 	data_set_request(multipart, uploading.m_main_id, data);
 	http_api_request_action(multipart);
 	if (progress_bar_div) {
-		uploading.m_progress_bar->set_text(L"檔案：0B/" + std::to_wstring(uploading.m_size) + L"B " + file.wstring());
+		uploading.m_progress_bar->set_text("檔案：0B/" + std::to_string(uploading.m_size) + "B " + file.string());
 	}
 	list->emplace_back(uploading);
 	log_file(file.string() + "\n");
@@ -525,7 +525,7 @@ auto folder_upload_callback(engine_t* engine, std::shared_ptr<divy_soft_t> progr
 		loading->m_type = "folder";
 		loading->m_name = i;
 		loading->m_pos = *pos;
-		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(progress_bar_div->space_x(std_margin)
+		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin)
     	, std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
 		std::unique_lock lock{ uploading_list->m_mutex };
 		uploading_list->m_list.push_back(loading);
@@ -542,7 +542,7 @@ auto file_upload_callback(engine_t* engine, std::shared_ptr<divy_soft_t> progres
 		loading->m_type = "file";
 		loading->m_name = i;
 		loading->m_pos = *pos;
-		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(progress_bar_div->space_x(std_margin)
+		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin)
     	, std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
 		std::unique_lock lock{ uploading_list->m_mutex };
 		uploading_list->m_list.push_back(loading);
@@ -554,12 +554,12 @@ auto file_upload_callback(engine_t* engine, std::shared_ptr<divy_soft_t> progres
 
 auto list(engine_t* engine, std::shared_ptr<divy_soft_t> download_progress_bar_div, std::shared_ptr<divy_soft_t> viewer_div, std::string* pos, loading_list_t* uploading_list, loading_list_t* downloading_list) -> void;
 
-auto delete_all_confirm_callback(std::shared_ptr<divy_hard_t> center_div, std::shared_ptr<divy_soft_t> progress_bar_div, std::shared_ptr<std_text_line_input_flex_t> input, loading_list_t* uploading_list) {
-	if (input->get_text() == L"清除") {
+auto delete_all_confirm_callback(std::shared_ptr<divy_hard_t> center_div, std::shared_ptr<divy_soft_t> progress_bar_div, std::shared_ptr<text_line_flex_std_input_t> input, loading_list_t* uploading_list) {
+	if (input->get_text() == "清除") {
 		auto loading{ std::make_shared<loading_t>() };
 		loading->m_type = "delete_all";
 		loading->m_name = "清除";
-		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(progress_bar_div->space_x(std_margin)
+		loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin)
     	, std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
 		std::unique_lock lock{ uploading_list->m_mutex };
 		uploading_list->m_list.push_back(loading);
@@ -576,12 +576,12 @@ auto delete_all_cancel_callback(std::shared_ptr<divy_hard_t> center_div) {
 }
 
 auto delete_all_callback(std::shared_ptr<divy_hard_t> center_div, std::shared_ptr<divy_soft_t> progress_bar_div, loading_list_t* uploading_list) -> void {
-	auto input_div{ center_div->add_object_shared<divy_flex_soft_t>(size_1D{ 0x400 }, std_margin, alignment_2D{ alignment_x::left, alignment_y::center }) };
-	input_div->add_object<std_text_line_flex_t>(0.0f, L"真的要清除的話輸入\"清除\"", std_sideways, std_red);
+	auto input_div{ center_div->add_object_shared<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, size_1D{ 0x400 }, std_margin, alignment_2D{ alignment_x::left, alignment_y::center }) };
+	input_div->add_object<text_line_flex_std_t>(depth_range_t{0.0f,0.0f}, "真的要清除的話輸入\"清除\"", std_sideways, std_red);
 	auto focus{ new focus_t{} };
-	auto input{ input_div->add_object_shared<std_text_line_input_flex_t>(0.0f, L"", focus, std_sideways, std_red) };
-	input_div->add_object<button_classic_std_t>(std::bind(&delete_all_confirm_callback, center_div, progress_bar_div, input, uploading_list), L"確認", depth_range_t{ 0.0f, 1.0f });
-	input_div->add_object<button_classic_std_t>(std::bind(&delete_all_cancel_callback, center_div), L"取消", depth_range_t{ 0.0f, 1.0f });
+	auto input{ input_div->add_object_shared<text_line_flex_std_input_t>(depth_range_t{0.0f,0.0f}, "", focus, std_sideways, std_red) };
+	input_div->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&delete_all_confirm_callback, center_div, progress_bar_div, input, uploading_list), "確認");
+	input_div->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&delete_all_cancel_callback, center_div), "取消");
 	return;
 }
 
@@ -600,7 +600,7 @@ auto folder_download_callback(engine_t* engine, std::shared_ptr<divy_soft_t> pro
 	loading->m_type = "folder";
 	loading->m_name = (std::filesystem::path{ folder[0] } / name).string();
 	loading->m_pos = pos;
-	loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(progress_bar_div->space_x(std_margin)
+	loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin)
 	, std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
 	std::unique_lock lock{ downloading_list->m_mutex };
 	downloading_list->m_list.push_back(loading);
@@ -632,7 +632,7 @@ auto file_download_callback(engine_t* engine, std::shared_ptr<divy_soft_t> progr
 	loading->m_type = "file";
 	loading->m_name = (std::filesystem::path{ folder[0] } / name).string();
 	loading->m_pos = pos;
-	loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(progress_bar_div->space_x(std_margin)
+	loading->m_progress_bar_id = progress_bar_div->add_object<divy_flex_soft_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin)
 	, std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
 	std::unique_lock lock{ downloading_list->m_mutex };
 	downloading_list->m_list.push_back(loading);
@@ -646,18 +646,18 @@ auto list(engine_t* engine, std::shared_ptr<divy_soft_t> download_progress_bar_d
 	viewer_div->clear_state();
 	for (auto i : obj_list) {
 		if (i["type"] == "folder") {
-			viewer_div->add_object<button_text_t<std_text_line_scroll_t>>(std::bind(&folder_button_callback, engine, download_progress_bar_div, viewer_div, pos, i["id"], uploading_list, downloading_list), 0.0f, std_white
-			, L"資料夾，名稱：" + to_wstring(i["name"].get<std::string>()), size_1D{ viewer_div->space_2D(std_margin).x });
-			viewer_div->add_object<button_text_t<std_text_line_t>>(std::bind(&folder_download_callback, engine, download_progress_bar_div, i["name"].get<std::string>(), i["id"].get<std::string>(), uploading_list, downloading_list), 0.0f, std_white
-			, L"下載", viewer_div->space_x(std_margin));
-			viewer_div->add_object<std_linex_t>(viewer_div->space_x(std_margin), std_white, 0.0f);
+			viewer_div->add_object<button_text_t<text_line_scroll_std_t>>(depth_range_t{0.0f,0.5f}, std::bind(&folder_button_callback, engine, download_progress_bar_div, viewer_div, pos, i["id"], uploading_list, downloading_list)
+			, "資料夾，名稱：" + i["name"].get<std::string>(), std_white, size_1D{ viewer_div->space_2D(std_margin).x });
+			viewer_div->add_object<button_text_t<text_line_std_t>>(depth_range_t{0.0f,0.5f}, std::bind(&folder_download_callback, engine, download_progress_bar_div, i["name"].get<std::string>(), i["id"].get<std::string>(), uploading_list, downloading_list)
+			, "下載", std_white, viewer_div->space_x(std_margin));
+			viewer_div->add_object<std_linex_t>(depth_range_t{0.0f,0.5f}, viewer_div->space_x(std_margin), std_white);
 		}
 		else if (i["type"] == "file") {
-			viewer_div->add_object<button_text_t<std_text_line_scroll_t>>([] () {}, 0.0f, std_white
-			, L"檔案，名稱：" + to_wstring(i["name"].get<std::string>()) + L"，大小：" + std::to_wstring(i["size"].get<std::uint64_t>()), size_1D{ viewer_div->space_2D(std_margin).x });
-			viewer_div->add_object<button_text_t<std_text_line_t>>(std::bind(&file_download_callback, engine, download_progress_bar_div, i["name"].get<std::string>(), i["id"].get<std::string>(), uploading_list, downloading_list), 0.0f, std_white
-			, L"下載", viewer_div->space_x(std_margin));
-			viewer_div->add_object<std_linex_t>(viewer_div->space_x(std_margin), std_white, 0.0f);
+			viewer_div->add_object<button_text_t<text_line_scroll_std_t>>(depth_range_t{0.0f,0.5f}, [] () {}
+			, "檔案，名稱：" + i["name"].get<std::string>() + "，大小：" + std::to_string(i["size"].get<std::uint64_t>()), std_white, size_1D{ viewer_div->space_2D(std_margin).x });
+			viewer_div->add_object<button_text_t<text_line_std_t>>(depth_range_t{0.0f,0.5f}, std::bind(&file_download_callback, engine, download_progress_bar_div, i["name"].get<std::string>(), i["id"].get<std::string>(), uploading_list, downloading_list)
+			, "下載", std_white, viewer_div->space_x(std_margin));
+			viewer_div->add_object<std_linex_t>(depth_range_t{0.0f,0.5f}, viewer_div->space_x(std_margin), std_white);
 		}
 		else {
 			throw internal_error_t{ "obj type" };
@@ -668,36 +668,36 @@ auto list(engine_t* engine, std::shared_ptr<divy_soft_t> download_progress_bar_d
 
 auto home(engine_t* engine, state_t* state, std::shared_ptr<divy_soft_t>* upload_progress_bar_div, std::shared_ptr<divy_soft_t>* download_progress_bar_div, std::string* pos, loading_list_t* uploading_list, loading_list_t* downloading_list) -> void {
     state->clear_state();
-    auto main_div{ state->add_object_shared<divy_hard_t>(pos_2D{ 0, 0 }, engine->get_window_size()
+    auto main_div{ state->add_object_shared<divy_hard_t>(depth_range_t{ 0.0f, 1.0f }, pos_2D{ 0, 0 }, engine->get_window_size()
     , size_1D{ 0 }, alignment_2D{ alignment_x::left, alignment_y::top }) };
 
-    auto menu_left{ main_div->add_object_ghost_shared<divx_soft_t>(div_create_from_member{}, std_forward, std_margin
+    auto menu_left{ main_div->add_object_ghost_shared<divx_soft_t>(depth_range_t{0.0f,0.5f}, div_create_from_member{}, std_forward, std_margin
     , main_div->space_x(std_margin), alignment_2D{ alignment_x::left, alignment_y::center }) };
-    menu_left->add_object<std_text_line_t>(0.0f, std_white, L"雲端硬碟", main_div->space_x(std_margin));
+    menu_left->add_object<text_line_std_t>(depth_range_t{0.0f,0.5f}, "雲端硬碟", std_white, main_div->space_x(std_margin));
 
-    auto menu_right{ main_div->add_object_shared<divx_soft_t>(div_create_from_member{}, std_forward, std_margin
+    auto menu_right{ main_div->add_object_shared<divx_soft_t>(depth_range_t{0.0f,0.5f}, div_create_from_member{}, std_forward, std_margin
     , main_div->space_x(std_margin), alignment_2D{ alignment_x::right, alignment_y::center }) };
-    main_div->add_object_shared<std_linex_t>(main_div->space_x(std_margin), std_white, 0.0f);
-    auto work_div{ main_div->add_object_shared<divx_soft_t>(main_div->space_2D(std_margin), std_margin, alignment_2D{ alignment_x::left, alignment_y::top }) };
+    main_div->add_object_shared<std_linex_t>(depth_range_t{0.0f,0.5f}, main_div->space_x(std_margin), std_white);
+    auto work_div{ main_div->add_object_shared<divx_soft_t>(depth_range_t{0.0f,0.5f}, main_div->space_2D(std_margin), std_margin, alignment_2D{ alignment_x::left, alignment_y::top }) };
 
-    auto path_div{ work_div->add_object_ghost_shared<divy_soft_t>(size_2D{ 0x100, work_div->space_y(std_margin).x }
+    auto path_div{ work_div->add_object_ghost_shared<divy_soft_t>(depth_range_t{0.0f,0.5f}, size_2D{ 0x100, work_div->space_y(std_margin).x }
     , std_margin, alignment_2D{ alignment_x::left, alignment_y::top }) };
-	*upload_progress_bar_div = work_div->add_object_ghost_shared<divy_soft_t>(size_2D{ 0x100, work_div->space_y(std_margin).x }
+	*upload_progress_bar_div = work_div->add_object_ghost_shared<divy_soft_t>(depth_range_t{0.0f,0.5f}, size_2D{ 0x100, work_div->space_y(std_margin).x }
     , std_margin, alignment_2D{ alignment_x::left, alignment_y::bottom }, true);
-	*download_progress_bar_div = work_div->add_object_shared<divy_soft_t>(size_2D{ 0x100, work_div->space_y(std_margin).x }
+	*download_progress_bar_div = work_div->add_object_shared<divy_soft_t>(depth_range_t{0.0f,0.5f}, size_2D{ 0x100, work_div->space_y(std_margin).x }
     , std_margin, alignment_2D{ alignment_x::left, alignment_y::top }, true);
 	uploading_list->m_progress_bar_div = *upload_progress_bar_div;
 	downloading_list->m_progress_bar_div = *download_progress_bar_div;
-    work_div->add_object<std_liney_t>(work_div->space_y(std_margin), std_white, 0.0f);
-    auto viewer_div{ work_div->add_object_shared<divy_soft_t>(work_div->space_2D(std_margin), std_margin, alignment_2D{ alignment_x::left, alignment_y::top }) };
+    work_div->add_object<std_liney_t>(depth_range_t{0.0f,0.5f}, work_div->space_y(std_margin), std_white);
+    auto viewer_div{ work_div->add_object_shared<divy_soft_t>(depth_range_t{0.0f,0.5f}, work_div->space_2D(std_margin), std_margin, alignment_2D{ alignment_x::left, alignment_y::top }) };
 
-	auto center_div{ state->add_object_shared<divy_hard_t>(pos_2D{ 0, 0 }, engine->get_window_size()
+	auto center_div{ state->add_object_shared<divy_hard_t>(depth_range_t{ 0.0f, 1.0f }, pos_2D{ 0, 0 }, engine->get_window_size()
     , size_1D{ 0 }, alignment_2D{ alignment_x::center, alignment_y::center }) };
 	
-    menu_right->add_object<button_classic_std_t>(std::bind(&folder_create_callback, engine, state, pos), L"新增資料夾", depth_range_t{ 0.0f, 1.0f });
-    menu_right->add_object<button_classic_std_t>(std::bind(&folder_upload_callback, engine, *upload_progress_bar_div, pos, uploading_list, downloading_list), L"上傳資料夾", depth_range_t{ 0.0f, 1.0f });
-    menu_right->add_object<button_classic_std_t>(std::bind(&file_upload_callback, engine, *upload_progress_bar_div, pos, uploading_list, downloading_list), L"上傳檔案", depth_range_t{ 0.0f, 1.0f });
-    menu_right->add_object<button_classic_std_t>(std::bind(&delete_all_callback, center_div, *upload_progress_bar_div, uploading_list), L"清除", depth_range_t{ 0.0f, 1.0f });
+    menu_right->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&folder_create_callback, engine, state, pos), "新增資料夾");
+    menu_right->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&folder_upload_callback, engine, *upload_progress_bar_div, pos, uploading_list, downloading_list), "上傳資料夾");
+    menu_right->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&file_upload_callback, engine, *upload_progress_bar_div, pos, uploading_list, downloading_list), "上傳檔案");
+    menu_right->add_object<button_classic_std_t>(depth_range_t{0.0f,0.5f}, std::bind(&delete_all_callback, center_div, *upload_progress_bar_div, uploading_list), "清除");
 	list(engine, *download_progress_bar_div, viewer_div, pos, uploading_list, downloading_list);
 	return;
 }
@@ -713,7 +713,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 		if (!list->m_list_process.empty()) {
 			auto obj_ptr{ list->m_list_process.begin()->get() };
 			auto progress_bar_div{ list->m_progress_bar_div->get_object_shared<divy_flex_soft_t>(obj_ptr->m_progress_bar_id) };
-			progress_bar_div->add_object<std_linex_t>(progress_bar_div->space_x(std_margin), std_white, 0.0f);
+			progress_bar_div->add_object<std_linex_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin), std_white);
 			if (obj_ptr->m_type == "file") {
 				lock1.unlock();
 				curl_multipart_t multipart{ http_api_multipart(curl_upload(), account_main) };
@@ -728,8 +728,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 				});
 			}
 			else if (obj_ptr->m_type == "folder") {
-				auto progress_bar{ progress_bar_div->add_object_shared<std_text_line_scroll_t>(0.0f, std_blue_light
-				, L"資料夾：0B/?B " + to_wstring(obj_ptr->m_name), size_1D{ 0x100 }) };
+				auto progress_bar{ progress_bar_div->add_object_shared<text_line_scroll_std_t>(depth_range_t{0.0f,0.5f}, 
+				"資料夾：0B/?B " + obj_ptr->m_name, std_blue_light, size_1D{ 0x100 }) };
 				lock1.unlock();
 				auto loading_folder{ std::make_shared<loading_folder_t>() };
 				loading_folder->m_name = obj_ptr->m_name;
@@ -743,11 +743,11 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 					{ "type", "folder" },
 					{ "id", id }
 				});
-				progress_bar->set_text(L"資料夾：0B/" + std::to_wstring(obj_ptr->m_size) + L"B " + to_wstring(obj_ptr->m_name));
+				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name);
 			}
 			else if (obj_ptr->m_type == "delete_all") {
-				auto progress_bar{ progress_bar_div->add_object_shared<std_text_line_scroll_t>(0.0f
-				, std_blue_light, L"刪除：0/? " + to_wstring(obj_ptr->m_name), size_1D{ 0x100 }) };
+				auto progress_bar{ progress_bar_div->add_object_shared<text_line_scroll_std_t>(depth_range_t{0.0f,0.5f}, 
+				"刪除：0/? " + obj_ptr->m_name, std_blue_light, size_1D{ 0x100 }) };
 				lock1.unlock();
 				data_t folder_root_data{};
 				folder_root_data.m_name = nlohmann::json{
@@ -784,7 +784,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 					}, {}, account_main));
 				}
 				empty_blob->clear_end();
-				progress_bar->set_text(L"刪除：0/" + std::to_wstring(obj_ptr->m_size) + L" " + to_wstring(obj_ptr->m_name));
+				progress_bar->set_text("刪除：0/" + std::to_string(obj_ptr->m_size) + " " + obj_ptr->m_name);
 			}
 			else {
 				throw;
@@ -890,11 +890,11 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 				multipart.action();
 				uploading.m_progress += batch_size;
 				if (uploading.m_progress_bar) {
-					uploading.m_progress_bar->set_text(L"檔案：" + std::to_wstring(uploading.m_progress) + L"B/" + std::to_wstring(uploading.m_size) + L"B " + to_wstring(uploading.m_name));
+					uploading.m_progress_bar->set_text("檔案：" + std::to_string(uploading.m_progress) + "B/" + std::to_string(uploading.m_size) + "B " + uploading.m_name);
 				}
 				if (uploading.m_folder) {
 					uploading.m_folder->m_progress += batch_size;
-					uploading.m_folder->m_progress_bar->set_text(L"資料夾：" + std::to_wstring(uploading.m_folder->m_progress) + L"B/" + std::to_wstring(uploading.m_folder->m_size) + L"B " + to_wstring(uploading.m_folder->m_name));
+					uploading.m_folder->m_progress_bar->set_text("資料夾：" + std::to_string(uploading.m_folder->m_progress) + "B/" + std::to_string(uploading.m_folder->m_size) + "B " + uploading.m_folder->m_name);
 				}
 				uploading.m_loading->m_progress += batch_size;
 			}
@@ -910,8 +910,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void {
 			multipart.action();
 			for (std::uint64_t i{ 0 }; i < delete_count; ++i) {
 				++delete_id[i].m_loading->m_progress;
-				delete_id[i].m_progress_bar->set_text(L"刪除：" + std::to_wstring(delete_id[i].m_loading->m_progress) + L"/"
-				+ std::to_wstring(delete_id[i].m_loading->m_size) + L" " + to_wstring(delete_id[i].m_loading->m_name));
+				delete_id[i].m_progress_bar->set_text("刪除：" + std::to_string(delete_id[i].m_loading->m_progress) + "/"
+				+ std::to_string(delete_id[i].m_loading->m_size) + " " + delete_id[i].m_loading->m_name);
 			}
 			delete_id.erase(delete_id.begin(), delete_id.begin() + delete_count);
 		}
@@ -925,7 +925,7 @@ auto file_download(CURL* curl, loading_t* loading, std::shared_ptr<loading_folde
 	downloading.m_name = file.string();
 	if (progress_bar_div) {
 		std::unique_lock<std::mutex> lock{ mutex };
-		downloading.m_progress_bar = progress_bar_div->add_object_shared<std_text_line_scroll_t>(0.0f, std_green_light, L"檔案：0B/?B " + file.wstring(), size_1D{ 0x100 });
+		downloading.m_progress_bar = progress_bar_div->add_object_shared<text_line_scroll_std_t>(depth_range_t{0.0f,0.5f}, "檔案：0B/?B " + file.string(), std_green_light, size_1D{ 0x100 });
 		lock.unlock();
 	}
 	downloading.m_size = nlohmann::json::parse(data_name_get(curl, pos))["size"];
@@ -937,7 +937,7 @@ auto file_download(CURL* curl, loading_t* loading, std::shared_ptr<loading_folde
 	downloading.m_loading = loading;
 	downloading.m_main_id = pos;
 	if (progress_bar_div) {
-		downloading.m_progress_bar->set_text(L"檔案：0B/" + std::to_wstring(downloading.m_size) + L"B " + file.wstring());
+		downloading.m_progress_bar->set_text("檔案：0B/" + std::to_string(downloading.m_size) + "B " + file.string());
 	}
 	list->emplace_back(downloading);
 	return;
@@ -969,19 +969,19 @@ auto download(loading_list_t* list) -> void {
 		if (!list->m_list_process.empty()) {
 			auto obj_ptr{ list->m_list_process.begin()->get() };
 			auto progress_bar_div{ list->m_progress_bar_div->get_object_shared<divy_flex_soft_t>(obj_ptr->m_progress_bar_id) };
-			progress_bar_div->add_object<std_linex_t>(progress_bar_div->space_x(std_margin), std_white, 0.0f);
+			progress_bar_div->add_object<std_linex_t>(depth_range_t{0.0f,0.5f}, progress_bar_div->space_x(std_margin), std_white);
 			if (obj_ptr->m_type == "file") {
 				lock1.unlock();
 				file_download(curl_download(), obj_ptr, nullptr, progress_bar_div, obj_ptr->m_pos, obj_ptr->m_name, &file_list, list->m_mutex);
 			}
 			else if (obj_ptr->m_type == "folder") {
-				auto progress_bar{ progress_bar_div->add_object_shared<std_text_line_scroll_t>(0.0f, std_green_light, L"資料夾：0B/?B " + to_wstring(obj_ptr->m_name), size_1D{ 0x100 }) };
+				auto progress_bar{ progress_bar_div->add_object_shared<text_line_scroll_std_t>(depth_range_t{0.0f,0.5f}, "資料夾：0B/?B " + obj_ptr->m_name, std_green_light, size_1D{ 0x100 }) };
 				lock1.unlock();
 				auto loading_folder{ std::make_shared<loading_folder_t>() };
 				loading_folder->m_name = obj_ptr->m_name;
 				loading_folder->m_progress_bar = progress_bar;
 				folder_download(curl_download(), obj_ptr, loading_folder, nullptr, obj_ptr->m_pos, obj_ptr->m_name, &file_list, list->m_mutex);
-				progress_bar->set_text(L"資料夾：0B/" + std::to_wstring(obj_ptr->m_size) + L"B " + to_wstring(obj_ptr->m_name));
+				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name);
 			}
 			else {
 				throw;
@@ -1025,11 +1025,11 @@ auto download(loading_list_t* list) -> void {
 				}
 				downloading.m_progress += batch_size;
 				if (downloading.m_progress_bar) {
-					downloading.m_progress_bar->set_text(L"檔案：" + std::to_wstring(downloading.m_progress) + L"B/" + std::to_wstring(downloading.m_size) + L"B " + to_wstring(downloading.m_name));
+					downloading.m_progress_bar->set_text("檔案：" + std::to_string(downloading.m_progress) + "B/" + std::to_string(downloading.m_size) + "B " + downloading.m_name);
 				}
 				if (downloading.m_folder) {
 					downloading.m_folder->m_progress += batch_size;
-					downloading.m_folder->m_progress_bar->set_text(L"資料夾：" + std::to_wstring(downloading.m_folder->m_progress) + L"B/" + std::to_wstring(downloading.m_folder->m_size) + L"B " + to_wstring(downloading.m_folder->m_name));
+					downloading.m_folder->m_progress_bar->set_text("資料夾：" + std::to_string(downloading.m_folder->m_progress) + "B/" + std::to_string(downloading.m_folder->m_size) + "B " + downloading.m_folder->m_name);
 				}
 				downloading.m_loading->m_progress += batch_size;
 			}
@@ -1046,8 +1046,10 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) -> int {
     init_directx();
 	freetype_t freetype{};
 	font_face_t::freetype_set(&freetype);
-	font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 256 };
-    engine_t engine{ instance, size_2D{ 0x600, 0x400 } };
+	font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 12 };
+	font_preference_t::default_get().push_back(&font_face);
+    engine_t engine{ instance, size_2D{ 0x600, 0x400 }, "wWinMain.engine" };
+    text_line_t::init_global(engine.device_get());
     depth_tracker_t depth_tracker{};
     state_t state{ &engine, &depth_tracker };
 	loading_list_t uploading_list{}, downloading_list{};
@@ -1103,6 +1105,7 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) -> int {
 	account_main.uninit();
 	free();
     state.clear_state();
+	engine.log_info_queue();
     log_file("finished!\n");
     return 0;
 }

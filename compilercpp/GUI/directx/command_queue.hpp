@@ -26,20 +26,24 @@ private:
     HANDLE m_event{};
     UINT64 m_fence_value{ 0 };
     std::recursive_mutex m_mutex{};
+    std::string m_name{};
 public:
     command_queue_t() = default;
 
-    auto init(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_COMMAND_LIST_TYPE type) -> void {
+    auto init(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_COMMAND_LIST_TYPE type, std::string name) -> void {
         std::unique_lock lock{ m_mutex };
         m_device = device;
         m_type = type;
+        m_name = name;
         D3D12_COMMAND_QUEUE_DESC desc{};
         desc.Type = type;
         desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
         desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         desc.NodeMask = 0;
         hresult(m_device->CreateCommandQueue(&desc, IID_PPV_ARGS(&m_queue)));
+        D3D12_set_name(m_queue, name + ".m_queue");
         hresult(m_device->CreateFence(m_fence_value, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+        D3D12_set_name(m_fence, name + ".m_fence");
         m_event = CreateEventW(nullptr, false, false, nullptr);
         return;
     }
@@ -83,6 +87,7 @@ public:
         }
         else {
             hresult(m_device->CreateCommandAllocator(m_type, IID_PPV_ARGS(&allocator)));
+            D3D12_set_name(allocator, m_name + "'s allocator");
         }
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> list{};
         if (m_list_unused.size()) {
@@ -92,6 +97,7 @@ public:
         }
         else {
             hresult(m_device->CreateCommandList(0, m_type, allocator.Get(), nullptr, IID_PPV_ARGS(&list)));
+            D3D12_set_name(list, m_name + "'s command list");
         }
         m_allocator_map.emplace(list, allocator);
         return list;

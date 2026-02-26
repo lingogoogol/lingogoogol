@@ -11,6 +11,14 @@
 #include "../../lib/stu.hpp"
 #include "../primitive/engine_decl.hpp"
 
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::string text,
+//std::function<void(std::wstring*, wchar_t)> constraint,
+//focus_t* focus,
+//t_arg&&... arg
 template<typename t_text>
 class text_input_constraint_impl_t: public t_text {
 private:
@@ -19,7 +27,7 @@ private:
     std::atomic_bool m_on_focus{ false };
     click_area_t m_click_area{};
     std::function<void(wchar_t)>* m_callback{};
-    std::function<void(std::wstring*, wchar_t)> m_constraint{};
+    std::function<void(std::string*, wchar_t)> m_constraint{};
 
     auto text_input_charw_callback(wchar_t in) -> void;
     auto text_input_click_area_callback() -> void;
@@ -28,15 +36,23 @@ private:
     auto set_callback() -> void;
     auto clear_callback() -> void;
 public:
-    static auto constraint_default(std::wstring* text, wchar_t in) -> void;
-    static auto only_num(std::wstring* text, wchar_t in) -> void;
-    static auto limit_len(std::wstring* text, wchar_t in, std::size_t len) -> void;
-    static auto only_num_limit_len(std::wstring* text, wchar_t in, std::size_t len) -> void;
+    static auto constraint_default(std::string* text, wchar_t in) -> void;
+    static auto only_num(std::string* text, wchar_t in) -> void;
+    static auto limit_len(std::string* text, wchar_t in, std::size_t len) -> void;
+    static auto only_num_limit_len(std::string* text, wchar_t in, std::size_t len) -> void;
 
     text_input_constraint_impl_t() = default;
     template<typename... t_arg>
-    text_input_constraint_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth, std::wstring text
-    , std::function<void(std::wstring*, wchar_t)> constraint, focus_t* focus, t_arg&&... arg);
+    text_input_constraint_impl_t(
+        engine_t* engine,
+        depth_tracker_t* depth_tracker,
+        depth_range_t depth_range,
+        pos_2D pos,
+        std::string text,
+        std::function<void(std::string*, wchar_t)> constraint,
+        focus_t* focus,
+        t_arg&&... arg
+    );
     
     auto set_pos(pos_2D pos) -> void override;
 
@@ -47,7 +63,7 @@ public:
 template<typename t_text>
 auto text_input_constraint_impl_t<t_text>::text_input_charw_callback(wchar_t in) -> void {
     std::unique_lock lock{ this->m_mutex };
-    std::wstring text{ t_text::get_text() };
+    std::string text{ t_text::get_text() };
     if (m_constraint) {
         m_constraint(&text, in);
     }
@@ -96,20 +112,20 @@ auto text_input_constraint_impl_t<t_text>::clear_callback() -> void {
 }
 
 template<typename t_text>
-auto text_input_constraint_impl_t<t_text>::constraint_default(std::wstring* text, wchar_t in) -> void {
+auto text_input_constraint_impl_t<t_text>::constraint_default(std::string* text, wchar_t in) -> void {
     if (in == L'\b') {
         if (!text->empty()) {
             text->pop_back();
         }
     }
     else {
-        text->push_back(in);
+        text->push_back(static_cast<char>(in));//...you cannot do this cast
     }
     return;
 }
 
 template<typename t_text>
-auto text_input_constraint_impl_t<t_text>::only_num(std::wstring* text, wchar_t in) -> void {
+auto text_input_constraint_impl_t<t_text>::only_num(std::string* text, wchar_t in) -> void {
     if ((in >= L'0' && in <= L'9') || (in >= L'A' && in <= L'F') || in == L'\b') {
         constraint_default(text, in);
     }
@@ -117,7 +133,7 @@ auto text_input_constraint_impl_t<t_text>::only_num(std::wstring* text, wchar_t 
 }
 
 template<typename t_text>
-auto text_input_constraint_impl_t<t_text>::limit_len(std::wstring* text, wchar_t in, std::size_t len) -> void {
+auto text_input_constraint_impl_t<t_text>::limit_len(std::string* text, wchar_t in, std::size_t len) -> void {
     if (text->size() < len || in == L'\b') {
         constraint_default(text, in);
     }
@@ -125,7 +141,7 @@ auto text_input_constraint_impl_t<t_text>::limit_len(std::wstring* text, wchar_t
 }
 
 template<typename t_text>
-auto text_input_constraint_impl_t<t_text>::only_num_limit_len(std::wstring* text, wchar_t in, std::size_t len) -> void {
+auto text_input_constraint_impl_t<t_text>::only_num_limit_len(std::string* text, wchar_t in, std::size_t len) -> void {
     if ((text->size() < len && ((in >= L'0' && in <= L'9') || (in >= L'A' && in <= L'F'))) || in == L'\b') {
         constraint_default(text, in);
     }
@@ -134,11 +150,40 @@ auto text_input_constraint_impl_t<t_text>::only_num_limit_len(std::wstring* text
 
 template<typename t_text>
 template<typename... t_arg>
-text_input_constraint_impl_t<t_text>::text_input_constraint_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth
-, std::wstring text, std::function<void(std::wstring*, wchar_t)> constraint, focus_t* focus, t_arg&&... arg)
-: t_text{ engine, depth_tracker, pos, depth, text, std::forward<t_arg&&>(arg)... }
-, m_engine{ engine }, m_focus{ focus }, m_click_area{ engine, depth_tracker, pos, t_text::get_size(), depth
-, [] (pos_2D) {}, [] () {}, [] (pos_2D) {}, [] (pos_2D) {}, std::bind(&text_input_constraint_impl_t::text_input_click_area_callback, this) }, m_constraint{ constraint } {}
+text_input_constraint_impl_t<t_text>::text_input_constraint_impl_t(
+    engine_t* engine,
+    depth_tracker_t* depth_tracker,
+    depth_range_t depth_range,
+    pos_2D pos,
+    std::string text,
+    std::function<void(std::string*, wchar_t)> constraint,
+    focus_t* focus,
+    t_arg&&... arg
+):
+    t_text{
+        engine,
+        depth_tracker,
+        depth_range,
+        pos,
+        text,
+        std::forward<t_arg>(arg)...
+    },
+    m_engine{ engine },
+    m_focus{ focus },
+    m_click_area{
+        engine,
+        depth_tracker,
+        depth_range,
+        pos,
+        t_text::get_size(),
+        [] (pos_2D) {},
+        [] () {},
+        [] (pos_2D) {},
+        [] (pos_2D) {},
+        std::bind(&text_input_constraint_impl_t::text_input_click_area_callback, this)
+    },
+    m_constraint{ constraint }
+{}
 
 template<typename t_text>
 auto text_input_constraint_impl_t<t_text>::set_pos(pos_2D pos) -> void {
@@ -174,27 +219,67 @@ auto text_input_constraint_impl_t<t_text>::hide_impl(bool base) -> void {
     return;
 }
 
-using std_text_line_input_constraint_t = text_input_constraint_impl_t<std_text_line_t>;
-using std_text_line_input_constraint_flex_t = text_input_constraint_impl_t<std_text_line_flex_t>;
-using text_block_scroll_input_constraint_t = text_input_constraint_impl_t<text_block_scroll_t>;
-using std_text_block_scroll_input_constraint_t = text_input_constraint_impl_t<std_text_block_scroll_t>;
+using text_line_std_input_constraint_t = text_input_constraint_impl_t<text_line_std_t>;
+using text_line_std_input_constraint_flex_t = text_input_constraint_impl_t<text_line_flex_std_t>;
+//using text_block_scroll_input_constraint_t = text_input_constraint_impl_t<text_block_scroll_t>;
+//using text_block_scroll_std_input_constraint_t = text_input_constraint_impl_t<text_block_scroll_std_t>;
 
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//depth_range_t depth_range,
+//pos_2D pos,
+//std::string text,
+//focus_t* focus,
+//t_arg&&... arg
+//v
+//engine,
+//depth_tracker,
+//depth_range,
+//pos,
+//text,
+//arg...
 template<typename t_text>
 class text_input_impl_t: public text_input_constraint_impl_t<t_text> {
 public:
     text_input_impl_t() = default;
     template<typename... t_arg>
-    text_input_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth, std::wstring text, focus_t* focus, t_arg&&... arg);
+    text_input_impl_t(
+        engine_t* engine,
+        depth_tracker_t* depth_tracker,
+        depth_range_t depth_range,
+        pos_2D pos,
+        std::string text,
+        focus_t* focus,
+        t_arg&&... arg
+    );
 };
 
 template<typename t_text>
 template<typename... t_arg>
-text_input_impl_t<t_text>::text_input_impl_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, float depth, std::wstring text, focus_t* focus, t_arg&&... arg)
-: text_input_constraint_impl_t<t_text>{ engine, depth_tracker, pos, depth, text, {}, focus, std::forward<t_arg>(arg)... } {}
+text_input_impl_t<t_text>::text_input_impl_t(
+    engine_t* engine,
+    depth_tracker_t* depth_tracker,
+    depth_range_t depth_range,
+    pos_2D pos,
+    std::string text,
+    focus_t* focus,
+    t_arg&&... arg
+):
+    text_input_constraint_impl_t<t_text>{
+        engine,
+        depth_tracker,
+        depth_range,
+        pos,
+        text,
+        {},
+        focus,
+        std::forward<t_arg>(arg)...
+    }
+{}
 
-using std_text_line_input_t = text_input_impl_t<std_text_line_t>;
-using std_text_line_input_flex_t = text_input_impl_t<std_text_line_flex_t>;
-using text_block_scroll_input_t = text_input_impl_t<text_block_scroll_t>;
-using std_text_block_scroll_input_t = text_input_impl_t<std_text_block_scroll_t>;
+using text_line_std_input_t = text_input_impl_t<text_line_std_t>;
+using text_line_flex_std_input_t = text_input_impl_t<text_line_flex_std_t>;
+//using text_block_scroll_input_t = text_input_impl_t<text_block_scroll_t>;
+//using text_block_scroll_std_input_t = text_input_impl_t<text_block_scroll_std_t>;
 
 #endif

@@ -70,15 +70,15 @@ auto button_plus_t::button_plus_mouse_left_release_callback(pos_2D) -> void {
 
 button_plus_t::button_plus_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, color_t content_color, size_1D border_size, color_t border_color
 , depth_range_t depth_range, std::function<void(void)> callback)
-: m_engine{ engine }, m_click_area{ engine, depth_tracker, pos, size, depth_range.near
+: m_engine{ engine }, m_click_area{ engine, depth_tracker, depth_range, pos, size
 , std::bind(&button_plus_t::button_plus_mouse_move_callback, this, std::placeholders::_1)
 , std::bind(&button_plus_t::button_plus_mouse_leave_callback, this), std::bind(&button_plus_t::button_plus_mouse_left_click_callback, this, std::placeholders::_1)
 , std::bind(&button_plus_t::button_plus_mouse_left_release_callback, this, std::placeholders::_1), callback }
 , m_rect{ engine, depth_tracker, pos, size, content_color, border_size, border_color, depth_range_t{ (depth_range.near + depth_range.far) / 2, depth_range.far } }
-, m_horizontal{ engine, depth_tracker, pos_2D{ pos.x + size.x / 4, pos.y + (size.y - border_size.x) / 2 }
-, size_2D{ size.x / 2, border_size.x }, depth_range.near, border_color }
-, m_vertical{ engine, depth_tracker, pos_2D{ pos.x + (size.x - border_size.x) / 2, pos.y + size.y / 4 }
-, size_2D{ border_size.x, size.y / 2 }, depth_range.near, border_color }, m_border_color{ border_color } {}
+, m_horizontal{ engine, depth_tracker, depth_range, pos_2D{ pos.x + size.x / 4, pos.y + (size.y - border_size.x) / 2 }
+, size_2D{ size.x / 2, border_size.x }, border_color }
+, m_vertical{ engine, depth_tracker, depth_range, pos_2D{ pos.x + (size.x - border_size.x) / 2, pos.y + size.y / 4 }
+, size_2D{ border_size.x, size.y / 2 }, border_color }, m_border_color{ border_color } {}
 
 auto button_plus_t::get_pos() const -> pos_2D {
     return m_rect.get_pos();

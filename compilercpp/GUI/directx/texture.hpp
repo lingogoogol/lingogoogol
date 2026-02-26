@@ -8,9 +8,9 @@ class texture_t {
 public:
     texture_t() = default;
     texture_t(Microsoft::WRL::ComPtr<ID3D12Device> device
-    , Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap);
+    , Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap, std::string name);
     auto init(Microsoft::WRL::ComPtr<ID3D12Device> device
-    , Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap) -> void;
+    , Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap, std::string name) -> void;
 
     auto format_get() const -> DXGI_FORMAT;
     auto miplevel_count_get() const -> std::uint16_t;
@@ -22,21 +22,25 @@ private:
     
     const pixmap_t* m_pixmap{};
     Microsoft::WRL::ComPtr<ID3D12Resource> m_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_upload_resource{};
     DXGI_FORMAT m_format{};
     std::uint16_t m_miplevel_count{};
+    std::string m_name{};
 
     friend class descriptor_heap_t;
 };
 
 texture_t::texture_t(Microsoft::WRL::ComPtr<ID3D12Device> device
-, Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap): m_pixmap{ &pixmap } {
+, Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list
+, const pixmap_t& pixmap, std::string name): m_pixmap{ &pixmap }, m_name{ name } {
     init1(device, command_list);
     return;
 }
 
 auto texture_t::init(Microsoft::WRL::ComPtr<ID3D12Device> device
-, Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap) -> void {
+, Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, const pixmap_t& pixmap, std::string name) -> void {
     m_pixmap = &pixmap;
+    m_name = name;
     init1(device, command_list);
     return;
 }
@@ -74,21 +78,22 @@ auto texture_t::init1(Microsoft::WRL::ComPtr<ID3D12Device> device
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
     std::uint64_t upload_size{};
     device->GetCopyableFootprints(&resource_desc, 0, 1, 0, &footprint, nullptr, nullptr, &upload_size);
-    Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{ create_resource_upload(device, upload_size) };
+    m_upload_resource = create_resource_upload(device, upload_size, m_name + ".m_upload_resource");
     std::byte* dest_ptr{};
-    hresult(upload_resource->Map(0, nullptr, reinterpret_cast<void**>(&dest_ptr)));
+    hresult(m_upload_resource->Map(0, nullptr, reinterpret_cast<void**>(&dest_ptr)));
     for (std::uint64_t y{ 0 }; y < static_cast<std::uint64_t>(m_pixmap->size_get().y); ++y) {
         for (std::uint64_t x{ 0 }; x < static_cast<std::uint64_t>(m_pixmap->size_get().x); ++x) {
             std::uint64_t offset{ footprint.Footprint.RowPitch * y + x };
             dest_ptr[offset] = (*m_pixmap)[x, y];
         }
     }
-    upload_resource->Unmap(0, nullptr);
+    m_upload_resource->Unmap(0, nullptr);
 
     D3D12_HEAP_PROPERTIES default_heap_properties{ create_default_heap_property() };
     hresult(device->CreateCommittedResource(&default_heap_properties, D3D12_HEAP_FLAG_NONE
     , &resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_resource)));
-    D3D12_TEXTURE_COPY_LOCATION src_location{ create_copy_location(upload_resource, footprint) };
+    D3D12_set_name(m_resource, m_name + ".m_resource");
+    D3D12_TEXTURE_COPY_LOCATION src_location{ create_copy_location(m_upload_resource, footprint) };
     D3D12_TEXTURE_COPY_LOCATION dest_location{ create_copy_location(m_resource, 0) };
     command_list->CopyTextureRegion(&dest_location, 0, 0, 0, &src_location, nullptr);
     D3D12_RESOURCE_BARRIER resource_barrier{};

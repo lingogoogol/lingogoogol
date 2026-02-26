@@ -31,6 +31,7 @@ public:
     state_t() = default;
     state_t(engine_t* engine, depth_tracker_t* depth_tracker);
     state_t(const state_t&) = delete;
+    auto init(engine_t* engine, depth_tracker_t* depth_tracker) -> void;
     auto operator=(const state_t&) = delete;
 
     auto get_engine() -> engine_t*;
@@ -56,6 +57,12 @@ public:
 
 state_t::state_t(engine_t* engine, depth_tracker_t* depth_tracker): m_engine{ engine }, m_depth_tracker{ depth_tracker } {}
 
+auto state_t::init(engine_t* engine, depth_tracker_t* depth_tracker) -> void {
+    m_engine = engine;
+    m_depth_tracker = depth_tracker;
+    return;
+}
+
 auto state_t::get_engine() -> engine_t* {
     return m_engine;
 }
@@ -70,20 +77,20 @@ auto state_t::get_focus() -> focus_t* {
 
 template<typename t_object, typename... t_arg>
 auto state_t::add_object(t_arg&&... arg) -> std::uint64_t {
-    m_current.m_object.emplace(m_current_id_object, std::make_shared<t_object>(m_engine, m_depth_tracker, std::forward<t_arg&&>(arg)...));
+    m_current.m_object.emplace(m_current_id_object, std::make_shared<t_object>(m_engine, m_depth_tracker, std::forward<t_arg>(arg)...));
     m_current.m_object[m_current_id_object]->show();
     return m_current_id_object++;
 }
 
 template<typename t_object, typename t_self, typename... t_arg>
 auto state_t::add_object_weak(this t_self&& self, t_arg&&... arg) -> std::weak_ptr<t_object> {
-    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg>(arg)...) };
     return self.get_object_weak<t_object>(id);
 }
 
 template<typename t_object, typename t_self, typename... t_arg>
 auto state_t::add_object_shared(this t_self&& self, t_arg&&... arg) -> std::shared_ptr<t_object> {
-    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg&&>(arg)...) };
+    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg>(arg)...) };
     return self.get_object_shared<t_object>(id);
 }
 

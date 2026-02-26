@@ -3,10 +3,16 @@
 
 #include "../../lib/header.hpp"
 
+auto D3D12_set_name(Microsoft::WRL::ComPtr<ID3D12Object> obj, std::string name) -> void;
 auto hresult(HRESULT result) -> void;
 //Include a check for the device removed error when responding to window size changes and after present.
 auto handle_device_removed(HRESULT result, Microsoft::WRL::ComPtr<ID3D12Device2> device) -> bool;
 auto log_blob(Microsoft::WRL::ComPtr<ID3DBlob> in) -> void;
+
+auto D3D12_set_name(Microsoft::WRL::ComPtr<ID3D12Object> obj, std::string name) -> void {
+    obj->SetPrivateData(WKPDID_D3DDebugObjectName, static_cast<UINT>(name.size()), name.data());
+    return;
+}
 
 auto hresult(HRESULT result) -> void {
     if (result == S_OK) {
