@@ -7,7 +7,7 @@
 #include "rect_border.hpp"
 #include "text.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../GUI_primitive/engine_def.hpp"
 
 class button_t: public GUI_object {

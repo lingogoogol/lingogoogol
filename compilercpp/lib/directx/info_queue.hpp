@@ -4,9 +4,9 @@
 #include <string>
 #include <cstddef>
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
-#include "../file.hpp"
+#include "../other/file.hpp"
 
 auto log_info_queue(Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue) -> void {
     for (UINT64 i{ 0 }; i < info_queue->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i) {

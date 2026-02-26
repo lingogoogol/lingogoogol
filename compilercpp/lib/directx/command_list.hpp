@@ -3,7 +3,7 @@
 
 #include <array>
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 auto push_transition_barrier(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list
 , Microsoft::WRL::ComPtr<ID3D12Resource> resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) -> void {

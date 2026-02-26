@@ -256,7 +256,7 @@
 				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
 				"cwd": "${cwd}",
 				"args": [
-					"source/temp/logfile.txt"
+					"source/temp/setting"
 				],
 				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
 				"requireExactSource": true,

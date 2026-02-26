@@ -1,7 +1,7 @@
 #ifndef COMPILERCPP_LIB_DIRECTX_INIT
 #define COMPILERCPP_LIB_DIRECTX_INIT
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 auto init_directx() -> void {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

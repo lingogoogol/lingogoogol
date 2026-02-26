@@ -6,11 +6,11 @@
 #include <string>
 #include <vector>
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 #include "engine_decl.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../directx/create.hpp"
 
 class rect_primitive_t {

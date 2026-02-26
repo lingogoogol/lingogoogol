@@ -4,7 +4,7 @@
 #include "rect_def.hpp"
 #include "engine_def.hpp"
 
-#include "../common.hpp"
+#include "../other/common.hpp"
 
 auto rect_primitive_t::upload_vertex_data() -> void {
     float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };

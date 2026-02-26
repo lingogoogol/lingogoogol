@@ -4,7 +4,7 @@
 #include "object.hpp"
 #include "rect.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 
 class rect_border_t: public GUI_object {
 private:

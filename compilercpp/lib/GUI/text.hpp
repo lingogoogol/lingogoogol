@@ -5,7 +5,7 @@
 
 #include "object.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../GUI_primitive/engine_def.hpp"
 #include "../GUI_primitive/text_impl.hpp"
 

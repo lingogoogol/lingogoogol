@@ -7,7 +7,7 @@
 
 #include "object.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../GUI_primitive/engine_def.hpp"
 
 class state_t {

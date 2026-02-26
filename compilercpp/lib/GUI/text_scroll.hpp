@@ -7,7 +7,7 @@
 #include "rect.hpp"
 #include "text.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../GUI_primitive/engine_decl.hpp"
 
 class text_scroll_t: public text_t {

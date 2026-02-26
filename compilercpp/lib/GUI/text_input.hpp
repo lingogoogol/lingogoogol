@@ -5,7 +5,7 @@
 
 #include "text_scroll.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../GUI_primitive/engine_decl.hpp"
 
 class text_input_t: public text_scroll_t {

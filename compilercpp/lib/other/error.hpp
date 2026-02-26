@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_ERROR
-#define COMPILERCPP_LIB_ERROR
+#ifndef COMPILERCPP_LIB_OTHER_ERROR
+#define COMPILERCPP_LIB_OTHER_ERROR
 
 #include <exception>
 #include <cstdint>

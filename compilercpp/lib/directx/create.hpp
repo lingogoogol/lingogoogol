@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <fstream>
 
-#include "../header.hpp"
-#include "../stu.hpp"
+#include "../other/header.hpp"
+#include "../other/stu.hpp"
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};

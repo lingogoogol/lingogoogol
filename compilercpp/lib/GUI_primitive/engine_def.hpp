@@ -8,13 +8,13 @@
 #include <functional>
 #include <cstdint>
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 #include "engine_decl.hpp"
 #include "rect_def.hpp"
 #include "text_def.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 #include "../directx/command_queue_smart.hpp"
 #include "../directx/command_list.hpp"
 #include "../directx/create.hpp"
@@ -341,6 +341,7 @@ auto engine_t::get_window_size() -> size_2D {
 auto engine_t::get_cursor_pos() -> pos_2D {
     POINT cursor_pos{};
     GetCursorPos(&cursor_pos);
+    ScreenToClient(m_window, &cursor_pos);
     return pos_2D{ cursor_pos.x, cursor_pos.y };
 }
 

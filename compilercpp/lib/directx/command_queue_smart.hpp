@@ -4,10 +4,10 @@
 #include <queue>
 #include <map>
 #include <utility>
-#include "../file.hpp"
+#include "../other/file.hpp"
 #include "info_queue.hpp"
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 class command_queue_smart {
 private:

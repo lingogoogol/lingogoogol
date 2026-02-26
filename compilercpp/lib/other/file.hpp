@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_FILE
-#define COMPILERCPP_LIB_FILE
+#ifndef COMPILERCPP_LIB_OTHER_FILE
+#define COMPILERCPP_LIB_OTHER_FILE
 
 #include "header.hpp"
 
@@ -8,7 +8,6 @@
 #include <string>
 
 constexpr inline std::ios_base::iostate file_exception_mask{ std::ios_base::badbit | std::ios_base::failbit | std::ios_base::eofbit };
-const std::string default_logfile_path{ "logfile.txt" };
 
 auto create_ofstream(const std::wstring& path, std::ios_base::openmode mode = std::ios_base::out | std::ios_base::binary | std::ios_base::trunc) -> std::ofstream {
     std::ofstream out{};
@@ -28,40 +27,47 @@ auto create_ifstream(const std::wstring& path, std::ios_base::openmode mode = st
     return out;
 }
 
+auto create_fstream(const std::wstring& path, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary) -> std::fstream {
+    std::fstream out{};
+    out.open(path, std::ios_base::out | std::ios_base::app);
+    out.close();
+    out.open(path, mode);
+    if (!out.fail()) {
+        out.exceptions(file_exception_mask);
+    }
+    return out;
+}
+
 auto get_logfile() -> std::ofstream& {
     static std::ofstream logfile{};
     return logfile;
 }
 
+auto get_logfile_string() -> std::string& {
+    static std::string logfile_string{};
+    return logfile_string;
+}
+
 auto log_file(const std::string& in) -> void {
-    for (std::size_t i{ 0 }; i < in.size(); ++i) {
-        get_logfile().put(in[i]);
+    if (get_logfile().is_open()) {
+        for (std::size_t i{ 0 }; i < in.size(); ++i) {
+            get_logfile().put(in[i]);
+        }
+    }
+    else {
+        get_logfile_string() += in;
     }
     return;
 }
 
-auto init_logfile(PWSTR arg) -> void {
-    int argc{};
-    LPWSTR* argv{ CommandLineToArgvW(arg, &argc) };
-    if (argc >= 1) {
-        get_logfile().open(argv[0]);
-    }
-    else {
-        get_logfile().open(default_logfile_path);
-    }
-    bool bad_filename{ false };
+auto init_logfile(const std::wstring& path) -> bool {
+    get_logfile().open(path);
     if (get_logfile().fail()) {
-        get_logfile().open(default_logfile_path);
-        bad_filename = true;
+        return false;
     }
     get_logfile().exceptions(file_exception_mask);
-    if (argc > 1) {
-        log_file("command_line_argument_count\n");
-    }
-    if (bad_filename) {
-        log_file("logfile_path\n");
-    }
-    return;
+    log_file(get_logfile_string());
+    return true;
 }
 
 auto log_console(const std::string& in) -> void {

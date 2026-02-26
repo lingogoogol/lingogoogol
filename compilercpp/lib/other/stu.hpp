@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_STU
-#define COMPILERCPP_LIB_STU
+#ifndef COMPILERCPP_LIB_OTHER_STU
+#define COMPILERCPP_LIB_OTHER_STU
 
 #include <cstdint>
 

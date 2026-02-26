@@ -5,11 +5,11 @@
 #include <string>
 #include <array>
 
-#include "../header.hpp"
+#include "../other/header.hpp"
 
 #include "engine_decl.hpp"
 
-#include "../stu.hpp"
+#include "../other/stu.hpp"
 
 class text_primitive_t {
 private:
