@@ -1,5 +1,5 @@
-#ifndef VERSION_H
-#define VERSION_H
+#ifndef LIBRARY_VERSION_H
+#define LIBRARY_VERSION_H
 
 #include <cstdint>
 #include <string>

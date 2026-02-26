@@ -9,7 +9,7 @@
 
 #include "surface_f.h"
 #include "cell_f.h"
-#include "debug_f.h"
+#include "lib.h"
 #include "data_f.h"
 #include "object_f.h"
 
@@ -83,8 +83,7 @@ private:
 };
 
 template<typename T1>
-unsigned int create_tex(T1* tex_data, GLenum format,
-	unsigned int width, unsigned int height, Data_pv* data) {
+unsigned int create_tex(T1* tex_data, GLenum format, unsigned int width, unsigned int height) {
 	unsigned int tex{};
 	glGenTextures(1, &tex);
 	glActiveTexture(GL_TEXTURE0);
@@ -100,7 +99,7 @@ unsigned int create_tex(T1* tex_data, GLenum format,
 	else if constexpr (std::is_same_v<T1, float>)
 		type = GL_FLOAT;
 	else
-		handle_error(U"未知的資料類型。", data);
+		handle_error(U"未知的資料類型。");
 	glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, type, tex_data);
 	glGenerateMipmap(GL_TEXTURE_2D);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

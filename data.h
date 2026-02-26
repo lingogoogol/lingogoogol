@@ -14,12 +14,9 @@
 #include FT_FREETYPE_H
 
 #include "const_f.h"
-#include "text.h"
-#include "holder.h"
-#include "button_f.h"
+#include "lib.h"
 #include "tile_f.h"
 #include "block_f.h"
-#include "graphic_f.h"
 
 enum class State {
     Home,

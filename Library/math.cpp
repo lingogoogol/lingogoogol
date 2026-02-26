@@ -2,8 +2,7 @@
 #include <time.h>
 #include <chrono>
 
-#include "math.h"
-#include "const_f.h"
+#include <Library/math.h>
 
 Plane::Plane(glm::vec3 point1, glm::vec3 point2, glm::vec3 point3) :
     coefficient{ (point2 - point1) * (point3 - point1) }, constant{ glm::dot(coefficient, point1) } {
@@ -25,7 +24,7 @@ std::string to_string8(float f, int precision) {
     if (f < 0)
         s8.push_back('-');
     while (digit >= 0) {
-        int div{ static_cast<int>(std::trunc(f / std::pow(10, digit)))};
+        int div{ static_cast<int>(std::trunc(f / std::pow(10, digit))) };
         f -= static_cast<float>(std::pow(10, digit)) * div;
         s8 += std::to_string(std::abs(div));
         digit--;
@@ -109,31 +108,6 @@ std::u32string to_string32(std::string s8) {
 
 glm::vec3 Line::foot_of_perpendicular(glm::vec3 point) {
     return origin + dir * glm::dot(point - origin, dir) / glm::dot(dir, dir);
-}
-
-glm::vec3 to_cell_side(glm::vec3 begin, glm::vec3 dir) {
-    glm::vec3 coefficient{};
-    for (int i{ 0 }; i < 3; i++)
-        coefficient[i] = dir[i] == 0 ? std::numeric_limits<float>::infinity() :
-        (((dir[i] > 0 ? std::floor(begin[i] + 1) : std::ceil(begin[i] - 1)) - begin[i]) / dir[i]);
-    float dist_to_cell_side{ std::min(coefficient.x, std::min(coefficient.y, coefficient.z)) };
-    for (int i{ 0 }; i < 3; i++)
-        begin[i] = coefficient[i] == dist_to_cell_side ? (dir[i] > 0 ? std::floor(begin[i] + 1) :
-            std::ceil(begin[i] - 1)) : (begin[i] + dir[i] * dist_to_cell_side);
-    return begin;
-};
-
-glm::ivec3 to_block(glm::ivec3 coord) {
-    for (int i{ 0 }; i < 3; i++)
-        coord[i] = coord[i] / constant::cell_num - (coord[i] >= 0 ? 0 :
-            (coord[i] % constant::cell_num == 0 ? 0 : 1));
-    return coord;
-}
-
-glm::ivec3 to_coord_in_block(glm::ivec3 coord) {
-    for (int i{ 0 }; i < 3; i++)
-        coord[i] = coord[i] % constant::cell_num + (coord[i] >= 0 ? 0 : 1);
-    return coord;
 }
 
 std::string get_time() {

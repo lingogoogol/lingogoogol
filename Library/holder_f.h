@@ -1,5 +1,5 @@
-#ifndef HOLDER_F_H
-#define HOLDER_F_H
+#ifndef LIBRARY_HOLDER_F_H
+#define LIBRARY_HOLDER_F_H
 
 template<typename T1>
 class Copy_holder;

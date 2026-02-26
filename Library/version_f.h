@@ -1,5 +1,5 @@
-#ifndef VERSION_F_H
-#define VERSION_F_H
+#ifndef LIBRARY_VERSION_F_H
+#define LIBRARY_VERSION_F_H
 
 #include <fstream>
 

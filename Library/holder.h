@@ -1,5 +1,5 @@
-#ifndef HOLDER_H
-#define HOLDER_H
+#ifndef LIBRARY_HOLDER_H
+#define LIBRARY_HOLDER_H
 
 #include <map>
 #include <functional>
@@ -11,7 +11,7 @@ template<typename T1>
 class Copy_holder<T1*> {
 public:
 	template<typename U1>
-	Copy_holder(U1* value_param, std::function<void(U1*)> destructor_param, Data_pv* data);
+	Copy_holder(U1* value_param, std::function<void(U1*)> destructor_param);
 	Copy_holder(const Copy_holder<T1*>& holder);
 	~Copy_holder();
 	Copy_holder<T1*>& operator=(const Copy_holder<T1*>& holder);
@@ -31,17 +31,17 @@ template<typename T1>
 std::map<unsigned int, unsigned int> Copy_holder<T1*>::copy_count{};
 
 template<typename U1>
-Copy_holder(U1*, std::function<void(U1*)>, Data_pv*)->Copy_holder<U1*>;
+Copy_holder(U1*, std::function<void(U1*)>)->Copy_holder<U1*>;
 
 template<typename T1>
 template<typename U1>
-Copy_holder<T1*>::Copy_holder(U1* value_param, std::function<void(U1*)> destructor_param, Data_pv* data) :
+Copy_holder<T1*>::Copy_holder(U1* value_param, std::function<void(U1*)> destructor_param) :
 	value{ value_param }, destructor{ destructor_param } {
 	unsigned int first_ID_to_use{ ID_to_use };
 	while (copy_count.count(ID_to_use) == 1) {
 		ID_to_use++;
 		if (ID_to_use == first_ID_to_use)
-			handle_error(U"Copy_holder：太多物件，ID不夠用。", data);
+			handle_error(U"Copy_holder：太多物件，ID不夠用。");
 	}
 	copy_count.insert(std::pair<unsigned int, unsigned int>(first_ID_to_use, 1));
 	ID = ID_to_use;

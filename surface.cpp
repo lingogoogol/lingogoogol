@@ -7,7 +7,7 @@
 
 #include "data_f.h"
 #include "surface.h"
-#include "debug_f.h"
+#include "lib.h"
 #include "cell.h"
 
 Surface_pv::Surface_pv(std::array<glm::vec3, 3> vertices_param,
@@ -87,7 +87,7 @@ Cell_surface_pv::Cell_surface_pv(std::array<glm::vec3, 3> vertices_param, std::a
 	Surface_pv{ vertices_param,texcoords_param,data_param }, parent_cell{ parent_cell_param } {
 	included_cell = get_included_cell(vertices_param, data);
 	if (!included_cell) {
-		handle_error(U"表面存在世界外，無法儲存其位置。", data);
+		handle_error(U"表面存在世界外，無法儲存其位置。");
 		return;
 	}
 	included_cell->add_include_surface(this);
@@ -130,7 +130,6 @@ void Cell_surface_pv::render() {
 	glBindVertexArray(VAO);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	glBindVertexArray(0);
-	check_GL_error(data);
 	return;
 }
 
@@ -161,7 +160,7 @@ void Stone_surface::gen_normal() {
 		0.0f,0.0f,1.0f,0.0f,0.0f,1.0f,
 	};
 	normal = create_tex(tex_data, GL_RGB,
-		constant::surface_tex_precision, constant::surface_tex_precision, data);
+		constant::surface_tex_precision, constant::surface_tex_precision);
 }
 
 void Stone_surface::gen_color() {
@@ -170,7 +169,7 @@ void Stone_surface::gen_color() {
 		255,255,0,255,0,255,255,255
 	};
 	color = create_tex(tex_data, GL_RGBA,
-		constant::surface_tex_precision, constant::surface_tex_precision, data);
+		constant::surface_tex_precision, constant::surface_tex_precision);
 	return;
 }
 
@@ -180,7 +179,7 @@ void Stone_surface::gen_shininess() {
 		32.0f,32.0f
 	};
 	shininess = create_tex(tex_data, GL_RED,
-		constant::surface_tex_precision, constant::surface_tex_precision, data);
+		constant::surface_tex_precision, constant::surface_tex_precision);
 }
 
 void Stone_surface::gen_specular_strength() {
@@ -189,7 +188,7 @@ void Stone_surface::gen_specular_strength() {
 		0.5f,0.5f
 	};
 	specular_strength = create_tex(tex_data, GL_RED,
-		constant::surface_tex_precision, constant::surface_tex_precision, data);
+		constant::surface_tex_precision, constant::surface_tex_precision);
 }
 
 Cell_pv* get_included_cell(const std::array<glm::vec3, 3>& vertices, World_data* data) {

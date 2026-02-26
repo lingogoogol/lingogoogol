@@ -5,10 +5,10 @@
 
 #include <glm/glm.hpp>
 
-#include "version.h"
+#include "lib.h"
 
 namespace constant {
-    inline const Version current_version{ 0,0,0,1,2 };
+    inline const Version current_version{ 0,0,0,1,3 };
     inline const Version last_necessary_version{ 0,0,0,0,1 };
     inline constexpr int OpenGL_version_major{ 4 };
     inline constexpr int OpenGL_version_minor{ 6 };
@@ -18,7 +18,6 @@ namespace constant {
     inline constexpr int message_window_height{ 300 };
     inline const float message_text_height{ 50.0f };
     inline const glm::vec3 message_text_color{ 0.0f,0.0f,0.0f };
-    inline constexpr int error_message_max_size{ 1024 };
     inline constexpr int surface_tex_precision{ 2 };
     inline constexpr int tile_num{ 1 };
     inline constexpr int cell_num{ 16 };
@@ -26,30 +25,6 @@ namespace constant {
     inline const float pi_floor{ 3.141f };
     inline const float pi_ceil{ 3.142f };
     inline const std::string GLSL_version{ "460" };
-    inline const std::string text_vertex_shader{
-        "#version " + GLSL_version + " core\n"
-        "layout (location = 0) in vec3 vertex;\n"
-        "layout (location = 1) in vec2 texcoord;\n"
-        "out vec2 texcoord_frag;\n"
-        "uniform mat4 transform_mat;\n"
-        "void main() {\n"
-        "    gl_Position = transform_mat * vec4(vertex, 1.0);\n"
-        "    texcoord_frag = texcoord;\n"
-        "}\n"
-    };
-    inline const std::string text_fragment_shader{
-        "#version " + GLSL_version + " core\n"
-        "in vec2 texcoord_frag;\n"
-        "out vec4 color_out;\n"
-        "uniform vec3 color;\n"
-        "uniform sampler2D tex;\n"
-        "void main() {\n"
-        "    float alpha = texture(tex, texcoord_frag).r;\n"
-        "    if(alpha == 0.0)\n"
-        "        discard;\n"
-        "    color_out = vec4(color, 1.0);\n"
-        "}\n"
-    };
     inline const std::string button_vertex_shader{
         "#version " + GLSL_version + " core\n"
         "layout (location = 0) in vec3 pos;\n"

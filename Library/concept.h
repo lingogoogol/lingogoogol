@@ -1,7 +1,5 @@
-#ifndef CONCEPT_H
-#define CONCEPT_H
-
-#include "concept_f.h"
+#ifndef LIBRARY_CONCEPT_H
+#define LIBRARY_CONCEPT_H
 
 template<typename T1, typename... T2>
 concept initializable = requires (T2... a) {

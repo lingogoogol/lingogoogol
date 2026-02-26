@@ -5,7 +5,7 @@
 #include "cell.h"
 #include "math.h"
 #include "block.h"
-#include "holder.h"
+#include "lib.h"
 #include "surface.h"
 #include "data_f.h"
 
@@ -173,7 +173,7 @@ void Cell_pv::update_surface(World_data* data) {
 				size() : i) - static_cast<std::size_t>(1)].first), static_cast<glm::vec3>(pos) };
 			Cell_pv* included_cell{ get_included_cell(triangle, data) };
 			if (!included_cell) {
-				handle_error(U"無法存取同一單元的表面，因為該單元不在已讀取區塊的範圍內。", data);
+				handle_error(U"無法存取同一單元的表面，因為該單元不在已讀取區塊的範圍內。");
 				return;
 			}
 			bool to_push{ true };
@@ -272,7 +272,7 @@ void Cell_pv::remove_include_surface(Surface_pv* surface, World_data* data) {
 			include_surfaces.erase(i);
 			return;
 		}
-	handle_error(U"移除包含的表面時在該單元找不到。", data);
+	handle_error(U"移除包含的表面時在該單元找不到。");
 	return;
 }
 
@@ -334,4 +334,29 @@ Cell_pv* get_cell(glm::ivec3 pos, World_data* data) {
 	else
 		return (*data->blocks[index_y][index_x][index_z])->get_child_cells()
 		[coord_in_block.y][coord_in_block.x][coord_in_block.z];
+}
+
+glm::vec3 to_cell_side(glm::vec3 begin, glm::vec3 dir) {
+	glm::vec3 coefficient{};
+	for (int i{ 0 }; i < 3; i++)
+		coefficient[i] = dir[i] == 0 ? std::numeric_limits<float>::infinity() :
+		(((dir[i] > 0 ? std::floor(begin[i] + 1) : std::ceil(begin[i] - 1)) - begin[i]) / dir[i]);
+	float dist_to_cell_side{ std::min(coefficient.x, std::min(coefficient.y, coefficient.z)) };
+	for (int i{ 0 }; i < 3; i++)
+		begin[i] = coefficient[i] == dist_to_cell_side ? (dir[i] > 0 ? std::floor(begin[i] + 1) :
+			std::ceil(begin[i] - 1)) : (begin[i] + dir[i] * dist_to_cell_side);
+	return begin;
+};
+
+glm::ivec3 to_block(glm::ivec3 coord) {
+	for (int i{ 0 }; i < 3; i++)
+		coord[i] = coord[i] / constant::cell_num - (coord[i] >= 0 ? 0 :
+			(coord[i] % constant::cell_num == 0 ? 0 : 1));
+	return coord;
+}
+
+glm::ivec3 to_coord_in_block(glm::ivec3 coord) {
+	for (int i{ 0 }; i < 3; i++)
+		coord[i] = coord[i] % constant::cell_num + (coord[i] >= 0 ? 0 : 1);
+	return coord;
 }

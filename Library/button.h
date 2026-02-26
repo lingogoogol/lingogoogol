@@ -1,5 +1,5 @@
-#ifndef LIBRARY_H
-#define LIBRARY_H
+#ifndef LIBRARY_BUTTON_H
+#define LIBRARY_BUTTON_H
 
 #include <cstdint>
 #include <fstream>
@@ -13,10 +13,7 @@
 #include <glm/glm.hpp>
 
 #include "button_f.h"
-#include "surface.h"
-#include "debug_f.h"
 #include "math.h"
-#include "data_f.h"
 
 enum class Button_state {
 	Normal,
@@ -30,15 +27,14 @@ public:
 	glm::vec3 normal_color{};
 	glm::vec3 hovered_color{};
 	glm::vec3 clicked_color{};
-	State state{};
 	std::function<void()> func{};
 	Button(float width_param, float height_param, glm::mat4 transform_mat_param,
 		glm::vec3 normal_color_param, glm::vec3 hovered_color_param, glm::vec3 clicked_color_param,
-		State state_param, std::function<void(void)> func_param = []() {});
+		std::function<void(void)> func_param);
 	void set_pos(glm::vec3 pos_param);
-	void render(Data_pv* data);
-	bool update_state_hover(float x, float y, Data_pv* data);
-	bool update_state_click(int action, Data_pv* data);
+	void render(unsigned int shader);
+	bool update_state_hover(float x, float y, GLFWwindow* window);
+	bool update_state_click(int action);
 private:
 	glm::vec3 pos{ 0.0f,0.0f,0.0f };
 	Alignment horizontal_alignment{ Alignment::Middle };
