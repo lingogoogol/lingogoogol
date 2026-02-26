@@ -131,7 +131,8 @@
 			"queue": "cpp",
 			"deque": "cpp",
 			"ranges": "cpp",
-			"span": "cpp"
+			"span": "cpp",
+			"set": "cpp"
 		},
 		"terminal.integrated.cwd": "../../"
 	},

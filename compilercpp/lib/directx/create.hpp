@@ -3,13 +3,11 @@
 
 #include <string>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <fstream>
 
-#include "../header/Windows.h"
-#include "../header/wrl_client.h"
-#include "../header/d3d12.h"
-#include "../header/dxgi1_6.h"
+#include "../header.hpp"
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};
@@ -147,6 +145,26 @@ auto create_shader_bytecode(std::string path, std::string& code) -> D3D12_SHADER
     D3D12_SHADER_BYTECODE out{};
     out.pShaderBytecode = code.data();
     out.BytecodeLength = code.size();
+    return out;
+}
+
+auto create_upload_heap_property() -> D3D12_HEAP_PROPERTIES {
+    D3D12_HEAP_PROPERTIES out{};
+    out.Type = D3D12_HEAP_TYPE_UPLOAD;
+    out.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    out.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    out.CreationNodeMask = 0;
+    out.VisibleNodeMask = 0;
+    return out;
+}
+
+auto create_default_heap_property() -> D3D12_HEAP_PROPERTIES {
+    D3D12_HEAP_PROPERTIES out{};
+    out.Type = D3D12_HEAP_TYPE_DEFAULT;
+    out.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    out.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    out.CreationNodeMask = 0;
+    out.VisibleNodeMask = 0;
     return out;
 }
 

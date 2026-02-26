@@ -7,10 +7,7 @@
 #include "../file.hpp"
 #include "info_queue.hpp"
 
-#include "../header/Windows.h"
-#include "../header/wrl_client.h"
-#include "../header/d3d12.h"
-#include "../header/dxgi1_6.h"
+#include "../header.hpp"
 
 class command_queue_smart {
 private:

@@ -1,9 +1,7 @@
 #ifndef COMPILERCPP_LIB_FILE
 #define COMPILERCPP_LIB_FILE
 
-#include "header/Windows.h"
-#include "header/wrl_client.h"
-#include "header/d3d12.h"
+#include "header.hpp"
 
 #include <iostream>
 #include <fstream>

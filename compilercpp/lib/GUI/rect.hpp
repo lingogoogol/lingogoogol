@@ -1,9 +1,12 @@
 #ifndef COMPILERCPP_LIB_GUI_RECT
 #define COMPILERCPP_LIB_GUI_RECT
 
+#include <array>
+#include <cstring>
+
 #include "stu.hpp"
 
-class rect {
+class rect_t {
 private:
     struct vertex_data {
         DirectX::XMFLOAT4 pos{};
@@ -57,13 +60,16 @@ public:
         pipeline_state_description.RasterizerState.AntialiasedLineEnable = false;
         pipeline_state_description.RasterizerState.ForcedSampleCount = 0;
         pipeline_state_description.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-        pipeline_state_description.DepthStencilState.DepthEnable = false;
+        pipeline_state_description.DepthStencilState.DepthEnable = true;
+        pipeline_state_description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        pipeline_state_description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
         pipeline_state_description.DepthStencilState.StencilEnable = false;
         pipeline_state_description.InputLayout.pInputElementDescs = input_element.data();
         pipeline_state_description.InputLayout.NumElements = input_element.size();
         pipeline_state_description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pipeline_state_description.NumRenderTargets = 1;
         pipeline_state_description.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        pipeline_state_description.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         pipeline_state_description.SampleDesc.Count = 1;
         pipeline_state_description.SampleDesc.Quality = 0;
         pipeline_state_description.NodeMask = 0;
@@ -84,27 +90,22 @@ public:
         return;
     }
 
-    rect() {}
+    rect_t() {}
 
-    rect(pos_2D pos, size_2D size) {
+    rect_t(pos_2D pos, size_2D size, color_t color, float depth) {
         float pos_x{ static_cast<float>(pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };
         float pos_y{ 1.0f - static_cast<float>(pos.y) / static_cast<float>(m_window_size.y) * 2.0f };
         float size_x{ static_cast<float>(size.x) / static_cast<float>(m_window_size.x) * 2.0f };
         float size_y{ static_cast<float>(size.y) / static_cast<float>(m_window_size.y) * 2.0f };
         std::array vertex{
-            vertex_data{ { pos_x, pos_y, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-            vertex_data{ { pos_x + size_x, pos_y, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-            vertex_data{ { pos_x, pos_y + size_y, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
-            vertex_data{ { pos_x + size_x, pos_y + size_y, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } }
+            vertex_data{ { pos_x, pos_y, depth, 1.0f }, { color.R, color.G, color.B, 1.0f } },
+            vertex_data{ { pos_x + size_x, pos_y, depth, 1.0f }, { color.R, color.G, color.B, 1.0f } },
+            vertex_data{ { pos_x, pos_y - size_y, depth, 1.0f }, { color.R, color.G, color.B, 1.0f } },
+            vertex_data{ { pos_x + size_x, pos_y - size_y, depth, 1.0f }, { color.R, color.G, color.B, 1.0f } }
         };
         const UINT64 vertex_size{ vertex.size() * sizeof(vertex_data) };
 
-        D3D12_HEAP_PROPERTIES upload_heap_property{};
-        upload_heap_property.Type = D3D12_HEAP_TYPE_UPLOAD;
-        upload_heap_property.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        upload_heap_property.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-        upload_heap_property.CreationNodeMask = 0;
-        upload_heap_property.VisibleNodeMask = 0;
+        auto upload_heap_property{ create_upload_heap_property() };
         D3D12_RESOURCE_DESC upload_resource_description{};
         upload_resource_description.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
         upload_resource_description.Alignment = 0;
@@ -138,9 +139,9 @@ public:
     }
 };
 
-Microsoft::WRL::ComPtr<ID3D12Device2> rect::m_device{};
-Microsoft::WRL::ComPtr<ID3D12RootSignature> rect::m_root_signature{};
-Microsoft::WRL::ComPtr<ID3D12PipelineState> rect::m_pipeline_state{};
-size_2D rect::m_window_size{};
+Microsoft::WRL::ComPtr<ID3D12Device2> rect_t::m_device{};
+Microsoft::WRL::ComPtr<ID3D12RootSignature> rect_t::m_root_signature{};
+Microsoft::WRL::ComPtr<ID3D12PipelineState> rect_t::m_pipeline_state{};
+size_2D rect_t::m_window_size{};
 
 #endif

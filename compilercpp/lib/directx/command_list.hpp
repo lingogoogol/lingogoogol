@@ -3,9 +3,7 @@
 
 #include <array>
 
-#include "../header/Windows.h"
-#include "../header/wrl_client.h"
-#include "../header/d3d12.h"
+#include "../header.hpp"
 
 auto push_transition_barrier(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list
 , Microsoft::WRL::ComPtr<ID3D12Resource> resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) -> void {

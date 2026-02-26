@@ -2,11 +2,9 @@
 #define COMPILERCPP_LIB_GUI_ENGINE
 
 #include <vector>
+#include <set>
 
-#include "../header/wrl_client.h"
-#include "../header/Windows.h"
-#include "../header/d3d12.h"
-#include "../header/dxgi1_6.h"
+#include "../header.hpp"
 
 #include "stu.hpp"
 #include "rect.hpp"
@@ -19,8 +17,8 @@
 
 constexpr inline UINT buffer_count{ 0x2 };
 
-class engine {
-public:
+class engine_t {
+private:
     HWND m_window{};
     size_2D m_window_size{};
     bool m_initialized{ false };
@@ -28,16 +26,18 @@ public:
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_info_queue{};
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swap_chain{};
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_RT{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_DS{};
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_DSV_heap{};
     command_queue_smart m_command_queue{};
     std::vector<UINT64> m_buffer_fence_value{};
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_RTV_heap{};
     UINT m_RTV_size{};
     UINT m_frame_index{};
-    std::vector<rect> m_rect{};
-    std::vector<text> m_text{};
+    std::set<rect_t*> m_rect{};
+    std::set<text_t*> m_text{};
 
     static auto CALLBACK window_proc(HWND window, UINT message, WPARAM param_1, LPARAM param_2) -> LRESULT {
-        engine* ptr{ reinterpret_cast<engine*>(GetWindowLongPtrW(window, GWLP_USERDATA)) };
+        engine_t* ptr{ reinterpret_cast<engine_t*>(GetWindowLongPtrW(window, GWLP_USERDATA)) };
         if (!ptr || !ptr->m_initialized) {
             return DefWindowProcW(window, message, param_1, param_2);
         }
@@ -51,6 +51,8 @@ public:
             D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle{ create_V_handle(ptr->m_RTV_heap->GetCPUDescriptorHandleForHeapStart()
             , ptr->m_RTV_size, ptr->m_frame_index) };
             clear_RT(command_list, RTV_handle, { 0.0f, 0.0f, 0.0f, 1.0f });
+            D3D12_CPU_DESCRIPTOR_HANDLE DSV_handle{ ptr->m_DSV_heap->GetCPUDescriptorHandleForHeapStart() };
+            command_list->ClearDepthStencilView(DSV_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
             D3D12_VIEWPORT viewport{};
             viewport.TopLeftX = 0;
             viewport.TopLeftY = 0;
@@ -65,18 +67,18 @@ public:
             scissor_rect.right = ptr->m_window_size.x;
             scissor_rect.bottom = ptr->m_window_size.y;
             command_list->RSSetScissorRects(1, &scissor_rect);
-            command_list->OMSetRenderTargets(1, &RTV_handle, false, nullptr);
-            rect::render_begin(command_list);
-            for (std::size_t i{ 0 }; i < ptr->m_rect.size(); ++i) {
-                ptr->m_rect[i].render(command_list);
+            command_list->OMSetRenderTargets(1, &RTV_handle, false, &DSV_handle);
+            rect_t::render_begin(command_list);
+            for (auto i{ ptr->m_rect.begin() }; i != ptr->m_rect.end(); ++i) {
+                (*i)->render(command_list);
             }
-            rect::render_end();
+            rect_t::render_end();
             ptr->m_command_queue.execute_list(command_list);
-            text::render_begin(ptr->m_frame_index);
-            for (std::size_t i{ 0 }; i < ptr->m_text.size(); ++i) {
-                ptr->m_text[i].render();
+            text_t::render_begin(ptr->m_frame_index);
+            for (auto i{ ptr->m_text.begin() }; i != ptr->m_text.end(); ++i) {
+                (*i)->render();
             }
-            text::render_end(ptr->m_frame_index);
+            text_t::render_end(ptr->m_frame_index);
 
             ptr->m_buffer_fence_value[ptr->m_frame_index] = ptr->m_command_queue.set_fence();
             ptr->m_swap_chain->Present(0, ptr->m_tearing_supported ? DXGI_PRESENT_ALLOW_TEARING : 0);
@@ -100,7 +102,7 @@ public:
         return;
     }
 public:
-    engine(HINSTANCE instance, size_2D window_size): m_window_size{ window_size } {
+    engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ window_size } {
         Microsoft::WRL::ComPtr<IDXGIFactory5> factory{ create_factory(true) };
         m_tearing_supported = check_tearing_support(factory);
         ATOM window_class{ create_window_class(L"window_class", &window_proc, instance
@@ -119,8 +121,33 @@ public:
         m_RTV_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         m_RT = create_RT(m_swap_chain, buffer_count);
         create_RTV(device, m_RT, m_RTV_size, m_RTV_heap);
-        text::init(device, m_command_queue.get(), m_window, m_RT);
-        rect::init(device, m_window_size);
+        auto heap_property{ create_default_heap_property() };
+        D3D12_RESOURCE_DESC DS_resource_description{};
+        DS_resource_description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        DS_resource_description.Alignment = 0;
+        DS_resource_description.Width = window_size.x;
+        DS_resource_description.Height = window_size.y;
+        DS_resource_description.DepthOrArraySize = 1;
+        DS_resource_description.MipLevels = 1;
+        DS_resource_description.Format = DXGI_FORMAT_D32_FLOAT;
+        DS_resource_description.SampleDesc.Count = 1;
+        DS_resource_description.SampleDesc.Quality = 0;
+        DS_resource_description.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        DS_resource_description.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+        D3D12_CLEAR_VALUE DS_clear_value{};
+        DS_clear_value.Format = DXGI_FORMAT_D32_FLOAT;
+        DS_clear_value.DepthStencil.Depth = 1.0f;
+        device->CreateCommittedResource(&heap_property, D3D12_HEAP_FLAG_NONE, &DS_resource_description
+        , D3D12_RESOURCE_STATE_DEPTH_WRITE, &DS_clear_value, IID_PPV_ARGS(&m_DS));
+        m_DSV_heap = create_V_heap(device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
+        D3D12_DEPTH_STENCIL_VIEW_DESC DSV_description{};
+        DSV_description.Format = DXGI_FORMAT_D32_FLOAT;
+        DSV_description.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        DSV_description.Flags = D3D12_DSV_FLAG_NONE;
+        DSV_description.Texture2D.MipSlice = 0;
+        device->CreateDepthStencilView(m_DS.Get(), &DSV_description, m_DSV_heap->GetCPUDescriptorHandleForHeapStart());
+        text_t::init(device, m_command_queue.get(), m_window, m_RT);
+        rect_t::init(device, m_window_size);
         m_frame_index = m_swap_chain->GetCurrentBackBufferIndex();
         m_buffer_fence_value.resize(buffer_count);
         m_initialized = true;
@@ -134,19 +161,44 @@ public:
         return;
     }
 
-    auto add_rect(const rect& in) -> void {
-        m_rect.push_back(in);
+    auto add_rect(const rect_t& in) -> rect_t* {
+        rect_t* out{ new rect_t{ in } };
+        m_rect.emplace(out);
+        redraw();
+        return out;
+    }
+
+    auto add_text(const text_t& in) -> text_t* {
+        text_t* out{ new text_t{ in } };
+        m_text.emplace(out);
+        redraw();
+        return out;
+    }
+
+    auto remove_rect(rect_t* in) -> void {
+        m_rect.erase(in);
+        m_command_queue.flush();
+        delete in;
         redraw();
         return;
     }
 
-    auto add_text(const text& in) -> void {
-        m_text.push_back(in);
+    auto remove_text(text_t* in) -> void {
+        m_text.erase(in);
+        m_command_queue.flush();
+        delete in;
         redraw();
         return;
     }
 
-    ~engine() {
+    ~engine_t() {
+        m_command_queue.flush();
+        for (auto i{ m_rect.begin() }; i != m_rect.end(); ++i) {
+            delete *i;
+        }
+        for (auto i{ m_text.begin() }; i != m_text.end(); ++i) {
+            delete *i;
+        }
         log_info_queue(m_info_queue);
         return;
     }

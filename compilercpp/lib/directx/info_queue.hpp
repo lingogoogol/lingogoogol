@@ -4,9 +4,7 @@
 #include <string>
 #include <cstddef>
 
-#include "../header/wrl_client.h"
-#include "../header/d3d12.h"
-#include "../header/Windows.h"
+#include "../header.hpp"
 
 #include "../file.hpp"
 

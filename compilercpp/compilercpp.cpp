@@ -2,24 +2,12 @@
 #include <fstream>
 #include <cstdint>
 #include <string>
-#include <array>
 #include <vector>
-#include <cstring>
+#include <functional>
 
 #define UNICODE
 
-#include "lib/header/Windows.h"
-#include "lib/header/wrl_client.h"
-#include "lib/header/d3d12.h"
-#include "lib/header/d3d12shader.h"
-#include "lib/header/DirectXMath.h"
-#include "lib/header/dxgi1_6.h"
-#include "lib/header/shellapi.h"
-#include "lib/header/d3d11on12.h"
-#include "lib/header/d2d1_3.h"
-#include "lib/header/dwrite_3.h"
-
-Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue{};
+#include "lib/header.hpp"
 
 #include "lib/.hpp"
 #include "out/.hpp"
@@ -108,7 +96,40 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
     return;
 }
 
-const inline std::wstring window_name{ L"compiler" };
+auto input() -> std::string {
+    std::string out{};
+    return out;
+}
+
+class button_t {
+private:
+    engine_t* m_engine{};
+    rect_t* m_outer_rect{};
+    rect_t* m_inner_rect{};
+    text_t* m_text{};
+    std::function<void(void)> m_callback{};
+public:
+    button_t() {}
+
+    button_t(engine_t* engine, pos_2D pos, size_2D size, std::uint64_t border_size
+    , std::wstring display_text, depth_range_t depth_range, std::function<void(void)> callback)
+    : m_engine{ engine }, m_callback{ callback } {
+        float depth_distance{ (depth_range.far - depth_range.near) / 2 };
+        m_outer_rect = m_engine->add_rect(rect_t{ pos, size, color_t{ 1.0f, 1.0f, 1.0f }, depth_range.far - depth_distance });
+        pos_2D inner_pos{ pos.x + border_size, pos.y + border_size };
+        size_2D inner_size{ size.x - border_size * 2, size.y - border_size * 2 };
+        m_inner_rect = m_engine->add_rect(rect_t{ inner_pos, inner_size, color_t{ 0.0f, 0.0f, 0.0f }, depth_range.far - depth_distance * 2 });
+        m_text = m_engine->add_text(text_t{ display_text, inner_pos, inner_size, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::center, alignment_y::center } });
+        return;
+    }
+
+    ~button_t() {
+        m_engine->remove_text(m_text);
+        m_engine->remove_rect(m_inner_rect);
+        m_engine->remove_rect(m_outer_rect);
+        return;
+    }
+};
 
 auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     int argc{};
@@ -119,9 +140,8 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
 
     init_logfile(argv[2]);
     init_directx();
-    engine window{ instance, size_2D{ 0x400, 0x400 } };
-    window.add_rect(rect{ pos_2D{ 0x300, 0x300 }, size_2D{ 0x40, 0x40 } });
-    window.add_text(text{ L"compilercpp你好", pos_2D{ 0x0, 0x0 }, size_2D{ 0x200, 0x200 }, color{ 1.0f, 1.0f, 1.0f } });
+    engine_t engine{ instance, size_2D{ 0x400, 0x400 } };
+    button_t button{ &engine, pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, 0x4, L"按鈕", depth_range_t{ 0.0f, 1.0f }, [] () {} };
     MSG message{};
     BOOL message_get_result{};
     while ((message_get_result = GetMessageW(&message, NULL, 0, 0))) {
@@ -131,7 +151,6 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
         }
         DispatchMessageW(&message);
     }
-    window.m_command_queue.flush();
 
     std::ifstream source{ create_ifstream(argv[0], std::ios_base::in | std::ios_base::binary) };
     std::ofstream exe{ create_ofstream(argv[1], std::ios_base::out
