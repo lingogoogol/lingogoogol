@@ -95,8 +95,6 @@ auto rect_primitive_t::render_end() -> void {
     return;
 }
 
-rect_primitive_t::rect_primitive_t() {}
-
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color)
 : m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_color{ color } {
     auto upload_heap_property{ create_upload_heap_property() };

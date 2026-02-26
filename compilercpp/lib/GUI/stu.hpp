@@ -11,6 +11,10 @@ struct depth_range_t {
     float near{}, far{};
 };
 
+struct size_1D {
+    std::uint64_t x{};
+};
+
 struct size_2D {
     std::uint64_t x{}, y{};
 };

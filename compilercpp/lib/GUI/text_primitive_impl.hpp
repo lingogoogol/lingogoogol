@@ -35,38 +35,6 @@ auto text_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device_D3D12, 
     font_set_builder->CreateFontSet(&font_set);
     Microsoft::WRL::ComPtr<IDWriteFontCollection1> font_collection{};
     m_factory_DWrite->CreateFontCollectionFromFontSet(font_set.Get(), &font_collection);
-    for (std::size_t i{ 0 }; i < format_count; ++i) {
-        m_factory_DWrite->CreateTextFormat(L"Noto Sans TC", font_collection.Get()
-        , DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 0x10, L"", &m_format[i]);
-        switch (static_cast<alignment_x>(i % static_cast<std::size_t>(alignment_x::count))) {
-        case alignment_x::left: {
-            m_format[i]->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            break;
-        }
-        case alignment_x::center: {
-            m_format[i]->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            break;
-        }
-        case alignment_x::right: {
-            m_format[i]->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            break;
-        }
-        }
-        switch (static_cast<alignment_y>(i / static_cast<std::size_t>(alignment_y::count))) {
-        case alignment_y::top: {
-            m_format[i]->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-            break;
-        }
-        case alignment_y::center: {
-            m_format[i]->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            break;
-        }
-        case alignment_y::bottom: {
-            m_format[i]->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
-            break;
-        }
-        }
-    }
     
     m_RT_D3D11.resize(RT.size());
     for (std::size_t i{ 0 }; i < RT.size(); ++i) {
@@ -108,13 +76,40 @@ auto text_primitive_t::render_end(std::size_t frame_index) -> void {
     return;
 }
 
-text_primitive_t::text_primitive_t() {}
-
-text_primitive_t::text_primitive_t(engine_t* engine, std::wstring text, pos_2D pos, size_2D size, color_t color, alignment_2D alignment)
+text_primitive_t::text_primitive_t(engine_t* engine, std::wstring text, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment)
 : m_engine{ engine }, m_text{ text }, m_pos{ static_cast<float>(pos.x), static_cast<float>(pos.y) } {
-    m_factory_DWrite->CreateTextLayout(m_text.data(), m_text.size()
-    , m_format[static_cast<std::size_t>(alignment.y) * static_cast<std::size_t>(alignment_x::count) + static_cast<std::size_t>(alignment.x)].Get()
-    , static_cast<float>(size.x), static_cast<float>(size.y), &m_layout);
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> format{};
+    m_factory_DWrite->CreateTextFormat(L"Noto Sans TC", m_font_collection.Get()
+    , DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size_font.x, L"", &format);
+    switch (alignment.x) {
+    case alignment_x::left: {
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        break;
+    }
+    case alignment_x::center: {
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        break;
+    }
+    case alignment_x::right: {
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        break;
+    }
+    }
+    switch (alignment.y) {
+    case alignment_y::top: {
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        break;
+    }
+    case alignment_y::center: {
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        break;
+    }
+    case alignment_y::bottom: {
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
+        break;
+    }
+    }
+    m_factory_DWrite->CreateTextLayout(m_text.data(), m_text.size(), format.Get(), static_cast<float>(size.x), static_cast<float>(size.y), &m_layout);
     create_brush(color);
     return;
 }

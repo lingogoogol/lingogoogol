@@ -41,8 +41,10 @@ public:
     static auto init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2D window_size) -> void;
     static auto render_begin(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void;
     static auto render_end() -> void;
-    rect_primitive_t();
+
+    rect_primitive_t() = default;
     rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color);
+    
     auto set_color(color_t color) -> void;
     auto render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void;
     auto inside(pos_2D pos) -> bool;

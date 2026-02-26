@@ -16,6 +16,14 @@
 #include "expr/.hpp"
 #include "instr/.hpp"
 
+#pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "D3D12.lib")
+#pragma comment(lib, "D3D11.lib")
+#pragma comment(lib, "D2d1.lib")
+#pragma comment(lib, "Dwrite.lib")
+
 auto compile(std::istream& source, std::ostream& exe) -> void {
     std::string entrance{ get_string(source) };
 
@@ -96,84 +104,20 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
     return;
 }
 
-auto input() -> std::string {
-    std::string out{};
-    return out;
+namespace state {
+    enum state: std::uint64_t {
+        normal,
+        input
+    };
 }
 
-class button_t {
-private:
-    engine_t* m_engine{};
-    rect_primitive_t* m_outer_rect{};
-    rect_primitive_t* m_inner_rect{};
-    text_primitive_t* m_text{};
-    std::function<void(void)> m_callback{};
-    bool m_clicked_inside{};
-public:
-    button_t() {}
-
-    auto mouse_move_callback(pos_2D pos) -> void {
-        if (m_outer_rect->inside(pos)) {
-            if (GetAsyncKeyState(VK_LBUTTON) < 0) {
-                m_clicked_inside = false;
-            }
-            else {
-                m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 0.0f });
-                m_text->set_color(color_t{ 1.0f, 1.0f, 0.0f });
-            }
-        }
-        else {
-            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
-            m_inner_rect->set_color(color_t{ 0.0f, 0.0f, 0.0f });
-            m_text->set_color(color_t{ 1.0f, 1.0f, 1.0f });
-        }
-        return;
-    }
-
-    auto mouse_left_click_callback(pos_2D pos) -> void {
-        if (m_outer_rect->inside(pos)) {
-            m_clicked_inside = true;
-            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
-            m_inner_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
-            m_text->set_color(color_t{ 0.0f, 0.0f, 0.0f });
-        }
-        return;
-    }
-
-    auto mouse_left_release_callback(pos_2D pos) -> void {
-        if (m_outer_rect->inside(pos)) {
-            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 0.0f });
-            m_inner_rect->set_color(color_t{ 0.0f, 0.0f, 0.0f });
-            m_text->set_color(color_t{ 1.0f, 1.0f, 0.0f });
-            if (m_clicked_inside) {
-                m_callback();
-            }
-        }
-        return;
-    }
-
-    button_t(engine_t* engine, pos_2D pos, size_2D size, std::uint64_t border_size
-    , std::wstring display_text, depth_range_t depth_range, std::function<void(void)> callback)
-    : m_engine{ engine }, m_callback{ callback } {
-        float depth_distance{ (depth_range.far - depth_range.near) / 2 };
-        m_outer_rect = m_engine->add_rect(pos, size, color_t{ 1.0f, 1.0f, 1.0f }, depth_range.far - depth_distance);
-        pos_2D inner_pos{ pos.x + border_size, pos.y + border_size };
-        size_2D inner_size{ size.x - border_size * 2, size.y - border_size * 2 };
-        m_inner_rect = m_engine->add_rect(inner_pos, inner_size, color_t{ 0.0f, 0.0f, 0.0f }, depth_range.far - depth_distance * 2);
-        m_text = m_engine->add_text(display_text, inner_pos, inner_size, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::center, alignment_y::center });
-        m_engine->add_mouse_move(std::bind(&button_t::mouse_move_callback, this, std::placeholders::_1));
-        m_engine->add_mouse_left_click(std::bind(&button_t::mouse_left_click_callback, this, std::placeholders::_1));
-        m_engine->add_mouse_left_release(std::bind(&button_t::mouse_left_release_callback, this, std::placeholders::_1));
-        return;
-    }
-
-    ~button_t() {
-        m_engine->remove_text(m_text);
-        m_engine->remove_rect(m_inner_rect);
-        m_engine->remove_rect(m_outer_rect);
-        return;
-    }
-};
+auto get_input(state_t* engine, std::string* out) -> void {
+    engine->save_state(state::normal);
+    engine->clear_state();
+    engine->add_text(L"你按了按鈕", pos_2D{ 0x0, 0x0 }, size_2D{ 0x100, 0x100 }, size_1D{ 0x20 }
+    , color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top });
+    return;
+}
 
 auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     int argc{};
@@ -185,7 +129,9 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     init_logfile(argv[2]);
     init_directx();
     engine_t engine{ instance, size_2D{ 0x400, 0x400 } };
-    button_t button{ &engine, pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, 0x4, L"按鈕", depth_range_t{ 0.0f, 1.0f }, [] () {} };
+    state_t state{ &engine };
+    std::string input{};
+    state.add_button(pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, size_1D{ 0x4 }, L"按鈕", depth_range_t{ 0.0f, 1.0f }, std::bind(get_input, &state, &input));
     MSG message{};
     BOOL message_get_result{};
     while ((message_get_result = GetMessageW(&message, NULL, 0, 0))) {
