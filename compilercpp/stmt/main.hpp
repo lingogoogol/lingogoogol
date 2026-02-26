@@ -30,7 +30,7 @@ public:
             m_data = new ::instr{ src };
             break;
         default:
-            throw internal_error{ "stmt type" };
+            log_file("stmt type\r\n");
         }
         return;
     }

@@ -1,6 +1,8 @@
 #ifndef COMPILERCPP_LIB_FILE
 #define COMPILERCPP_LIB_FILE
 
+#include "header/Windows.h"
+
 #include <iostream>
 #include <fstream>
 
@@ -31,8 +33,13 @@ auto init_logfile(const std::wstring& path) -> void {
     return;
 }
 
-auto log(const std::string& in) -> void {
+auto log_file(const std::string& in) -> void {
     get_logfile() << in;
+    return;
+}
+
+auto log_console(const std::string& in) -> void {
+    OutputDebugStringA(in.data());
     return;
 }
 

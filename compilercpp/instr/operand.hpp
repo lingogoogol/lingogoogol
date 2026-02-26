@@ -44,7 +44,7 @@ private:
         case imm64:
             return 8;
         default:
-            throw internal_error{ "operand type" };
+            log_file("operand type\r\n");
         }
     }
 public:
@@ -60,11 +60,11 @@ public:
                 return (m_val == in.m_type) || ((m_val - (reg::general_begin + 1)) / 8 == in.m_type - reg::end);
             }
             else {
-                throw internal_error{ "operand type" };
+                log_file("operand type\r\n");
             }
         }
         else {
-            throw internal_error{ "operand type" };
+            log_file("operand type\r\n");
         }
     }
 };

@@ -33,7 +33,7 @@ public:
                 throw error{ error::eof };
             }
             else {
-                throw internal_error{ "source reading" };
+                log_file("source reading\r\n");
             }
         }
 

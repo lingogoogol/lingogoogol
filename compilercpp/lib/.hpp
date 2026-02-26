@@ -1,6 +1,8 @@
 #ifndef COMPILERCPP_LIB
 #define COMPILERCPP_LIB
 
+#include "directx/.hpp"
+
 #include "common.hpp"
 #include "io.hpp"
 #include "error.hpp"
