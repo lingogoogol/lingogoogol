@@ -103,6 +103,11 @@ auto link(const std::string& configuration, const std::filesystem::path& filenam
         add_objs(command, root, imports[i]);
     }
 
+    add_arg(command, "Shell32.lib");
+    add_arg(command, "User32.lib");
+    add_arg(command, "dxgi.lib");
+    add_arg(command, "D3D12.lib");
+
     call(command, flag);
     return;
 }

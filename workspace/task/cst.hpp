@@ -26,7 +26,8 @@ namespace cst {
         "/O2"
     };
     std::vector<std::string> linker_args{
-        "/WX"
+        "/WX",
+        "/INCREMENTAL:NO"
     };
     std::vector<std::string> debug_linker_args{
         "/DEBUG"

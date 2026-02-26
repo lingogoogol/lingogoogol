@@ -43,7 +43,7 @@ public:
     virtual ~internal_error() {}
 
     virtual auto what() -> std::string {
-        return "internal error: " + m_description + "\n, stack trace: " + std::to_string(m_stack);
+        return "internal error: " + m_description + "\r\n, stack trace: " + std::to_string(m_stack);
     }
 };
 

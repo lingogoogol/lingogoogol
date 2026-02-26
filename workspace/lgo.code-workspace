@@ -268,7 +268,8 @@
 				"cwd": "${cwd}",
 				"args": [
 					"source/temp/compiler",
-					"source/temp/compiler.exe"
+					"source/temp/compiler.exe",
+					"source/temp/logfile.txt"
 				],
 				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
 				"requireExactSource": true,
