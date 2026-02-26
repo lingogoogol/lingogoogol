@@ -2,9 +2,12 @@
 #define COMPILERCPP_LIB_FILE
 
 #include "header/Windows.h"
+#include "header/wrl_client.h"
+#include "header/d3d12.h"
 
 #include <iostream>
 #include <fstream>
+#include <string>
 
 constexpr inline std::ios_base::iostate file_exception_mask{ std::ios_base::badbit | std::ios_base::failbit | std::ios_base::eofbit };
 
@@ -40,6 +43,20 @@ auto log_file(const std::string& in) -> void {
 
 auto log_console(const std::string& in) -> void {
     OutputDebugStringA(in.data());
+    return;
+}
+
+template<typename t_in>
+auto log_ref_count(t_in in) -> void {
+    in->AddRef();
+    log_console(std::to_string(in->Release()));
+    return;
+}
+
+auto log_blob(Microsoft::WRL::ComPtr<ID3DBlob> in) -> void {
+    for (SIZE_T i{ 0 }; i < in->GetBufferSize(); ++i) {
+        log_file(std::string{ *(reinterpret_cast<const char*>(in->GetBufferPointer()) + i) });
+    }
     return;
 }
 

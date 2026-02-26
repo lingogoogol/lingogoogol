@@ -14,7 +14,8 @@ enum class filetype {
     headerunit,
     interface,
     implementation,
-    source
+    source,
+    hlsl
 };
 
 std::filesystem::path canonical(const std::string& in) {
@@ -125,6 +126,9 @@ auto get_filetype(const std::filesystem::path& filename) -> filetype {
         else {
             return filetype::source;
         }
+    }
+    else if (filename_s.ends_with(".hlsl")) {
+        return filetype::hlsl;
     }
     else {
         std::cout << "The file extension is not supported: " + filename_s << std::endl;

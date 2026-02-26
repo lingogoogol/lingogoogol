@@ -14,7 +14,7 @@ constexpr inline int hide_line{ 0b00000001 };
 constexpr inline int show_command{ 0b00000010 };
 constexpr inline int preprocess{ 0b00000100 };
 
-auto get_flag(char** flag, int size) -> int {
+auto get_option(char** flag, int size) -> int {
     int out{ 0b00000000 };
     for (int i{ 0 }; i < size; ++i) {
         std::string arg_string{ flag[i] };
@@ -34,24 +34,33 @@ auto get_flag(char** flag, int size) -> int {
     return out;
 }
 
-auto find_msvc() -> std::string {
-    bool compiler_exist{ false };
-    std::string msvc_dir{};
-    for (std::filesystem::directory_iterator i{ "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\" }
+auto fild_directory(const std::filesystem::path& base
+, const std::filesystem::path& suffix) -> std::filesystem::path {
+    bool exist{ false };
+    std::filesystem::path out{};
+    for (std::filesystem::directory_iterator i{ base }
     ; i != std::filesystem::directory_iterator{}; ++i) {
-        msvc_dir = i->path().string() + "\\bin\\Hostx64\\x64\\";
-        if (std::filesystem::exists(msvc_dir)) {
-            if (compiler_exist) {
+        out = i->path().string() + suffix.string();
+        if (std::filesystem::exists(out)) {
+            if (exist) {
                 throw std::string{ "There are more possible path to the compiler." };
             }
-            compiler_exist = true;
+            exist = true;
             break;
         }
     }
-    if (!compiler_exist) {
+    if (!exist) {
         throw std::string{ "We cannot find the compiler." };
     }
-    return msvc_dir;
+    return out;
+}
+
+auto find_msvc() -> std::filesystem::path {
+    return fild_directory("C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/", "/bin/Hostx64/x64/");
+}
+
+auto find_dxc() -> std::filesystem::path {
+    return fild_directory("C:/lingogoogol/application/", "/bin/x64/");
 }
 
 auto call(const std::string& command, int flag) -> void {

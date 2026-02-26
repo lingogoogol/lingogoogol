@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_DIRECTX_COMMAND_QUEUE
-#define COMPILERCPP_LIB_DIRECTX_COMMAND_QUEUE
+#ifndef COMPILERCPP_LIB_DIRECTX_COMMAND_QUEUE_SMART
+#define COMPILERCPP_LIB_DIRECTX_COMMAND_QUEUE_SMART
 
 #include <queue>
 #include <map>
@@ -12,7 +12,7 @@
 #include "../header/d3d12.h"
 #include "../header/dxgi1_6.h"
 
-class command_queue {
+class command_queue_smart {
 private:
     Microsoft::WRL::ComPtr<ID3D12Device2> m_device{};
     D3D12_COMMAND_LIST_TYPE m_type{};
@@ -26,7 +26,7 @@ private:
     HANDLE m_event{};
     UINT64 m_fence_value{ 0 };
 public:
-    command_queue() {}
+    command_queue_smart() {}
 
     auto init(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_COMMAND_LIST_TYPE type) -> void {
         m_device = device;
@@ -118,6 +118,7 @@ public:
         factory->CreateSwapChainForHwnd(m_queue.Get(), window
         , &swap_chain_description, nullptr, nullptr, &swap_chain1);
         swap_chain1.As(&out);
+        factory->MakeWindowAssociation(window, DXGI_MWA_NO_WINDOW_CHANGES);
         return out;
     }
 };

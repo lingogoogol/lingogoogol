@@ -140,26 +140,10 @@
 		"tasks": [
 			{
 				"type": "process",
-				"label": "Debug This",
+				"label": "C++ Debug",
 				"command": "middle/task.exe",
 				"args": [
-					"debug",
-					"${file}",
-					"this",
-					"hide_line"
-				],
-				"options": {
-					"cwd": "${cwd}/../../"
-				},
-				"group": {
-					"kind": "build"
-				}
-			},
-			{
-				"type": "process",
-				"label": "Debug No_module",
-				"command": "middle/task.exe",
-				"args": [
+					"C++",
 					"debug",
 					"${file}",
 					"no_module",
@@ -175,61 +159,10 @@
 			},
 			{
 				"type": "process",
-				"label": "Debug This, preprocess",
+				"label": "C++ Release",
 				"command": "middle/task.exe",
 				"args": [
-					"debug",
-					"${file}",
-					"this",
-					"hide_line",
-					"preprocess"
-				],
-				"options": {
-					"cwd": "${cwd}/../../"
-				},
-				"group": {
-					"kind": "build"
-				}
-			},
-			{
-				"type": "process",
-				"label": "Debug All",
-				"command": "middle/task.exe",
-				"args": [
-					"debug",
-					"${file}",
-					"all",
-					"hide_line"
-				],
-				"options": {
-					"cwd": "${cwd}/../../"
-				},
-				"group": {
-					"kind": "build"
-				}
-			},
-			{
-				"type": "process",
-				"label": "Release This",
-				"command": "middle/task.exe",
-				"args": [
-					"release",
-					"${file}",
-					"this",
-					"hide_line"
-				],
-				"options": {
-					"cwd": "${cwd}/../../"
-				},
-				"group": {
-					"kind": "build"
-				}
-			},
-			{
-				"type": "process",
-				"label": "Release No_module",
-				"command": "middle/task.exe",
-				"args": [
+					"C++",
 					"release",
 					"${file}",
 					"no_module",
@@ -244,13 +177,64 @@
 			},
 			{
 				"type": "process",
-				"label": "Release All",
+				"label": "HLSL Vertex Debug",
 				"command": "middle/task.exe",
 				"args": [
+					"HLSL",
+					"debug",
+					"${file}",
+					"vertex"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "HLSL Vertex Release",
+				"command": "middle/task.exe",
+				"args": [
+					"HLSL",
 					"release",
 					"${file}",
-					"all",
-					"hide_line"
+					"vertex"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "HLSL Pixel Debug",
+				"command": "middle/task.exe",
+				"args": [
+					"HLSL",
+					"debug",
+					"${file}",
+					"pixel"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "HLSL Pixel Release",
+				"command": "middle/task.exe",
+				"args": [
+					"HLSL",
+					"release",
+					"${file}",
+					"pixel"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"

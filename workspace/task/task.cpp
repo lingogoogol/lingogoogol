@@ -18,7 +18,7 @@ auto compile(const std::string& configuration, const std::filesystem::path& file
     std::filesystem::path basename{ get_basename(filename) };
 
     std::string command{};
-    add_arg(command, "\"" + find_msvc() + "cl.exe\"");
+    add_arg(command, "\"" + find_msvc().string() + "cl.exe\"");
     add_args(command, cst::compiler_args);
     for (int i{ 0 }; i < cst::hpp_dir.size(); ++i) {
         add_arg(command, "/I\"" + cst::hpp_dir[i] + "\"");
@@ -83,7 +83,7 @@ auto link(const std::string& configuration, const std::filesystem::path& filenam
     std::filesystem::path basename{ get_basename(filename) };
 
     std::string command{};
-    add_arg(command, "\"" + find_msvc() + "link.exe\"");
+    add_arg(command, "\"" + find_msvc().string() + "link.exe\"");
     add_args(command, cst::linker_args);
     add_arg(command, "/ILK:\"" + cst::ilk_dir + basename.string() + ".ilk\"");
     add_arg(command, "/PDB:\"" + cst::pdbl_dir + basename.string() + ".pdb\"");
@@ -114,10 +114,10 @@ auto link(const std::string& configuration, const std::filesystem::path& filenam
     return;
 }
 
-auto process(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
+auto process_CPP(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
 , int flag, const std::vector<std::filesystem::path>& parent, std::vector<std::filesystem::path>& processed) -> void;
 
-auto process_sub(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
+auto process_CPP_sub(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
 , int flag, const std::vector<std::string>& sub_modules, const std::vector<std::filesystem::path>& parent
 , std::vector<std::filesystem::path>& processed) -> void {
     std::filesystem::path root{ get_root(filename) };
@@ -126,13 +126,13 @@ auto process_sub(const std::string& configuration, const std::filesystem::path& 
     for (int i{ 0 }; i < sub_modules.size(); ++i) {
         find_circular(parent, sub_modules[i]);
         if (std::find(processed.begin(), processed.end(), sub_modules[i]) == processed.end()) {
-            process(configuration, module_to_filename(root, project, sub_modules[i]), target, flag, parent, processed);
+            process_CPP(configuration, module_to_filename(root, project, sub_modules[i]), target, flag, parent, processed);
         }
     }
     return;
 }
 
-auto process(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
+auto process_CPP(const std::string& configuration, const std::filesystem::path& filename, const std::string& target
 , int flag, const std::vector<std::filesystem::path>& parent, std::vector<std::filesystem::path>& processed) -> void {
     std::string filename_s{ filename.string() };
     if (!std::filesystem::exists(filename)) {
@@ -154,7 +154,7 @@ auto process(const std::string& configuration, const std::filesystem::path& file
     
     if (target == "all") {
         processed.push_back(basename);
-        process_sub(configuration, filename, target, flag, imports, parent + basename, processed);
+        process_CPP_sub(configuration, filename, target, flag, imports, parent + basename, processed);
     }
     else if (target == "no_module") {
         if (type != filetype::source) {
@@ -170,18 +170,60 @@ auto process(const std::string& configuration, const std::filesystem::path& file
         link(configuration, filename, target, flag, imports);
     }
     else if (type == filetype::interface) {
-        process_sub(configuration, filename, "this", flag, get_exports(root, basename.string()), parent, processed);
+        process_CPP_sub(configuration, filename, "this", flag, get_exports(root, basename.string()), parent, processed);
     }
+    return;
+}
+
+auto process_HLSL(const std::string& configuration, const std::filesystem::path& filename, const std::string& type, int flag) -> void {
+    const std::string model{ "6_0" };
+    const std::string version{ "2021" };
+
+    std::string command{};
+    add_arg(command, "\"" + find_dxc().string() + "dxc.exe\"");
+    add_arg(command, "-E " + type);
+    std::filesystem::path basemane{ get_basename(filename) };
+    add_arg(command, "-Fd \"middle/pdbs/" + basemane.string() + ".pdb\"");
+    add_arg(command, "-Fo \"output/" + basemane.string() + ".cso\"");
+    add_arg(command, "-HV " + version);
+    std::string type_profile{};
+    if (type == "vertex") {
+        type_profile = "vs";
+    }
+    else if (type == "pixel") {
+        type_profile = "ps";
+    }
+    else {
+        throw std::string{ "shader_type" };
+    }
+    add_arg(command, "-T " + type_profile + "_" + model);
+    if (configuration == "debug") {
+        add_arg(command, "-Zi");
+    }
+    else if (configuration != "release") {
+        throw std::string{ "configuration" };
+    }
+    add_arg(command, "\"" + filename.string() + "\"");
+    call(command, flag);
     return;
 }
 
 auto main(int argc, char** argv) -> int {
     try {
-        if (argc < 4) {
-            throw std::string{ "You didn't pass enough arguments." };
-        }
         std::vector<std::filesystem::path> processed{};
-        process(argv[1], argv[2], argv[3], get_flag(argv + 4, argc - 4), {}, processed);
+        std::string language{ argv[1] };
+        if (language == "C++") {
+            if (argc < 4) {
+                throw std::string{ "You didn't pass enough arguments." };
+            }
+            process_CPP(argv[2], argv[3], argv[4], get_option(argv + 5, argc - 5), {}, processed);
+        }
+        else if (language == "HLSL") {
+            process_HLSL(argv[2], argv[3], argv[4], get_option(argv + 5, argc - 5));
+        }
+        else {
+            throw std::string{ "language" };
+        }
     }
     catch (std::string description) {
         std::cout << "An error occurred: " << description << std::endl;
