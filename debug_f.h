@@ -5,7 +5,7 @@
 
 #include "data_f.h"
 
-#define DEBUG
+//#define DEBUG
 
 #ifndef DEBUG
 #pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
