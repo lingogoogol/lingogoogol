@@ -2,6 +2,7 @@
 #define COMPILERCPP_LIB
 
 #include "directx/.hpp"
+#include "GUI/.hpp"
 
 #include "common.hpp"
 #include "io.hpp"

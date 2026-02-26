@@ -42,6 +42,10 @@ public:
         return;
     }
 
+    auto get() -> Microsoft::WRL::ComPtr<ID3D12CommandQueue> {
+        return m_queue;
+    }
+
     auto set_fence() -> UINT64 {
         ++m_fence_value;
         m_queue->Signal(m_fence.Get(), m_fence_value);

@@ -99,17 +99,23 @@ auto create_V_heap(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_DESCRIPTO
     return out;
 }
 
-auto create_RT(Microsoft::WRL::ComPtr<ID3D12Device2> device, Microsoft::WRL::ComPtr<IDXGISwapChain4> swap_chain
-, Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTV_heap, UINT RTV_size, UINT count) -> std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> {
+auto create_RT(Microsoft::WRL::ComPtr<IDXGISwapChain4> swap_chain, UINT count) -> std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> {
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> out{};
     out.resize(count);
-    D3D12_CPU_DESCRIPTOR_HANDLE RTV{ RTV_heap->GetCPUDescriptorHandleForHeapStart() };
     for (UINT i{ 0 }; i < count; ++i) {
         swap_chain->GetBuffer(i, IID_PPV_ARGS(&(out[i])));
-        device->CreateRenderTargetView(out[i].Get(), nullptr, RTV);
-        RTV.ptr += RTV_size;
     }
     return out;
+}
+
+auto create_RTV(Microsoft::WRL::ComPtr<ID3D12Device2> device, std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> RT
+, UINT RTV_size, Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> RTV_heap) -> void {
+    D3D12_CPU_DESCRIPTOR_HANDLE RTV{ RTV_heap->GetCPUDescriptorHandleForHeapStart() };
+    for (UINT i{ 0 }; i < RT.size(); ++i) {
+        device->CreateRenderTargetView(RT[i].Get(), nullptr, RTV);
+        RTV.ptr += RTV_size;
+    }
+    return;
 }
 
 auto create_V_handle(D3D12_CPU_DESCRIPTOR_HANDLE start, SIZE_T V_size, SIZE_T index) -> D3D12_CPU_DESCRIPTOR_HANDLE {

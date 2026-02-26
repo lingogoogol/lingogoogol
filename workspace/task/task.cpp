@@ -109,6 +109,9 @@ auto link(const std::string& configuration, const std::filesystem::path& filenam
     add_arg(command, "User32.lib");
     add_arg(command, "dxgi.lib");
     add_arg(command, "D3D12.lib");
+    add_arg(command, "D3D11.lib");
+    add_arg(command, "D2d1.lib");
+    add_arg(command, "Dwrite.lib");
 
     call(command, flag);
     return;

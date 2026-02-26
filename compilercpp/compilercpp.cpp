@@ -15,6 +15,9 @@
 #include "lib/header/DirectXMath.h"
 #include "lib/header/dxgi1_6.h"
 #include "lib/header/shellapi.h"
+#include "lib/header/d3d11on12.h"
+#include "lib/header/d2d1_3.h"
+#include "lib/header/dwrite_3.h"
 
 Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue{};
 
@@ -120,10 +123,11 @@ struct window_state {
     std::vector<UINT64> m_buffer_fence_value{};
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_RTV_heap{};
     UINT m_RTV_size{};
-    UINT m_current_buffer_index{};
+    UINT m_frame_index{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_root_signature{};
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipeline_state{};
     D3D12_VERTEX_BUFFER_VIEW m_vertex_buffer_view{};
+    text m_text{};
 };
 
 auto CALLBACK WndProc(HWND window, UINT message, WPARAM param_1, LPARAM param_2) -> LRESULT {
@@ -133,12 +137,14 @@ auto CALLBACK WndProc(HWND window, UINT message, WPARAM param_1, LPARAM param_2)
     }
     switch (message) {
     case WM_PAINT: {
-        log_info_queue(info_queue);
-        Microsoft::WRL::ComPtr<ID3D12Resource> RT_current{ state->m_RT[state->m_current_buffer_index] };
+        PAINTSTRUCT paint_info{};
+        BeginPaint(window, &paint_info);
+        log_console("paint received\r\n");
+        Microsoft::WRL::ComPtr<ID3D12Resource> RT_current{ state->m_RT[state->m_frame_index] };
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list{ state->m_command_queue.create_list() };
         push_transition_barrier(command_list, RT_current, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
         D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle{ create_V_handle(state->m_RTV_heap->GetCPUDescriptorHandleForHeapStart()
-        , state->m_RTV_size, state->m_current_buffer_index) };
+        , state->m_RTV_size, state->m_frame_index) };
         clear_RT(command_list, RTV_handle, { 0.0f, 0.0f, 0.0f, 1.0f });
         command_list->SetGraphicsRootSignature(state->m_root_signature.Get());
         command_list->SetPipelineState(state->m_pipeline_state.Get());
@@ -160,12 +166,14 @@ auto CALLBACK WndProc(HWND window, UINT message, WPARAM param_1, LPARAM param_2)
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         command_list->IASetVertexBuffers(0, 1, &state->m_vertex_buffer_view);
         command_list->DrawInstanced(3, 1, 0, 0);
-        push_transition_barrier(command_list, RT_current, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
         state->m_command_queue.execute_list(command_list);
-        state->m_buffer_fence_value[state->m_current_buffer_index] = state->m_command_queue.set_fence();
+        state->m_text.render(state->m_frame_index);
+
+        state->m_buffer_fence_value[state->m_frame_index] = state->m_command_queue.set_fence();
         state->m_swap_chain->Present(0, state->m_tearing_supported ? DXGI_PRESENT_ALLOW_TEARING : 0);
-        state->m_current_buffer_index = state->m_swap_chain->GetCurrentBackBufferIndex();
-        state->m_command_queue.wait_fence(state->m_buffer_fence_value[state->m_current_buffer_index]);
+        state->m_frame_index = state->m_swap_chain->GetCurrentBackBufferIndex();
+        state->m_command_queue.wait_fence(state->m_buffer_fence_value[state->m_frame_index]);
+        EndPaint(window, &paint_info);
         return 0;
     }
     case WM_DESTROY: {
@@ -211,10 +219,20 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     , window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_USAGE_RENDER_TARGET_OUTPUT, buffer_count, state.m_tearing_supported);
     state.m_RTV_heap = create_V_heap(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, buffer_count);
     state.m_RTV_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    state.m_RT = create_RT(device, state.m_swap_chain, state.m_RTV_heap, state.m_RTV_size, buffer_count);
-    state.m_current_buffer_index = state.m_swap_chain->GetCurrentBackBufferIndex();
+    state.m_RT = create_RT(state.m_swap_chain, buffer_count);
+    create_RTV(device, state.m_RT, state.m_RTV_size, state.m_RTV_heap);
+    text::init(device, state.m_command_queue.get(), window, state.m_RT);
+    state.m_text = text{ L"compilercpp", 0x0, 0x0, 0x200, 0x200, 1.0f, 1.0f, 1.0f };
+    state.m_frame_index = state.m_swap_chain->GetCurrentBackBufferIndex();
     state.m_buffer_fence_value.resize(buffer_count);
     state.m_initialized = true;
+    D3D12_FEATURE_DATA_ROOT_SIGNATURE root_signature_version{};
+    root_signature_version.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+    device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &root_signature_version, sizeof root_signature_version);
+    if (root_signature_version.HighestVersion != D3D_ROOT_SIGNATURE_VERSION_1_1) {
+        log_file("root_signature_version\r\n");
+        return -1;
+    }
     D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_description{};
     root_signature_description.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
     root_signature_description.Desc_1_1.NumParameters = 0;
@@ -233,8 +251,8 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     input_element.push_back(create_input_element(input_element_name[1], DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0));
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pipeline_state_description{};
     pipeline_state_description.pRootSignature = state.m_root_signature.Get();
-    pipeline_state_description.VS = create_shader_bytecode("output/vertex.cso", shader_code[0]);
-    pipeline_state_description.PS = create_shader_bytecode("output/pixel.cso", shader_code[1]);
+    pipeline_state_description.VS = create_shader_bytecode("vertex.cso", shader_code[0]);
+    pipeline_state_description.PS = create_shader_bytecode("pixel.cso", shader_code[1]);
     pipeline_state_description.BlendState.AlphaToCoverageEnable = false;
     pipeline_state_description.BlendState.IndependentBlendEnable = false;
     pipeline_state_description.BlendState.RenderTarget[0].BlendEnable = false;
@@ -302,6 +320,7 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     while ((message_get_result = GetMessageW(&message, NULL, 0, 0))) {
         if (message_get_result == -1) {
             log_file("message_get\r\n");
+            return -1;
         }
         DispatchMessageW(&message);
     }

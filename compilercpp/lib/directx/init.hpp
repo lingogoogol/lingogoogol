@@ -15,7 +15,7 @@ auto init_directx() -> void {
 }
 
 auto check_tearing_support(Microsoft::WRL::ComPtr<IDXGIFactory5> factory) -> bool {
-    bool out{};
+    BOOL out{};
     factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &out, sizeof out);
     return out;
 }
