@@ -1,0 +1,2 @@
+"D:\_YY\application\Visual Studio\Preview\VC\Auxiliary\Build\vcvarsall.bat" x64
+cd /d "D:\_YY\workspace\source\compiler"

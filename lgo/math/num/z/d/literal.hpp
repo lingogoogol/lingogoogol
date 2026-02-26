@@ -1,0 +1,4 @@
+#ifndef LGO_MATH_NUM_Z_D_LITERAL
+#define LGO_MATH_NUM_Z_D_LITERAL
+
+#endif

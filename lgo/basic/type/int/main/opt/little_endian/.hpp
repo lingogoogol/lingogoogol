@@ -1,0 +1,6 @@
+#ifndef LGO_BASIC_TYPE_INT_MAIN_OPT_LITTLE_ENDIAN
+#define LGO_BASIC_TYPE_INT_MAIN_OPT_LITTLE_ENDIAN
+
+#include "def.hpp"
+
+#endif

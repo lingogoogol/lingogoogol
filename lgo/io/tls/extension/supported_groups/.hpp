@@ -1,0 +1,6 @@
+#ifndef LGO_IO_TLS_EXTENSION_SUPPORTED_GROUPS
+#define LGO_IO_TLS_EXTENSION_SUPPORTED_GROUPS
+
+#include "impl.hpp"
+
+#endif

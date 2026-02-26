@@ -1,0 +1,6 @@
+#ifndef LGO_ENCODE_CRYPTO_ECDH_CURVE25519
+#define LGO_ENCODE_CRYPTO_ECDH_CURVE25519
+
+#include "impl.hpp"
+
+#endif

@@ -1,0 +1,6 @@
+#ifndef LGO_BASIC_SEQ_MAIN_MAIN_OPT_INVERSE
+#define LGO_BASIC_SEQ_MAIN_MAIN_OPT_INVERSE
+
+#include "def.hpp"
+
+#endif

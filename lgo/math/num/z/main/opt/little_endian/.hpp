@@ -1,0 +1,6 @@
+#ifndef LGO_MATH_NUM_Z_MAIN_OPT_LITTLE_ENDIAN
+#define LGO_MATH_NUM_Z_MAIN_OPT_LITTLE_ENDIAN
+
+#include "def.hpp"
+
+#endif

@@ -1,0 +1,270 @@
+{
+	"folders": [
+		{
+			"name": "lgo",
+			"path": "../lgo"
+		},
+		{
+			"name": "workspace",
+			"path": "."
+		},
+		{
+			"name": "game",
+			"path": "../game"
+		},
+		{
+			"name": "installer",
+			"path": "../installer"
+		},
+		{
+			"name": "test",
+			"path": "../test"
+		},
+		{
+			"name": "other",
+			"path": "../other"
+		},
+		{
+			"path": "../compilercpp"
+		}
+	],
+	"settings": {
+		"C_Cpp.default.compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.40.33807\\bin\\Hostx64\\x64\\cl.exe",
+		"C_Cpp.default.defines": [
+			"_DEBUG",
+			"UNICODE",
+			"_UNICODE"
+		],
+		"C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+		"C_Cpp.default.includePath": [
+			"C:\\lingogoogol\\programming\\external\\header\\",
+			"C:\\lingogoogol\\programming\\_YY\\workspace\\source\\"
+		],
+		"C_Cpp.default.cppStandard": "c++23",
+		"editor.smoothScrolling": true,
+		"terminal.integrated.smoothScrolling": true,
+		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
+		"editor.unicodeHighlight.includeStrings": false,
+		"C_Cpp.intelliSenseEngine": "default",
+		"explorer.autoReveal": false,
+		"files.associations": {
+			"iostream": "cpp",
+			"xstring": "cpp",
+			"istream": "cpp",
+			"xutility": "cpp",
+			"algorithm": "cpp",
+			"atomic": "cpp",
+			"bit": "cpp",
+			"cctype": "cpp",
+			"charconv": "cpp",
+			"chrono": "cpp",
+			"clocale": "cpp",
+			"cmath": "cpp",
+			"codecvt": "cpp",
+			"compare": "cpp",
+			"concepts": "cpp",
+			"csignal": "cpp",
+			"cstddef": "cpp",
+			"cstdint": "cpp",
+			"cstdio": "cpp",
+			"cstdlib": "cpp",
+			"cstring": "cpp",
+			"ctime": "cpp",
+			"cwchar": "cpp",
+			"exception": "cpp",
+			"forward_list": "cpp",
+			"list": "cpp",
+			"string": "cpp",
+			"vector": "cpp",
+			"filesystem": "cpp",
+			"format": "cpp",
+			"fstream": "cpp",
+			"functional": "cpp",
+			"initializer_list": "cpp",
+			"iomanip": "cpp",
+			"ios": "cpp",
+			"iosfwd": "cpp",
+			"iterator": "cpp",
+			"limits": "cpp",
+			"locale": "cpp",
+			"map": "cpp",
+			"memory": "cpp",
+			"new": "cpp",
+			"optional": "cpp",
+			"ostream": "cpp",
+			"random": "cpp",
+			"ratio": "cpp",
+			"regex": "cpp",
+			"sstream": "cpp",
+			"stdexcept": "cpp",
+			"streambuf": "cpp",
+			"system_error": "cpp",
+			"tuple": "cpp",
+			"type_traits": "cpp",
+			"typeinfo": "cpp",
+			"unordered_map": "cpp",
+			"utility": "cpp",
+			"xfacet": "cpp",
+			"xhash": "cpp",
+			"xiosbase": "cpp",
+			"xlocale": "cpp",
+			"xlocbuf": "cpp",
+			"xlocinfo": "cpp",
+			"xlocmes": "cpp",
+			"xlocmon": "cpp",
+			"xlocnum": "cpp",
+			"xloctime": "cpp",
+			"xmemory": "cpp",
+			"xtr1common": "cpp",
+			"xtree": "cpp",
+			"stacktrace": "cpp",
+			"array": "cpp"
+		},
+		"terminal.integrated.cwd": "../../"
+	},
+	"tasks": {
+		"version": "2.0.0",
+		"tasks": [
+			{
+				"type": "process",
+				"label": "Debug This",
+				"command": "middle/task.exe",
+				"args": [
+					"debug",
+					"${file}",
+					"this",
+					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Debug No_module",
+				"command": "middle/task.exe",
+				"args": [
+					"debug",
+					"${file}",
+					"no_module",
+					"hide_line",
+					"show_command"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Debug This, preprocess",
+				"command": "middle/task.exe",
+				"args": [
+					"debug",
+					"${file}",
+					"this",
+					"hide_line",
+					"preprocess"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Debug All",
+				"command": "middle/task.exe",
+				"args": [
+					"debug",
+					"${file}",
+					"all",
+					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Release This",
+				"command": "middle/task.exe",
+				"args": [
+					"release",
+					"${file}",
+					"this",
+					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Release No_module",
+				"command": "middle/task.exe",
+				"args": [
+					"release",
+					"${file}",
+					"no_module",
+					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "Release All",
+				"command": "middle/task.exe",
+				"args": [
+					"release",
+					"${file}",
+					"all",
+					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			}
+		]
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Debug",
+				"type": "cppvsdbg",
+				"request": "launch",
+				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
+				"cwd": "${cwd}",
+				"args": [
+					"source/compilercpp/compiler",
+					"source/compilercpp/compiler.exe"
+				],
+				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
+				"requireExactSource": true,
+				"console": "integratedTerminal"
+			}
+		]
+	}
+}

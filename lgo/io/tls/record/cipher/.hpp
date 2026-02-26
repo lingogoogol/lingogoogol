@@ -1,0 +1,4 @@
+#ifndef LGO_IO_TLS_RECORD_CIPHER
+#define LGO_IO_TLS_RECORD_CIPHER
+
+#endif

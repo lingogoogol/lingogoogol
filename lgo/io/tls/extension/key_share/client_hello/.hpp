@@ -1,0 +1,6 @@
+#ifndef LGO_IO_TLS_EXTENSION_KEY_SHARE_CLIENT_HELLO
+#define LGO_IO_TLS_EXTENSION_KEY_SHARE_CLIENT_HELLO
+
+#include "impl.hpp"
+
+#endif
