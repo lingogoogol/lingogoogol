@@ -3,8 +3,6 @@
 
 #include <string>
 
-#define DEBUG
-
 #ifndef DEBUG
 #pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
 #endif
