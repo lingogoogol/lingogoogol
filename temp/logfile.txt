@@ -1,4 +1,4 @@
-ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
-ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
-ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
 complete
+ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
+ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.
+ID3D12Device::CreateCommittedResource: Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.

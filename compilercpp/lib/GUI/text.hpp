@@ -12,6 +12,8 @@
 #include "../header/Windows.h"
 #include "../header/d2d1_3.h"
 
+#include "stu.hpp"
+
 class text {
 private:
     static Microsoft::WRL::ComPtr<IDWriteFactory5> m_factory_DWrite;
@@ -47,14 +49,14 @@ public:
         Microsoft::WRL::ComPtr<IDWriteFontSetBuilder1> font_set_builder{};
         m_factory_DWrite->CreateFontSetBuilder(&font_set_builder);
         Microsoft::WRL::ComPtr<IDWriteFontFile> font_file{};
-        m_factory_DWrite->CreateFontFileReference(L"NotoSans-VariableFont_wdth,wght.ttf", nullptr, &font_file);
+        m_factory_DWrite->CreateFontFileReference(L"NotoSansTC-VariableFont_wght.ttf", nullptr, &font_file);
         font_set_builder->AddFontFile(font_file.Get());
         Microsoft::WRL::ComPtr<IDWriteFontSet> font_set{};
         font_set_builder->CreateFontSet(&font_set);
         Microsoft::WRL::ComPtr<IDWriteFontCollection1> font_collection{};
         m_factory_DWrite->CreateFontCollectionFromFontSet(font_set.Get(), &font_collection);
-        m_factory_DWrite->CreateTextFormat(L"Noto Sans", font_collection.Get()
-        , DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 64.0f, L"en-us", &m_format);
+        m_factory_DWrite->CreateTextFormat(L"Noto Sans TC", font_collection.Get()
+        , DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 64.0f, L"", &m_format);
         
         m_RT_D3D11.resize(RT.size());
         for (std::size_t i{ 0 }; i < RT.size(); ++i) {
@@ -82,26 +84,31 @@ public:
         return;
     }
 
-    text() {}
-
-    text(std::wstring content, float pos_x, float pos_y, float width, float height, float R, float G, float B)
-    : m_content{ content }, m_pos{ pos_x, pos_y } {
-        m_factory_DWrite->CreateTextLayout(m_content.data(), m_content.size(), m_format.Get(), width, height, &m_layout);
-        m_device_context_D2D1->CreateSolidColorBrush({ R, G, B, 1.0f }, &m_brush);
-        return;
-    }
-
-    auto render(std::size_t frame_index) -> void {
+    static auto render_begin(std::size_t frame_index) -> void {
         m_device_D3D11on12->AcquireWrappedResources(m_RT_D3D11[frame_index].GetAddressOf(), 1);
         m_device_context_D2D1->SetTarget(m_RT_D2D1[frame_index].Get());
         m_device_context_D2D1->BeginDraw();
-        D2D1_POINT_2F text_pos{};
-        text_pos.x = 0.0f;
-        text_pos.y = 0.0f;
-        m_device_context_D2D1->DrawTextLayout(text_pos, m_layout.Get(), m_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+        return;
+    }
+
+    static auto render_end(std::size_t frame_index) -> void {
         m_device_context_D2D1->EndDraw();
         m_device_D3D11on12->ReleaseWrappedResources(m_RT_D3D11[frame_index].GetAddressOf(), 1);
         m_device_context_D3D11->Flush();
+        return;
+    }
+
+    text() {}
+
+    text(std::wstring content, pos_2D pos, size_2D size, color color)
+    : m_content{ content }, m_pos{ static_cast<float>(pos.x), static_cast<float>(pos.y) } {
+        m_factory_DWrite->CreateTextLayout(m_content.data(), m_content.size(), m_format.Get(), static_cast<float>(size.x), static_cast<float>(size.y), &m_layout);
+        m_device_context_D2D1->CreateSolidColorBrush({ color.R, color.G, color.B, 1.0f }, &m_brush);
+        return;
+    }
+
+    auto render() -> void {
+        m_device_context_D2D1->DrawTextLayout(m_pos, m_layout.Get(), m_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
         return;
     }
 };
