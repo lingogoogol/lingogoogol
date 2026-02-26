@@ -3,10 +3,11 @@
 
 #include <string>
 
+#include "object.hpp"
 #include "stu.hpp"
 #include "engine_def.hpp"
 
-class text_t {
+class text_t: public GUI_object {
 private:
     engine_t* m_engine{};
     std::wstring m_text{};
@@ -20,8 +21,11 @@ public:
     text_t() = default;
     text_t(engine_t* engine, std::wstring m_text, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment);
 
-    auto show() -> void;
-    auto hide() -> void;
+    auto show() -> void override;
+    auto hide() -> void override;
+
+    auto get_text() -> std::wstring;
+    auto set_text(std::wstring text) -> void;
 };
 
 #endif

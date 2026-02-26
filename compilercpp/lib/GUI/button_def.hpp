@@ -3,12 +3,13 @@
 
 #include <functional>
 
+#include "object.hpp"
 #include "stu.hpp"
 #include "engine_decl.hpp"
 #include "rect_primitive_def.hpp"
 #include "text_primitive_def.hpp"
 
-class button_t {
+class button_t: public GUI_object {
 private:
     engine_t* m_engine{};
     pos_2D m_pos{};
@@ -33,8 +34,8 @@ public:
     button_t(engine_t* engine, pos_2D pos, size_2D size, size_1D border_size
     , std::wstring display_text, depth_range_t depth_range, std::function<void(void)> callback);
 
-    auto show() -> void;
-    auto hide() -> void;
+    auto show() -> void override;
+    auto hide() -> void override;
 };
 
 #endif

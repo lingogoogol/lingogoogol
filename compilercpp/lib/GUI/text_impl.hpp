@@ -14,4 +14,15 @@ auto text_t::hide() -> void {
     return;
 }
 
+auto text_t::get_text() -> std::wstring {
+    return m_text;
+}
+
+auto text_t::set_text(std::wstring text) -> void {
+    m_text = text;
+    m_engine->remove_text(m_primitive);
+    m_primitive = m_engine->add_text(m_text, m_pos, m_size, m_size_font, m_color, m_alignment);
+    return;
+}
+
 #endif

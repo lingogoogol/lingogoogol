@@ -43,16 +43,23 @@ private:
     std::set<std::function<void(pos_2D)>*> m_mouse_move{};
     std::set<std::function<void(pos_2D)>*> m_mouse_left_click{};
     std::set<std::function<void(pos_2D)>*> m_mouse_left_release{};
+    std::set<std::function<void(std::uint16_t)>*> m_key_down{};
+    std::set<std::function<void(wchar_t)>*> m_charw{};
     
-    static auto call_callback(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void;
+    static auto call_callback_pos(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void;
+    static auto call_callback_key(const std::set<std::function<void(std::uint16_t)>*>& callback, WPARAM wparam) -> void;
+    static auto call_callback_char(const std::set<std::function<void(wchar_t)>*>& callback, WPARAM wparam) -> void;
     static auto CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT;
 public:
     engine_t(HINSTANCE instance, size_2D window_size);
     engine_t(const engine_t&) = delete;
     ~engine_t();
     auto operator=(const engine_t&) = delete;
+
     auto flush() -> void;
     auto redraw() -> void;
+    auto get_window_size() -> size_2D;
+
     auto add_rect(pos_2D pos, size_2D size, color_t color, float depth) -> rect_primitive_t*;
     auto remove_rect(rect_primitive_t* in) -> void;
     auto add_text(std::wstring content, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment) -> text_primitive_t*;
@@ -64,13 +71,35 @@ public:
     auto remove_mouse_left_click(std::function<void(pos_2D)>* in) -> void;
     auto add_mouse_left_release(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;
     auto remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void;
+    auto add_key_down(std::function<void(std::uint16_t)> callback) -> std::function<void(std::uint16_t)>*;
+    auto remove_key_down(std::function<void(std::uint16_t)>* in) -> void;
+    auto add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>*;
+    auto remove_charw(std::function<void(wchar_t)>* in) -> void;
 };
 
-auto engine_t::call_callback(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void {
+auto engine_t::call_callback_pos(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void {
     std::function<void(pos_2D)>* current{};
     for (auto i{ callback.begin() }; i != callback.end(); i = callback.upper_bound(current)) {
         current = *i;
         (*current)(pos_2D{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) });
+    }
+    return;
+}
+
+auto engine_t::call_callback_key(const std::set<std::function<void(std::uint16_t)>*>& callback, WPARAM wparam) -> void {
+    std::function<void(std::uint16_t)>* current{};
+    for (auto i{ callback.begin() }; i != callback.end(); i = callback.upper_bound(current)) {
+        current = *i;
+        (*current)(wparam);
+    }
+    return;
+}
+
+auto engine_t::call_callback_char(const std::set<std::function<void(wchar_t)>*>& callback, WPARAM wparam) -> void {
+    std::function<void(wchar_t)>* current{};
+    for (auto i{ callback.begin() }; i != callback.end(); i = callback.upper_bound(current)) {
+        current = *i;
+        (*current)(wparam);
     }
     return;
 }
@@ -131,15 +160,23 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
         return 0;
     }
     case WM_MOUSEMOVE: {
-        call_callback(ptr->m_mouse_move, lparam);
+        call_callback_pos(ptr->m_mouse_move, lparam);
         return 0;
     }
     case WM_LBUTTONDOWN: {
-        call_callback(ptr->m_mouse_left_click, lparam);
+        call_callback_pos(ptr->m_mouse_left_click, lparam);
         return 0;
     }
     case WM_LBUTTONUP: {
-        call_callback(ptr->m_mouse_left_release, lparam);
+        call_callback_pos(ptr->m_mouse_left_release, lparam);
+        return 0;
+    }
+    case WM_KEYDOWN: {
+        call_callback_key(ptr->m_key_down, wparam);
+        return 0;
+    }
+    case WM_CHAR: {
+        call_callback_char(ptr->m_charw, wparam);
         return 0;
     }
     default: {
@@ -223,6 +260,10 @@ auto engine_t::redraw() -> void {
     return;
 }
 
+auto engine_t::get_window_size() -> size_2D {
+    return m_window_size;
+}
+
 auto engine_t::add_rect(pos_2D pos, size_2D size, color_t color, float depth) -> rect_primitive_t* {
     rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color } };
     m_rect_primitive.emplace(out);
@@ -285,6 +326,30 @@ auto engine_t::add_mouse_left_release(std::function<void(pos_2D)> callback) -> s
 
 auto engine_t::remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void {
     m_mouse_left_release.erase(in);
+    delete in;
+    return;
+}
+
+auto engine_t::add_key_down(std::function<void(std::uint16_t)> callback) -> std::function<void(std::uint16_t)>* {
+    std::function<void(std::uint16_t)>* out{ new std::function<void(std::uint16_t)>{ callback } };
+    m_key_down.emplace(out);
+    return out;
+}
+
+auto engine_t::remove_key_down(std::function<void(std::uint16_t)>* in) -> void {
+    m_key_down.erase(in);
+    delete in;
+    return;
+}
+
+auto engine_t::add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>* {
+    std::function<void(wchar_t)>* out{ new std::function<void(wchar_t)>{ callback } };
+    m_charw.emplace(out);
+    return out;
+}
+
+auto engine_t::remove_charw(std::function<void(wchar_t)>* in) -> void {
+    m_charw.erase(in);
     delete in;
     return;
 }

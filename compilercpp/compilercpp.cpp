@@ -111,10 +111,10 @@ namespace state {
     };
 }
 
-auto get_input(state_t* engine, std::string* out) -> void {
-    engine->save_state(state::normal);
-    engine->clear_state();
-    engine->add_text(L"你按了按鈕", pos_2D{ 0x0, 0x0 }, size_2D{ 0x100, 0x100 }, size_1D{ 0x20 }
+auto get_input(state_t* state, std::string* out) -> void {
+    state->save_state(state::normal);
+    state->clear_state();
+    state->add_object<text_input_t>(pos_2D{ 0x0, 0x0 }, state->get_engine()->get_window_size(), size_1D{ 0x20 }
     , color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top });
     return;
 }
@@ -131,7 +131,7 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
     engine_t engine{ instance, size_2D{ 0x400, 0x400 } };
     state_t state{ &engine };
     std::string input{};
-    state.add_button(pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, size_1D{ 0x4 }, L"按鈕", depth_range_t{ 0.0f, 1.0f }, std::bind(get_input, &state, &input));
+    state.add_object<button_t>(pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, size_1D{ 0x4 }, L"按鈕", depth_range_t{ 0.0f, 1.0f }, std::bind(get_input, &state, &input));
     MSG message{};
     BOOL message_get_result{};
     while ((message_get_result = GetMessageW(&message, NULL, 0, 0))) {
@@ -139,6 +139,7 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
             log_file("message_get\r\n");
             return -1;
         }
+        TranslateMessage(&message);
         DispatchMessageW(&message);
     }
 
