@@ -4,7 +4,8 @@
 namespace implement {
     struct Data;
 
-    extern Data* data;
+    Data* get_data();
+    bool get_data1();
 }
 
 #endif

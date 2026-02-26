@@ -1,13 +1,16 @@
+#ifndef LIBRARY_TEXT_D_H
+#define LIBRARY_TEXT_D_H
+
 #include <glad/glad.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#include <Library/text.h>
-#include <Library/debug_f.h>
-#include <Library/data.h>
+#include "text.h"
+#include "debug_f.h"
+#include "data.h"
 
-Text::Text(std::u32string text, float height, glm::vec3 color_param, glm::mat4 transform_mat_param) {
+inline Text::Text(std::u32string text, float height, glm::vec3 color_param, glm::mat4 transform_mat_param) {
 	color = color_param;
 	transform_mat = transform_mat_param;
 	set_text(text);
@@ -15,7 +18,7 @@ Text::Text(std::u32string text, float height, glm::vec3 color_param, glm::mat4 t
 	return;
 }
 
-void Text::render(unsigned int shader) {
+inline void Text::render(unsigned int shader) {
 	glEnable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
@@ -27,51 +30,51 @@ void Text::render(unsigned int shader) {
 	for (int i{ 0 }; i < text.size(); i++) {
 		glBindVertexArray(VAO[i]);
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, (*implement::data->chars)[text[i]].tex);
+		glBindTexture(GL_TEXTURE_2D, (*implement::get_data()->chars)[text[i]].tex);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 	}
 	glBindVertexArray(0);
 	return;
 }
 
-void Text::set_pos(glm::vec3 pos_param) {
+inline void Text::set_pos(glm::vec3 pos_param) {
 	pos = pos_param;
 	current_VBO();
 	return;
 }
 
-void Text::set_horizontal_alignment(Alignment horizontal_alignment_param) {
+inline void Text::set_horizontal_alignment(Alignment horizontal_alignment_param) {
 	horizontal_alignment = horizontal_alignment_param;
 	current_VBO();
 	return;
 }
 
-void Text::set_vertical_alignment(Alignment vertical_alignment_param) {
+inline void Text::set_vertical_alignment(Alignment vertical_alignment_param) {
 	vertical_alignment = vertical_alignment_param;
 	current_VBO();
 	return;
 }
 
-void Text::set_height(float height) {
-	vertical_scale = height / implement::data->text_resolution;
+inline void Text::set_height(float height) {
+	vertical_scale = height / implement::get_data()->text_resolution;
 	horizontal_scale = vertical_scale;
 	current_VBO();
 	return;
 }
 
-void Text::set_horizontal_dir(glm::vec3 horizontal_dir_param) {
+inline void Text::set_horizontal_dir(glm::vec3 horizontal_dir_param) {
 	horizontal_dir = horizontal_dir_param;
 	current_VBO();
 	return;
 }
 
-void Text::set_vertical_dir(glm::vec3 vertical_dir_param) {
+inline void Text::set_vertical_dir(glm::vec3 vertical_dir_param) {
 	vertical_dir = vertical_dir_param;
 	current_VBO();
 	return;
 }
 
-void Text::set_text(std::u32string text_param) {
+inline void Text::set_text(std::u32string text_param) {
 	for (int i{ 0 }; i < text.size(); i++) {
 		//...
 	}
@@ -80,32 +83,32 @@ void Text::set_text(std::u32string text_param) {
 	}
 	text = text_param;
 	for (int i{ 0 }; i < text.size(); i++) {
-		if (implement::data->chars->count(text[i]) == 0) {
-			if (FT_Load_Char(*implement::data->font_file, text[i], FT_LOAD_RENDER))
+		if (implement::get_data()->chars->count(text[i]) == 0) {
+			if (FT_Load_Char(*implement::get_data()->font_file, text[i], FT_LOAD_RENDER))
 				handle_error(U"error: Failed to load char.\n");
 			Character ch{};
 			glGenTextures(1, &ch.tex);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, ch.tex);
 			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, (*implement::data->font_file)->glyph->bitmap.width,
-				(*implement::data->font_file)->glyph->bitmap.rows, 0, GL_RED, GL_UNSIGNED_BYTE,
-				(*implement::data->font_file)->glyph->bitmap.buffer);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, (*implement::get_data()->font_file)->glyph->bitmap.width,
+				(*implement::get_data()->font_file)->glyph->bitmap.rows, 0, GL_RED, GL_UNSIGNED_BYTE,
+				(*implement::get_data()->font_file)->glyph->bitmap.buffer);
 			glGenerateMipmap(GL_TEXTURE_2D);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 			glBindTexture(GL_TEXTURE_2D, 0);
-			ch.advance = (*implement::data->font_file)->glyph->advance.x;
-			ch.width = (*implement::data->font_file)->glyph->bitmap.width;
-			ch.height = (*implement::data->font_file)->glyph->bitmap.rows;
-			ch.left_pos = (*implement::data->font_file)->glyph->bitmap_left;
-			ch.top_pos = (*implement::data->font_file)->glyph->bitmap_top;
+			ch.advance = (*implement::get_data()->font_file)->glyph->advance.x;
+			ch.width = (*implement::get_data()->font_file)->glyph->bitmap.width;
+			ch.height = (*implement::get_data()->font_file)->glyph->bitmap.rows;
+			ch.left_pos = (*implement::get_data()->font_file)->glyph->bitmap_left;
+			ch.top_pos = (*implement::get_data()->font_file)->glyph->bitmap_top;
 			ch.count = 0;
-			implement::data->chars->insert(std::pair<char32_t, Character>{text[i], ch});
+			implement::get_data()->chars->insert(std::pair<char32_t, Character>{text[i], ch});
 		}
-		(*implement::data->chars)[text[i]].count++;
+		(*implement::get_data()->chars)[text[i]].count++;
 	}
 	for (int i{ static_cast<int>(VAO.size()) }; i < text.size(); i++) {
 		unsigned int VAO_var{};
@@ -128,42 +131,41 @@ void Text::set_text(std::u32string text_param) {
 	return;
 }
 
-void Text::current_VBO() {
+inline void Text::current_VBO() {
 	if (text.size() == 0 || glm::length(horizontal_dir) == 0 || glm::length(vertical_dir) == 0)
 		return;
 	float width{ 0.0f };
 	int text_top{};
 	int text_bottom{};
 	for (int i{ 0 }; i < text.size(); i++) {
-		width += ((*implement::data->chars)[text[i]].advance >> 6) * horizontal_scale;
-		int current_top{ (*implement::data->chars)[text[i]].top_pos };
-		int current_bottom{ current_top - (*implement::data->chars)[text[i]].height };
-		if (current_top > text_top)
-			text_top = current_top;
-		if (current_bottom < text_bottom)
-			text_bottom = current_bottom;
+		width += ((*implement::get_data()->chars)[text[i]].advance >> 6) * horizontal_scale;
+		int top{ (*implement::get_data()->chars)[text[i]].top_pos };
+		int bottom{ top - (*implement::get_data()->chars)[text[i]].height };
+		if (top > text_top)
+			text_top = top;
+		if (bottom < text_bottom)
+			text_bottom = bottom;
 	}
 	glm::vec3 start_pos{ pos - horizontal_dir * width *
-		(horizontal_alignment == Alignment::Small ? 0.0f :
-			(horizontal_alignment == Alignment::Middle ? 0.5f : 1.0f))
-		- vertical_dir * (vertical_alignment == Alignment::Small ? static_cast<float>(text_bottom) :
-			(vertical_alignment == Alignment::Middle ? static_cast<float>(text_bottom + text_top) * 0.5f :
-				static_cast<float>(text_top))) * vertical_scale };
+		(horizontal_alignment == Alignment::Small ? 0.0f : (horizontal_alignment == Alignment::Middle ?
+		0.5f : 1.0f)) - vertical_dir * (vertical_alignment == Alignment::Small ?
+		static_cast<float>(text_bottom) : (vertical_alignment == Alignment::Middle ?
+		static_cast<float>(text_bottom + text_top) * 0.5f : static_cast<float>(text_top))) * vertical_scale };
 	float offset{ 0.0f };
 	for (int i{ 0 }; i < text.size(); i++) {
 		glm::vec3 current_pos{ start_pos + offset * horizontal_dir };
-		Character ch{ (*implement::data->chars)[text[i]] };
+		Character ch{ (*implement::get_data()->chars)[text[i]] };
 		glm::vec3 vertex1{ current_pos + static_cast<float>(ch.left_pos) * horizontal_dir * horizontal_scale + static_cast<float>(ch.top_pos - ch.height) * vertical_dir * vertical_scale };
 		glm::vec3 vertex2{ current_pos + static_cast<float>(ch.left_pos + ch.width) * horizontal_dir * horizontal_scale + static_cast<float>(ch.top_pos - ch.height) * vertical_dir * vertical_scale };
 		glm::vec3 vertex3{ current_pos + static_cast<float>(ch.left_pos) * horizontal_dir * horizontal_scale + static_cast<float>(ch.top_pos) * vertical_dir * vertical_scale };
 		glm::vec3 vertex4{ current_pos + static_cast<float>(ch.left_pos + ch.width) * horizontal_dir * horizontal_scale + static_cast<float>(ch.top_pos) * vertical_dir * vertical_scale };
 		float vertex_data[6][5] = {
-			{vertex1.x, vertex1.y, vertex1.z, 0.0f, 0.0f},
-			{vertex2.x, vertex2.y, vertex2.z, 1.0f, 0.0f},
-			{vertex3.x, vertex3.y, vertex3.z, 0.0f, 1.0f},
-			{vertex3.x, vertex3.y, vertex3.z, 0.0f, 1.0f},
-			{vertex2.x, vertex2.y, vertex2.z, 1.0f, 0.0f},
-			{vertex4.x, vertex4.y, vertex4.z, 1.0f, 1.0f},
+			{vertex1.x, vertex1.y, vertex1.z, 0.0f, 1.0f},
+			{vertex2.x, vertex2.y, vertex2.z, 1.0f, 1.0f},
+			{vertex3.x, vertex3.y, vertex3.z, 0.0f, 0.0f},
+			{vertex3.x, vertex3.y, vertex3.z, 0.0f, 0.0f},
+			{vertex2.x, vertex2.y, vertex2.z, 1.0f, 1.0f},
+			{vertex4.x, vertex4.y, vertex4.z, 1.0f, 0.0f},
 		};
 		glBindBuffer(GL_ARRAY_BUFFER, VBO[i]);
 		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float) * 5 * 6, vertex_data);
@@ -172,3 +174,5 @@ void Text::current_VBO() {
 	}
 	return;
 }
+
+#endif

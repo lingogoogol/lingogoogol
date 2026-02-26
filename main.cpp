@@ -33,8 +33,11 @@ void mouse_button_callback_home(GLFWwindow* window, int button, int action, int)
 void cursor_pos_callback_home(GLFWwindow* window, double x, double y) {
     glfwMakeContextCurrent(window);
     Home_data* data{ static_cast<Home_data*>(glfwGetWindowUserPointer(window)) };
+    int window_height{};
+    glfwGetWindowSize(window, nullptr, &window_height);
     for (int i{ 0 }; i < data->button.size(); i++)
-        if (data->button[i]->update_state_hover(static_cast<float>(x), static_cast<float>(y), data->main_window))
+        if (data->button[i]->update_state_hover(static_cast<float>(x),
+            static_cast<float>(window_height) - static_cast<float>(y), window))
             break;
     return;
 }
@@ -109,27 +112,31 @@ void home(Data_pv* data_global) {
     set_callback(nullptr, nullptr, cursor_pos_callback_home,
         mouse_button_callback_home, nullptr, nullptr, data);
     glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(data->main_window_width), static_cast<float>(data->main_window_height), 0.0f) };
+    int main_window_width{};
+    int main_window_height{};
+    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
+    glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(main_window_width),
+        0.0f, static_cast<float>(main_window_height)) };
     auto world_text{ new Text{U"歡迎！",64.0f,{0.0f,1.0f,1.0f},transform_mat} };
-    auto environment_text{ new Text{U"更新環境評估",32.0f,{0.0f,1.0f,1.0f},transform_mat} };
+    auto environment_text{ new Text{U"環境評估",32.0f,{0.0f,1.0f,1.0f},transform_mat} };
     world_text->set_pos({ 400.0f,300.0f,0.5f });
-    environment_text->set_pos({ 400.0f,400.0f,0.5f });
+    environment_text->set_pos({ 400.0f,200.0f,0.5f });
     data->text.push_back(world_text);
     data->text.push_back(environment_text);
     auto world_button{ new Button{200.0f,100.0f,transform_mat,
-        glm::vec3{0.8f,0.8f,0.0f},glm::vec3{0.7f,0.7f,0.0f},glm::vec3{0.9f,0.9f,0.0f},
+        {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
         [data]() {
             data->state = State::World;
         }
     } };
     auto environment_button{ new Button{100.0f,50.0f,transform_mat,
-        glm::vec3{0.8f,0.8f,0.0f},glm::vec3{0.7f,0.7f,0.0f},glm::vec3{0.9f,0.9f,0.0f},
+        {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
         [data]() {
             data->state = State::Environment;
         }
     } };
-    world_button->set_pos(glm::vec3{ 400.0f,300.0f,0.0f });
-    environment_button->set_pos(glm::vec3{ 400.0f,400.0f,0.0f });
+    world_button->set_pos({ 400.0f,300.0f,0.0f });
+    environment_button->set_pos({ 400.0f,200.0f,0.0f });
     data->button.push_back(world_button);
     data->button.push_back(environment_button);
     check_GL_error();
@@ -168,21 +175,24 @@ void environment(Data_pv* data_global) {
         mouse_button_callback_home, nullptr, nullptr, data);
     auto pointer{ new char8_t*[16384]{} };
     std::int_fast64_t size_i{ 0 };
+    int main_window_width{};
+    int main_window_height{};
+    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
     glm::mat4 transform_mat{ glm::ortho(0.0f, static_cast<float>(
-        data->main_window_width),static_cast<float>(data->main_window_height),0.0f) };
-    Text size_t{ U"約0位元組",50.0f,{0.0f,0.0f,0.0f},transform_mat,};
-    Text progress_t{U"",30.0f,{0.0f,0.0f,0.0f},transform_mat,};
-    Text home_text{ U"取消",48.0f,{0.0f,1.0f,1.0f},transform_mat,};
-    size_t.set_pos(glm::vec3{ 400.0f,300.0f,0.5f });
-    progress_t.set_pos(glm::vec3{ 400.0f,350.0f,0.5f });
-    home_text.set_pos({ 700.0f,550.0f,0.5f });
+        main_window_width),0.0f,static_cast<float>(main_window_height)) };
+    Text size_t{ U"約0位元組",50.0f,{0.0f,0.0f,0.0f},transform_mat};
+    Text progress_t{U"",30.0f,{0.0f,0.0f,0.0f},transform_mat};
+    Text home_text{ U"取消",48.0f,{0.0f,1.0f,1.0f},transform_mat};
+    size_t.set_pos({ 400.0f,300.0f,0.5f });
+    progress_t.set_pos({ 400.0f,250.0f,0.5f });
+    home_text.set_pos({ 700.0f,50.0f,0.5f });
     auto home_button{ new Button{128.0f,64.0f,transform_mat,
-        glm::vec3{0.8f,0.8f,0.0f},glm::vec3{0.7f,0.7f,0.0f},glm::vec3{0.9f,0.9f,0.0f},
+        {0.8f,0.8f,0.0f},{0.7f,0.7f,0.0f},{0.9f,0.9f,0.0f},
         [data]() {
             data->state = State::Home;
         }
     } };
-    home_button->set_pos({ 700.0f,550.0f,0.0f });
+    home_button->set_pos({ 700.0f,50.0f,0.0f });
     data->button.push_back(home_button);
     int index{ 0 };
     for (int i{ 1048576 }; i > 1048575; i--) {
@@ -252,7 +262,7 @@ void world(Data_pv* data_global) {
         for (int j{ 0 }; j < constant::block_num; j++) {
             data->blocks[i].push_back(std::vector<Copy_holder<Block*>>{});
             for (int k{ 0 }; k < constant::block_num; k++) {
-                data->blocks[i][j].push_back(Copy_holder{ new Block{glm::ivec3{0,0,0}},
+                data->blocks[i][j].push_back(Copy_holder{ new Block{{0,0,0}},
                     std::function<void(Block*)>(std::mem_fn(&Block::destruct)) });
                 (*data->blocks[i][j][k])->update(data);
             }
@@ -262,10 +272,16 @@ void world(Data_pv* data_global) {
     set_callback(key_callback_world, nullptr, cursor_pos_callback_world,
         nullptr, nullptr, nullptr, data);
     glfwSetInputMode(data->main_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    int main_window_width{};
+    int main_window_height{};
+    glfwGetWindowSize(data->main_window, &main_window_width, &main_window_height);
     data->projection = glm::perspective(data->angle_of_view,
-        (float)data->main_window_width / (float)data->main_window_height, 0.1f, 100.0f);
+        static_cast<float>(main_window_width) / static_cast<float>(main_window_height), 0.1f, 100.0f);
     check_GL_error();
-    unsigned int depth{ create_tex((float*)nullptr, GL_DEPTH_COMPONENT, data->main_window_width, data->main_window_height) };
+    int main_framebuffer_width{};
+    int main_framebuffer_height{};
+    glfwGetFramebufferSize(data->main_window, &main_framebuffer_width, &main_framebuffer_height);
+    unsigned int depth{ create_tex((float*)nullptr, GL_DEPTH_COMPONENT, main_framebuffer_width, main_framebuffer_height) };
     unsigned int FBO{ create_FBO(data->pos_shininess, data->normal_specular_strength, data->color, data->parent, depth) };
     while (!glfwWindowShouldClose(data->main_window) && data->state == State::World) {
         glfwMakeContextCurrent(data->main_window);
@@ -279,7 +295,7 @@ void world(Data_pv* data_global) {
         if (speed > deceleration)
             data->camera_speed *= (speed - deceleration) / speed;
         else if (speed <= deceleration)
-            data->camera_speed = glm::vec3(0, 0, 0);
+            data->camera_speed = { 0, 0, 0 };
         data->camera_pos += data->camera_speed * data->frame_period;
         glBindFramebuffer(GL_FRAMEBUFFER, FBO);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

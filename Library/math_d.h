@@ -1,20 +1,23 @@
+#ifndef LIBRARY_MATH_D_H
+#define LIBRARY_MATH_D_H
+
 #include <algorithm>
 #include <time.h>
 #include <chrono>
 
-#include <Library/math.h>
+#include "math.h"
 
-Plane::Plane(glm::vec3 point1, glm::vec3 point2, glm::vec3 point3) :
+inline Plane::Plane(glm::vec3 point1, glm::vec3 point2, glm::vec3 point3) :
     coefficient{ (point2 - point1) * (point3 - point1) }, constant{ glm::dot(coefficient, point1) } {
     return;
 }
 
-Line::Line(glm::vec3 origin_param, glm::vec3 point) :
+inline Line::Line(glm::vec3 origin_param, glm::vec3 point) :
     origin{ origin_param }, dir{ glm::normalize(point - origin_param) } {
     return;
 }
 
-std::string to_string8(float f, int precision) {
+inline std::string to_string8(float f, int precision) {
     int digit{ 0 };
     while (f / std::pow(10, digit) >= 1)
         digit += 1;
@@ -48,7 +51,7 @@ std::string to_string8(float f, int precision) {
     return s8;
 }
 
-std::string to_string8(double d, int precision) {
+inline std::string to_string8(double d, int precision) {
     int digit{ 0 };
     while (d / std::pow(10, digit) >= 1)
         digit += 1;
@@ -82,35 +85,35 @@ std::string to_string8(double d, int precision) {
     return s8;
 }
 
-std::string to_string8(std::u32string s32) {
+inline std::string to_string8(std::u32string s32) {
     std::string s8{};
     for (int i{ 0 }; i < s32.size(); i++)
         s8.push_back(static_cast<char>(s32[i]));
     return s8;
 }
 
-std::u32string to_string32(float f, int precision) {
+inline std::u32string to_string32(float f, int precision) {
     std::u32string s32{};
     return s32;
 }
 
-std::u32string to_string32(double d, int precision) {
+inline std::u32string to_string32(double d, int precision) {
     std::u32string s32{};
     return s32;
 }
 
-std::u32string to_string32(std::string s8) {
+inline std::u32string to_string32(std::string s8) {
     std::u32string s32{};
     for (int i{ 0 }; i < s8.size(); i++)
         s32.push_back(static_cast<char32_t>(s8[i]));
     return s32;
 }
 
-glm::vec3 Line::foot_of_perpendicular(glm::vec3 point) {
+inline glm::vec3 Line::foot_of_perpendicular(glm::vec3 point) {
     return origin + dir * glm::dot(point - origin, dir) / glm::dot(dir, dir);
 }
 
-std::string get_time() {
+inline std::string get_time() {
     std::time_t time{ std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) };
     char cstring[26]{};
     ctime_s(cstring, sizeof(cstring), &time);
@@ -187,3 +190,5 @@ std::string get_time() {
             string.push_back(cstring[i]);
     return string;
 }
+
+#endif

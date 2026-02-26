@@ -1,17 +1,20 @@
+#ifndef LIBRARY_GRAPHIC_D_H
+#define LIBRARY_GRAPHIC_D_H
+
 #include <glad/glad.h>
 
-#include <Library/graphic.h>
-#include <Library/debug_f.h>
-#include <Library/math_f.h>
-#include <Library/const_f.h>
-#include <Library/data_f.h>
+#include "graphic.h"
+#include "debug_f.h"
+#include "math_f.h"
+#include "const_f.h"
+#include "data_f.h"
 
-void Message_window_pv::destruct() {
+inline void Message_window_pv::destruct() {
     destruct1();
     return;
 }
 
-unsigned int create_shader(std::string vertex, std::string fragment) {
+inline unsigned int create_shader(std::string vertex, std::string fragment) {
     unsigned int vertex_shader{ glCreateShader(GL_VERTEX_SHADER) };
     const char* shader_code{ &(vertex[0]) };
     glShaderSource(vertex_shader, 1, &shader_code, NULL);
@@ -46,7 +49,7 @@ unsigned int create_shader(std::string vertex, std::string fragment) {
     return shader;
 }
 
-GLFWwindow* create_window(std::string title, unsigned int width, unsigned int height, bool resizeable) {
+inline GLFWwindow* create_window(std::string title, unsigned int width, unsigned int height, bool resizeable) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, OPENGL_VERSION_MAJOR);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, OPENGL_VERSION_MINOR);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -64,3 +67,5 @@ GLFWwindow* create_window(std::string title, unsigned int width, unsigned int he
     glViewport(0, 0, width, height);
     return window;
 }
+
+#endif

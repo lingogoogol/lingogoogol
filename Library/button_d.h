@@ -1,14 +1,17 @@
+#ifndef LIBRARY_BUTTON_D_H
+#define LIBRARY_BUTTON_D_H
+
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <Library/button.h>
-#include <Library/graphic.h>
+#include "button.h"
+#include "graphic.h"
 
-Button::Button(float width_param, float height_param, glm::mat4 transform_mat_param,
+inline Button::Button(float width_param, float height_param, glm::mat4 transform_mat_param,
 	glm::vec3 normal_color_param, glm::vec3 hovered_color_param, glm::vec3 clicked_color_param,
-	std::function<void()> func_param) :
+	std::function<void(Button&)> func_param) :
 	width{ width_param }, height{ height_param }, transform_mat{ transform_mat_param },
 	normal_color{ normal_color_param }, hovered_color{ hovered_color_param }, clicked_color{ clicked_color_param },
 	func{ func_param } {
@@ -17,13 +20,13 @@ Button::Button(float width_param, float height_param, glm::mat4 transform_mat_pa
 	return;
 }
 
-void Button::set_pos(glm::vec3 pos_param) {
+inline void Button::set_pos(glm::vec3 pos_param) {
 	pos = pos_param;
 	current_VBO();
 	return;
 }
 
-void Button::render(unsigned int shader) {
+inline void Button::render(unsigned int shader) {
 	glEnable(GL_DEPTH_TEST);
 	glDisable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
@@ -37,7 +40,7 @@ void Button::render(unsigned int shader) {
 	return;
 }
 
-bool Button::update_state_hover(float x, float y, GLFWwindow* window) {
+inline bool Button::update_state_hover(float x, float y, GLFWwindow* window) {
 	if (x >= left && x < right && y >= bottom && y < top)
 		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT))
 			button_state = Button_state::Clicked;
@@ -48,17 +51,17 @@ bool Button::update_state_hover(float x, float y, GLFWwindow* window) {
 	return button_state != Button_state::Normal;
 }
 
-bool Button::update_state_click(int action) {
+inline bool Button::update_state_click(int action) {
 	if (button_state != Button_state::Normal)
 		if (action == GLFW_PRESS)
 			button_state = Button_state::Clicked;
 		else if (action == GLFW_RELEASE) {
-			func();
+			func(*this);
 		}
 	return button_state != Button_state::Normal;
 }
 
-void Button::allocate_VAO() {
+inline void Button::allocate_VAO() {
 	glGenVertexArrays(1, &VAO);
 	glBindVertexArray(VAO);
 	glGenBuffers(1, &VBO);
@@ -70,7 +73,7 @@ void Button::allocate_VAO() {
 	glBindVertexArray(0);
 }
 
-void Button::current_VBO() {
+inline void Button::current_VBO() {
 	left = pos.x - width * (horizontal_alignment == Alignment::Small ? 0.0f :
 		(horizontal_alignment == Alignment::Middle ? 0.5f : 1.0f));
 	right = left + width;
@@ -90,3 +93,5 @@ void Button::current_VBO() {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	return;
 }
+
+#endif

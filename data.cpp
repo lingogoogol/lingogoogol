@@ -10,20 +10,17 @@
 Data_pv::Data_pv() :
 	text_resolution{ 256 }, main_window{}, logfile{ new std::ofstream{} }, current_time{}, last_time{},
 	frame_period{}, shader{ new Shader{} }, font_file{}, character{}, text{}, state{}, button{}, message_window{},
-	view{}, projection{}, main_window_width{}, main_window_height{} {
-	implement::data = new implement::Data{};
-	implement::data->text_resolution = text_resolution;
-	implement::data->logfile = logfile;
-	implement::data->message_windows = &message_window;
-	implement::data->font_file = &font_file;
-	implement::data->chars = &character;
-	implement::data->main_window = &main_window;
+	view{}, projection{} {
+	implement::get_data()->text_resolution = text_resolution;
+	implement::get_data()->logfile = logfile;
+	implement::get_data()->message_windows = &message_window;
+	implement::get_data()->font_file = &font_file;
+	implement::get_data()->chars = &character;
+	implement::get_data()->main_window = &main_window;
 	logfile->open(".\\logfile\\" + get_time() + ".txt");
 	glfwInit();
 	main_window = create_window("a fun game", constant::main_window_width, constant::main_window_height, false);
 	glfwSetWindowUserPointer(main_window, this);
-	main_window_width = constant::main_window_width;
-	main_window_height = constant::main_window_height;
 	shader->text = create_shader(implement::text_vertex_shader, implement::text_fragment_shader);
 	shader->button = create_shader(constant::button_vertex_shader, constant::button_fragment_shader);
 	shader->transparent_cell = create_shader(constant::transparent_cell_vertex_shader, constant::transparent_cell_fragment_shader);
@@ -95,9 +92,12 @@ void World_data::setup() {
 	pitch = 0.0f;
 	tiles = {};
 	blocks = {};
-	pos_shininess = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height);
-	normal_specular_strength = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height);
-	color = create_tex((float*)nullptr, GL_RGBA, main_window_width, main_window_height);
-	parent = create_tex((int*)nullptr, GL_RGBA, main_window_width, main_window_height);
+	int main_framebuffer_width{};
+	int main_framebuffer_height{};
+	glfwGetFramebufferSize(main_window, &main_framebuffer_width, &main_framebuffer_height);
+	pos_shininess = create_tex((float*)nullptr, GL_RGBA, main_framebuffer_width, main_framebuffer_height);
+	normal_specular_strength = create_tex((float*)nullptr, GL_RGBA, main_framebuffer_width, main_framebuffer_height);
+	color = create_tex((float*)nullptr, GL_RGBA, main_framebuffer_width, main_framebuffer_height);
+	parent = create_tex((int*)nullptr, GL_RGBA, main_framebuffer_width, main_framebuffer_height);
 	return;
 }

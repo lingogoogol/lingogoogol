@@ -54,8 +54,6 @@ public:
     std::vector<Copy_holder<Message_window_pv*>> message_window{};
     glm::mat4 view{};
     glm::mat4 projection{};
-    int main_window_width{};
-    int main_window_height{};
     Data_pv();
     ~Data_pv();
 };

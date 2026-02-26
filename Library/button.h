@@ -27,10 +27,10 @@ public:
 	glm::vec3 normal_color{};
 	glm::vec3 hovered_color{};
 	glm::vec3 clicked_color{};
-	std::function<void()> func{};
+	std::function<void(Button&)> func{};
 	Button(float width_param, float height_param, glm::mat4 transform_mat_param,
 		glm::vec3 normal_color_param, glm::vec3 hovered_color_param, glm::vec3 clicked_color_param,
-		std::function<void(void)> func_param);
+		std::function<void(Button&)> func_param);
 	void set_pos(glm::vec3 pos_param);
 	void render(unsigned int shader);
 	bool update_state_hover(float x, float y, GLFWwindow* window);

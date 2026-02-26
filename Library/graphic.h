@@ -56,8 +56,8 @@ void Message_window<T1>::process(int index) {
 		if constexpr (T1 == Message_window_type::Error) {
 			while (!glfwWindowShouldClose(window))
 				process1();
-			for (int i{ 0 }; i < implement::data->message_windows->size(); i++)
-				(*implement::data->message_windows)[i].~Copy_holder();
+			for (int i{ 0 }; i < implement::get_data()->message_windows->size(); i++)
+				(*implement::get_data()->message_windows)[i].~Copy_holder();
 			glfwTerminate();
 			std::exit(0);
 		}
@@ -65,7 +65,7 @@ void Message_window<T1>::process(int index) {
 			process1();
 	}
 	else
-		(*implement::data->message_windows)[index].~Copy_holder();
+		(*implement::get_data()->message_windows)[index].~Copy_holder();
 	return;
 }
 
@@ -81,12 +81,12 @@ void Message_window<T1>::process1() {
 
 template<Message_window_type T1>
 void Message_window<T1>::destruct1() {
-	glfwMakeContextCurrent(*implement::data->main_window);
+	glfwMakeContextCurrent(*implement::get_data()->main_window);
 	glfwDestroyWindow(window);
 	for (std::vector<Copy_holder<Message_window_pv*>>::iterator
-		i{ implement::data->message_windows->begin() }; i != implement::data->message_windows->end(); i++)
+		i{ implement::get_data()->message_windows->begin() }; i != implement::get_data()->message_windows->end(); i++)
 		if (static_cast<Message_window<T1>*>(**i) == this) {
-			implement::data->message_windows->erase(i);
+			implement::get_data()->message_windows->erase(i);
 			break;
 		}
 	return;
