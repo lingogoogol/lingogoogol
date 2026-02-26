@@ -10,104 +10,75 @@
 #include "constant.hpp"
 #include "setting.hpp"
 
-auto dos_header(std::ostream& ostream) -> void {
-    pad_integer(ostream, std::uint16_t{ 0x5A4D });
+auto dos_header(code_stream& stream) -> void {
+    stream.pad_int(std::uint16_t{ 0x5A4D });
     for (std::uint8_t i{ 0 }; i < 29; ++i) {
-        pad_integer(ostream, std::uint16_t{ 0x0 });
+        stream.pad_int(std::uint16_t{ 0x0 });
     }
-    std::streampos LFA_new{ ostream.tellp() };
-    pad_integer(ostream, std::uint32_t{});
-    fill_integer(ostream, LFA_new, static_cast<std::uint32_t>(ostream.tellp()));
+    stream.pad_address_ref("PE_signature", code_stream::resolver_overwrite_address(code_stream::raw_ptr, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_def("PE_signature");
     return;
 }
 
-auto signature(std::ostream& ostream) -> void {
-    pad_integer(ostream, std::uint32_t{ 0x00004550 });
+auto signature(code_stream& stream) -> void {
+    stream.pad_int(std::uint32_t{ 0x00004550 });
     return;
 }
 
-struct coff_file_header_missing_field {
-    std::streampos m_number_of_sections{};
-    std::streampos m_size_of_optional_header{};
-};
-
-[[nodiscard]]
-auto coff_file_header(std::ostream& ostream) -> coff_file_header_missing_field {
-    pad_integer(ostream, machine_type::AMD64);
-    const std::streampos number_of_sections{ ostream.tellp() };
-    pad_integer(ostream, std::uint16_t{});
-    pad_integer(ostream, static_cast<std::uint32_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
-    pad_integer(ostream, std::uint32_t{ 0 });
-    pad_integer(ostream, std::uint32_t{ 0 });
-    const std::streampos size_of_optional_header{ ostream.tellp() };
-    pad_integer(ostream, std::uint16_t{});
-    pad_integer(ostream, setting::characteristics);
-    return coff_file_header_missing_field{ number_of_sections, size_of_optional_header };
-}
-
-struct optional_header_missing_field {
-    std::streampos m_size_of_code{};
-    std::streampos m_size_of_initialized_data{};
-    std::streampos m_size_of_uninitialized_data{};
-    std::streampos m_address_of_entry_point{};
-    std::streampos m_base_of_code{};
-    
-    std::streampos m_size_of_image{};
-    std::streampos m_size_of_headers{};
-
-    std::streampos m_export_table{};
-    std::streampos m_import_table{};
-    std::streampos m_resource_table{};
-    std::streampos m_exception_table{};
-    std::streampos m_certificate_table{};
-    std::streampos m_base_relocation_table{};
-    std::streampos m_tls_table{};
-    std::streampos m_load_config_table{};
-    std::streampos m_IAT{};
-    std::streampos m_delay_import_descriptor{};
-};
-
-auto optional_header_standard(std::ostream& ostream, optional_header_missing_field& missing_field) -> void {
-    pad_integer(ostream, std::uint16_t{ 0x20B });
-    pad_integer(ostream, setting::linker_version_major);
-    pad_integer(ostream, setting::linker_version_minor);
-    missing_field.m_size_of_code = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    missing_field.m_size_of_initialized_data = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    missing_field.m_size_of_uninitialized_data = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    missing_field.m_address_of_entry_point = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    missing_field.m_base_of_code = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
+auto coff_file_header(code_stream& stream, std::uint16_t section_count) -> void {
+    stream.pad_int(machine_type::AMD64);
+    stream.pad_int(section_count);
+    stream.pad_int(static_cast<std::uint32_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
+    stream.pad_int(std::uint32_t{ 0x0 });
+    stream.pad_int(std::uint32_t{ 0x0 });
+    stream.pad_address_ref("optional_header", code_stream::resolver_overwrite_size(code_stream::raw_ptr, 2));
+    stream.pad_int(std::uint16_t{});
+    stream.pad_int(setting::characteristics);
     return;
 }
 
-auto optional_header_windows(std::ostream& ostream, optional_header_missing_field& missing_field) -> void {
-    pad_integer(ostream, setting::image_base);
-    pad_integer(ostream, setting::virtual_alignment);
-    pad_integer(ostream, setting::file_alignment);
-    pad_integer(ostream, setting::required_operating_system_version_major);
-    pad_integer(ostream, setting::required_operating_system_version_minor);
-    pad_integer(ostream, setting::image_version_major);
-    pad_integer(ostream, setting::image_version_minor);
-    pad_integer(ostream, setting::subsystem_version_major);
-    pad_integer(ostream, setting::subsystem_version_minor);
-    pad_integer(ostream, std::uint32_t{ 0 });
-    missing_field.m_size_of_image = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    missing_field.m_size_of_headers = ostream.tellp();
-    pad_integer(ostream, std::uint32_t{});
-    pad_integer(ostream, std::uint32_t{ 0 });
-    pad_integer(ostream, windows_subsystem::WINDOWS_CUI);
-    pad_integer(ostream, setting::dll_characteristics);
-    pad_integer(ostream, setting::size_stack_reserve);
-    pad_integer(ostream, setting::size_stack_commit);
-    pad_integer(ostream, setting::size_heap_reserve);
-    pad_integer(ostream, setting::size_heap_commit);
-    pad_integer(ostream, std::uint32_t{ 0 });
-    pad_integer(ostream, std::uint32_t{ 0x10 });
+auto optional_header_standard(code_stream& stream) -> void {
+    stream.pad_int(std::uint16_t{ 0x20B });
+    stream.pad_int(setting::linker_version_major);
+    stream.pad_int(setting::linker_version_minor);
+    stream.pad_address_ref("code", code_stream::resolver_overwrite_size_sum(code_stream::raw_ptr, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref("initialized_data", code_stream::resolver_overwrite_size_sum(code_stream::raw_ptr, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref("uninitialized_data", code_stream::resolver_overwrite_size_sum(code_stream::raw_ptr, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref("entry_point", code_stream::resolver_overwrite_address(code_stream::RVA, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref("code_begin0", code_stream::resolver_overwrite_address(code_stream::RVA, 4));
+    stream.pad_int(std::uint32_t{});
+    return;
+}
+
+auto optional_header_windows(code_stream& stream) -> void {
+    stream.pad_int(setting::image_base);
+    stream.pad_int(setting::virtual_alignment);
+    stream.pad_int(setting::file_alignment);
+    stream.pad_int(setting::required_operating_system_version_major);
+    stream.pad_int(setting::required_operating_system_version_minor);
+    stream.pad_int(setting::image_version_major);
+    stream.pad_int(setting::image_version_minor);
+    stream.pad_int(setting::subsystem_version_major);
+    stream.pad_int(setting::subsystem_version_minor);
+    stream.pad_int(std::uint32_t{ 0 });
+    stream.pad_address_ref("image", code_stream::resolver_overwrite_size(code_stream::RVA, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref("header", code_stream::resolver_overwrite_size(code_stream::raw_ptr, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_int(std::uint32_t{ 0 });
+    stream.pad_int(windows_subsystem::WINDOWS_CUI);
+    stream.pad_int(setting::dll_characteristics);
+    stream.pad_int(setting::size_stack_reserve);
+    stream.pad_int(setting::size_stack_commit);
+    stream.pad_int(setting::size_heap_reserve);
+    stream.pad_int(setting::size_heap_commit);
+    stream.pad_int(std::uint32_t{ 0 });
+    stream.pad_int(std::uint32_t{ 0x10 });
     return;
 }
 
@@ -116,49 +87,45 @@ struct data_directory {
     std::uint32_t m_size{ 0 };
 };
 
-auto pad_data_directory(std::ostream& ostream, const data_directory& in) -> void {
-    pad_integer(ostream, in.m_virtual_address);
-    pad_integer(ostream, in.m_size);
+auto pad_data_directory(code_stream& stream, const data_directory& in) -> void {
+    stream.pad_int(in.m_virtual_address);
+    stream.pad_int(in.m_size);
     return;
 }
 
-auto optional_header_data_directory(std::ostream& ostream, optional_header_missing_field& missing_field) -> void {
-    missing_field.m_export_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_import_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_resource_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_exception_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_certificate_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_base_relocation_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    pad_data_directory(ostream, { 0, 0 });
-    pad_data_directory(ostream, { 0, 0 });
-    pad_data_directory(ostream, { 0, 0 });
-    missing_field.m_tls_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_load_config_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    pad_data_directory(ostream, { 0, 0 });
-    missing_field.m_IAT = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.m_delay_import_descriptor = ostream.tellp();
-    pad_data_directory(ostream, {});
-    pad_data_directory(ostream, { 0, 0 });
-    pad_data_directory(ostream, { 0, 0 });
+auto pad_data_directory_empty(code_stream& stream, std::string name) -> void {
+    stream.pad_address_ref(name + "_begin", code_stream::resolver_overwrite_address_if_exist(code_stream::RVA, 4));
+    stream.pad_int(std::uint32_t{});
+    stream.pad_address_ref(name, code_stream::resolver_overwrite_size_if_exist(code_stream::RVA, 4));
+    stream.pad_int(std::uint32_t{});
     return;
 }
 
-[[nodiscard]]
-auto optional_header(std::ostream& ostream) -> optional_header_missing_field {
-    optional_header_missing_field missing_field{};
-    optional_header_standard(ostream, missing_field);
-    optional_header_windows(ostream, missing_field);
-    optional_header_data_directory(ostream, missing_field);
-    return missing_field;
+auto optional_header_data_directory(code_stream& stream) -> void {
+    pad_data_directory_empty(stream, "export_table");
+    pad_data_directory_empty(stream, "import_table");
+    pad_data_directory_empty(stream, "resource_table");
+    pad_data_directory_empty(stream, "exception_table");
+    pad_data_directory_empty(stream, "certificate_table");
+    pad_data_directory_empty(stream, "base_relocation_table");
+    pad_data_directory(stream, { 0, 0 });
+    pad_data_directory(stream, { 0, 0 });
+    pad_data_directory(stream, { 0, 0 });
+    pad_data_directory_empty(stream, "tls_table");
+    pad_data_directory_empty(stream, "load_config_table");
+    pad_data_directory(stream, { 0, 0 });
+    pad_data_directory_empty(stream, "IAT");
+    pad_data_directory_empty(stream, "delay_import_descriptor");
+    pad_data_directory(stream, { 0, 0 });
+    pad_data_directory(stream, { 0, 0 });
+    return;
+}
+
+auto optional_header(code_stream& stream) -> void {
+    optional_header_standard(stream);
+    optional_header_windows(stream);
+    optional_header_data_directory(stream);
+    return;
 }
 
 #endif

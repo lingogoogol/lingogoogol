@@ -1,5 +1,5 @@
-#ifndef FILE
-#define FILE
+#ifndef WORKSPACE_TASK_FILE
+#define WORKSPACE_TASK_FILE
 
 #include <filesystem>
 #include <fstream>
@@ -11,11 +11,13 @@
 #include "cst.hpp"
 
 enum class filetype {
+    directory,
     headerunit,
     interface,
     implementation,
     source,
-    hlsl
+    hlsl,
+    rc
 };
 
 std::filesystem::path canonical(const std::string& in) {
@@ -111,6 +113,9 @@ auto set_file(const std::filesystem::path& filename, const std::string& file) ->
 }
 
 auto get_filetype(const std::filesystem::path& filename) -> filetype {
+    if (std::filesystem::is_directory(filename)) {
+        return filetype::directory;
+    }
     std::string filename_s{ filename.string() };
     if (filename_s.ends_with(".h") || filename_s.ends_with(".hpp")
     || !std::regex_search(filename_s, std::regex{ "\\.[^\\\\]+$" })) {
@@ -129,6 +134,9 @@ auto get_filetype(const std::filesystem::path& filename) -> filetype {
     }
     else if (filename_s.ends_with(".hlsl")) {
         return filetype::hlsl;
+    }
+    else if (filename_s.ends_with(".rc")) {
+        return filetype::rc;
     }
     else {
         std::cout << "The file extension is not supported: " + filename_s << std::endl;

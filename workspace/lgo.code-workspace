@@ -13,8 +13,8 @@
 			"path": "../game"
 		},
 		{
-			"name": "installer",
-			"path": "../installer"
+			"name": "storage",
+			"path": "../storage"
 		},
 		{
 			"name": "compilercpp",
@@ -35,10 +35,17 @@
 		{
 			"name": "bug",
 			"path": "../bug"
+		},
+		{
+			"name": "math",
+			"path": "../math"
+		},
+		{
+			"path": "../homework"
 		}
 	],
 	"settings": {
-		"C_Cpp.default.compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.40.33807\\bin\\Hostx64\\x64\\cl.exe",
+		"C_Cpp.default.compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
 		"C_Cpp.default.defines": [
 			"_DEBUG",
 			"UNICODE",
@@ -46,94 +53,16 @@
 		],
 		"C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
 		"C_Cpp.default.includePath": [
-			"C:\\lingogoogol\\programming\\external\\header\\",
-			"C:\\lingogoogol\\programming\\_YY\\workspace\\source\\"
+			"C:/lingogoogol/programming/include/",
+			"C:/lingogoogol/programming/source/",
+			"C:/lingogoogol/Application/vcpkg/installed/x64-windows/include/"
 		],
 		"C_Cpp.default.cppStandard": "c++23",
 		"editor.smoothScrolling": true,
 		"terminal.integrated.smoothScrolling": true,
 		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
 		"editor.unicodeHighlight.includeStrings": false,
-		"C_Cpp.intelliSenseEngine": "default",
 		"explorer.autoReveal": false,
-		"files.associations": {
-			"iostream": "cpp",
-			"xstring": "cpp",
-			"istream": "cpp",
-			"xutility": "cpp",
-			"algorithm": "cpp",
-			"atomic": "cpp",
-			"bit": "cpp",
-			"cctype": "cpp",
-			"charconv": "cpp",
-			"chrono": "cpp",
-			"clocale": "cpp",
-			"cmath": "cpp",
-			"codecvt": "cpp",
-			"compare": "cpp",
-			"concepts": "cpp",
-			"csignal": "cpp",
-			"cstddef": "cpp",
-			"cstdint": "cpp",
-			"cstdio": "cpp",
-			"cstdlib": "cpp",
-			"cstring": "cpp",
-			"ctime": "cpp",
-			"cwchar": "cpp",
-			"exception": "cpp",
-			"forward_list": "cpp",
-			"list": "cpp",
-			"string": "cpp",
-			"vector": "cpp",
-			"filesystem": "cpp",
-			"format": "cpp",
-			"fstream": "cpp",
-			"functional": "cpp",
-			"initializer_list": "cpp",
-			"iomanip": "cpp",
-			"ios": "cpp",
-			"iosfwd": "cpp",
-			"iterator": "cpp",
-			"limits": "cpp",
-			"locale": "cpp",
-			"map": "cpp",
-			"memory": "cpp",
-			"new": "cpp",
-			"optional": "cpp",
-			"ostream": "cpp",
-			"random": "cpp",
-			"ratio": "cpp",
-			"regex": "cpp",
-			"sstream": "cpp",
-			"stdexcept": "cpp",
-			"streambuf": "cpp",
-			"system_error": "cpp",
-			"tuple": "cpp",
-			"type_traits": "cpp",
-			"typeinfo": "cpp",
-			"unordered_map": "cpp",
-			"utility": "cpp",
-			"xfacet": "cpp",
-			"xhash": "cpp",
-			"xiosbase": "cpp",
-			"xlocale": "cpp",
-			"xlocbuf": "cpp",
-			"xlocinfo": "cpp",
-			"xlocmes": "cpp",
-			"xlocmon": "cpp",
-			"xlocnum": "cpp",
-			"xloctime": "cpp",
-			"xmemory": "cpp",
-			"xtr1common": "cpp",
-			"xtree": "cpp",
-			"stacktrace": "cpp",
-			"array": "cpp",
-			"queue": "cpp",
-			"deque": "cpp",
-			"ranges": "cpp",
-			"span": "cpp",
-			"set": "cpp"
-		},
 		"terminal.integrated.cwd": "../../"
 	},
 	"tasks": {
@@ -145,8 +74,49 @@
 				"command": "middle/task.exe",
 				"args": [
 					"C++",
+					"latest",
 					"debug",
 					"${file}",
+					"no_module",
+					"hide_line",
+					"show_command"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "C++ Debug Custom1",
+				"command": "middle/task.exe",
+				"args": [
+					"C++",
+					"latest",
+					"debug",
+					"C:\\lingogoogol\\programming\\source\\homework\\2\\HW12",
+					"no_module",
+					"hide_line",
+					"show_command"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "C++ Debug Custom2",
+				"command": "middle/task.exe",
+				"args": [
+					"C++",
+					"latest",
+					"debug",
+					"C:\\lingogoogol\\programming\\source\\test\\test1",
 					"no_module",
 					"hide_line",
 					"show_command"
@@ -164,10 +134,31 @@
 				"command": "middle/task.exe",
 				"args": [
 					"C++",
+					"latest",
 					"release",
 					"${file}",
 					"no_module",
 					"hide_line"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
+			},
+			{
+				"type": "process",
+				"label": "C++11 Debug",
+				"command": "middle/task.exe",
+				"args": [
+					"C++",
+					"11",
+					"debug",
+					"${file}",
+					"no_module",
+					"hide_line",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"
@@ -243,6 +234,21 @@
 				"group": {
 					"kind": "build"
 				}
+			},
+			{
+				"type": "process",
+				"label": "RC",
+				"command": "middle/task.exe",
+				"args": [
+					"RC",
+					"${file}"
+				],
+				"options": {
+					"cwd": "${cwd}/../../"
+				},
+				"group": {
+					"kind": "build"
+				}
 			}
 		]
 	},
@@ -254,6 +260,32 @@
 				"type": "cppvsdbg",
 				"request": "launch",
 				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
+				"cwd": "${cwd}/",
+				"args": [
+					"source/temp/setting"
+				],
+				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
+				"requireExactSource": true,
+				"console": "integratedTerminal"
+			},
+			{
+				"name": "Debug Custom1",
+				"type": "cppvsdbg",
+				"request": "launch",
+				"program": "C:\\lingogoogol\\programming\\output\\HW12.exe",
+				"cwd": "${cwd}",
+				"args": [
+					"source/temp/setting"
+				],
+				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
+				"requireExactSource": true,
+				"console": "integratedTerminal"
+			},
+			{
+				"name": "Debug Custom2",
+				"type": "cppvsdbg",
+				"request": "launch",
+				"program": "C:\\lingogoogol\\programming\\output\\HW12.exe",
 				"cwd": "${cwd}",
 				"args": [
 					"source/temp/setting"

@@ -1,3 +1,5 @@
-int main() {
-	return 0;
+#include <iostream>
+auto asdfghjkl() -> void {
+	std::cout << "iostream";
+	return;
 }

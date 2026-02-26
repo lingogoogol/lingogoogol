@@ -10,6 +10,8 @@
 
 #include "file.hpp"
 
+#include "../file.hpp"
+
 constexpr inline int hide_line{ 0b00000001 };
 constexpr inline int show_command{ 0b00000010 };
 constexpr inline int preprocess{ 0b00000100 };
@@ -56,25 +58,25 @@ auto fild_directory(const std::filesystem::path& base
 }
 
 auto find_msvc() -> std::filesystem::path {
-    return fild_directory("C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/", "/bin/Hostx64/x64/");
+    return fild_directory(CSV_to_map(".\\middle\\setting.csv")["MSVC_path_root"], CSV_to_map(".\\middle\\setting.csv")["MSVC_path_bin"]);
 }
 
 auto find_dxc() -> std::filesystem::path {
-    return fild_directory("C:/lingogoogol/application/", "/bin/x64/");
+    return fild_directory(CSV_to_map(".\\middle\\setting.csv")["DXC_path_root"], CSV_to_map(".\\middle\\setting.csv")["DXC_path_bin"]);
 }
 
 auto call(const std::string& command, int flag) -> void {
     if (flag & show_command) {
         std::cout << command << '\n';
     }
-    if (std::system(('\"' + command + '\"').c_str()) != 0) {
+    if (std::system(("\"" + command + "\"").c_str()) != 0) {
         throw std::string{ "The compilation failed." };
     }
     return;
 }
 
 auto add_arg(std::string& command, const std::string& arg) -> void {
-    command += arg + ' ';
+    command += arg + " ";
     return;
 }
 

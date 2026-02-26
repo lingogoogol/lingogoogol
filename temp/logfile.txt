@@ -1,1 +1,2 @@
-complete
+CWD: C:\lingogoogol\programming
+完成

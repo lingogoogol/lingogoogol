@@ -4,6 +4,7 @@
 class stmt_pv {
 public:
     virtual ~stmt_pv() = default;
+    virtual auto save(std::ostream& dest) -> void = 0;
 };
 
 #endif

@@ -20,6 +20,10 @@ public:
     auto name() const -> const std::string& {
         return m_name;
     }
+
+    auto save(std::ostream& dest) -> void {
+        return;
+    }
 };
 
 #endif

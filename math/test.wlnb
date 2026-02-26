@@ -1,0 +1,63 @@
+{
+ "cells": [
+  {
+   "kind": 2,
+   "value": "N[(60!)^2/(40!)^3]",
+   "languageId": "wolfram",
+   "outputs": [
+    {
+     "items": [
+      {
+       "data": "<div class=\"wexpr\"><wsup><w></w><w>1.27472&#215;10</w><w><w>20</w></w></wsup></div>",
+       "mime": "x-application/wolfram-language-html"
+      },
+      {
+       "data": "1.2747191032859927*^20",
+       "mime": "text/plain"
+      }
+     ],
+     "id": "8290bdff-a548-476e-8506-da6bd81bcb07",
+     "metadata": {
+      "cellLabel": "Out[2]= ",
+      "isBoxData": false
+     }
+    }
+   ],
+   "metadata": {},
+   "executionSummary": {}
+  },
+  {
+   "kind": 2,
+   "value": "InverseLaplaceTransform[s^2,s,t]",
+   "languageId": "wolfram",
+   "outputs": [
+    {
+     "items": [
+      {
+       "data": "<div class=\"wexpr\"><wrow><w></w><wsup><w></w><w>DiracDelta</w><w><w class=\"small-symbol\"></w></w></wsup><wrow><w></w><wb>[</wb><w>t</w><wb>]</wb></wrow></wrow></div>",
+       "mime": "x-application/wolfram-language-html"
+      },
+      {
+       "data": "Derivative[2][DiracDelta][t]",
+       "mime": "text/plain"
+      }
+     ],
+     "id": "be331234-9ded-4c8b-9d8e-5463793a753e",
+     "metadata": {
+      "cellLabel": "Out[3]= ",
+      "isBoxData": false
+     }
+    }
+   ],
+   "metadata": {},
+   "executionSummary": {
+    "timing": {
+     "startTime": 1763441938666,
+     "endTime": 1763441938819
+    },
+    "executionOrder": 3,
+    "success": true
+   }
+  }
+ ]
+}

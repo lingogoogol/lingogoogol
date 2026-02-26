@@ -10,7 +10,6 @@ namespace cst {
         "/EHsc",
         "/volatile:iso",
         "/permissive-",
-        "/std:c++latest",
         "/source-charset:utf-8",
         "/Zc:enumTypes",
         "/W4",
@@ -41,10 +40,14 @@ namespace cst {
         "iostream"
     };
     std::vector<std::string> hpp_dir{
-        "../external/header/",
-        "source/"
+        "source/",
+        "include/",
+        "C:/lingogoogol/application/vcpkg/installed/x64-windows/include/"
     };
-    std::string lib_dir{ "../external/library/" };
+    std::vector<std::string> lib_dir{
+        "lib/",
+        "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
+    };
     std::string ifch_dir{ "middle/ifch/" };
     std::string ifcm_dir{ "middle/ifcm/" };
     std::string ppc_dir{ "middle/ppc/" };

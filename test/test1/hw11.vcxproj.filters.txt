@@ -1,0 +1,171 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="來源檔案">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="標頭檔">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="資源檔">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="BaseMonster.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="Battle.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="field.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="GoblinMonster.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="JWMonster.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="KnightPlayer.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="MagicianPlayer.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="NovicePlayer.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="OrcPlayer.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="ZombieMonster.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="Item.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="ArmorItem.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="ConsumableItem.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="SwordWeapon.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="WeaponItem.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="AxeWeapon.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="ShieldArmor.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="TunicArmor.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="LifePotion.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="MagicPotion.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="Game.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+    <ClCompile Include="MainMenu.cpp">
+      <Filter>來源檔案</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="BaseMonster.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="Battle.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="field.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="GoblinMonster.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="JWMonster.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="KnightPlayer.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="MagicianPlayer.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="NovicePlayer.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="OrcPlayer.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="ZombieMonster.h">
+      <Filter>來源檔案</Filter>
+    </ClInclude>
+    <ClInclude Include="Item.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="WeaponItem.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="ArmorItem.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="ConsumableItem.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="SwordWeapon.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="AxeWeapon.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="ShieldArmor.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="TunicArmor.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="LifePotion.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="MagicPotion.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="Game.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="Menu.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="MainMenu.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="Event.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="TalkEvent.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="TreasureEvent.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+    <ClInclude Include="ChangeMapEvent.h">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

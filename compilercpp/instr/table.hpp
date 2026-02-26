@@ -9,6 +9,24 @@
 
 std::map<mnemonic::mnemonic_t, std::vector<instr_entry>> instr_table{
     {
+        mnemonic::ADD,
+        {
+            {
+                { { operand_entry::AL, operand_entry::discard }, { operand_entry::imm8, operand_entry::imm } },
+                { { opcode::constant, 0x04 } }
+            }
+        }
+    },
+    {
+        mnemonic::CALL,
+        {
+            {
+                { { operand_entry::rel32, operand_entry::imm } },
+                { { opcode::constant, 0xE8 } }
+            }
+        }
+    },
+    {
         mnemonic::XOR,
         {
             {
@@ -19,7 +37,12 @@ std::map<mnemonic::mnemonic_t, std::vector<instr_entry>> instr_table{
     },
     {
         mnemonic::RET,
-        {}
+        {
+            {
+                {},
+                { { opcode::constant, 0xC3 } }
+            }
+        }
     }
 };
 

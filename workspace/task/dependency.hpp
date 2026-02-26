@@ -98,12 +98,12 @@ auto update_dependency(const std::filesystem::path& filename, std::vector<std::s
     std::vector<std::string> missing{ difference(imports, import_file) };
     for (int i{ 0 }; i < missing.size(); ++i) {
         std::filesystem::path export_filename{ module_to_export_filename(root, missing[i]) };
-        set_file(export_filename, get_file(export_filename) + missing[i] + '\n');
+        set_file(export_filename, get_file(export_filename) + missing[i] + "\n");
     }
     
     std::string import_file_s{};
     for (int i{ 0 }; i < imports.size(); ++i) {
-        import_file_s += imports[i] + '\n';
+        import_file_s += imports[i] + "\n";
     }
     set_file(module_to_import_filename(root, basename.string()), import_file_s);
     return;

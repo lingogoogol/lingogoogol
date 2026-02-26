@@ -30,10 +30,10 @@ public:
         }
         catch (std::ios_base::failure&) {
             if (src.eof()) {
-                throw error{ error::eof };
+                throw error_t{ "全域物件結束" };
             }
             else {
-                log_file("source reading\n");
+                throw internal_error_t{ "讀取原始碼檔案時發生錯誤" };
             }
         }
 
@@ -45,7 +45,7 @@ public:
             m_data = new ::fun{ src };
             break;
         default:
-            throw error{ error::global_type };
+            throw error_t{ "未知的全域物件種類" };
         }
     }
 
@@ -55,6 +55,12 @@ public:
 
     auto to_fun() -> ::fun& {
         return *dynamic_cast<::fun*>(m_data);
+    }
+
+    auto save(std::ostream& dest) -> void {
+        dest.put(m_type);
+        m_data->save(dest);
+        return;
     }
 };
 
