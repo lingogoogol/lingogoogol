@@ -258,8 +258,8 @@
 				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
 				"cwd": "${cwd}",
 				"args": [
-					"source/compilercpp/compiler",
-					"source/compilercpp/compiler.exe"
+					"source/test/compiler",
+					"source/test/compiler.exe"
 				],
 				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
 				"requireExactSource": true,
