@@ -8,18 +8,23 @@
 #include <string>
 
 constexpr inline std::ios_base::iostate file_exception_mask{ std::ios_base::badbit | std::ios_base::failbit | std::ios_base::eofbit };
+const std::string default_logfile_path{ "logfile.txt" };
 
-auto create_ofstream(const std::wstring& path, std::ios_base::openmode mode) -> std::ofstream {
+auto create_ofstream(const std::wstring& path, std::ios_base::openmode mode = std::ios_base::out | std::ios_base::binary | std::ios_base::trunc) -> std::ofstream {
     std::ofstream out{};
     out.open(path, mode);
-    out.exceptions(file_exception_mask);
+    if (!out.fail()) {
+        out.exceptions(file_exception_mask);
+    }
     return out;
 }
 
-auto create_ifstream(const std::wstring& path, std::ios_base::openmode mode) -> std::ifstream {
+auto create_ifstream(const std::wstring& path, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::binary) -> std::ifstream {
     std::ifstream out{};
     out.open(path, mode);
-    out.exceptions(file_exception_mask);
+    if (!out.fail()) {
+        out.exceptions(file_exception_mask);
+    }
     return out;
 }
 
@@ -28,14 +33,34 @@ auto get_logfile() -> std::ofstream& {
     return logfile;
 }
 
-auto init_logfile(const std::wstring& path) -> void {
-    get_logfile().open(path, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc);
-    get_logfile().exceptions(file_exception_mask);
+auto log_file(const std::string& in) -> void {
+    for (std::size_t i{ 0 }; i < in.size(); ++i) {
+        get_logfile().put(in[i]);
+    }
     return;
 }
 
-auto log_file(const std::string& in) -> void {
-    get_logfile() << in;
+auto init_logfile(PWSTR arg) -> void {
+    int argc{};
+    LPWSTR* argv{ CommandLineToArgvW(arg, &argc) };
+    if (argc >= 1) {
+        get_logfile().open(argv[0]);
+    }
+    else {
+        get_logfile().open(default_logfile_path);
+    }
+    bool bad_filename{ false };
+    if (get_logfile().fail()) {
+        get_logfile().open(default_logfile_path);
+        bad_filename = true;
+    }
+    get_logfile().exceptions(file_exception_mask);
+    if (argc > 1) {
+        log_file("command_line_argument_count\n");
+    }
+    if (bad_filename) {
+        log_file("logfile_path\n");
+    }
     return;
 }
 

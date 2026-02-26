@@ -21,10 +21,13 @@ private:
     color_t m_color{};
     alignment_2D m_alignment{};
     text_primitive_t* m_primitive{};
+protected:
+    auto init(engine_t* engine, std::wstring text, pos_2D text_pos, size_2D text_size
+    , pos_2D clip_pos, size_2D clip_size, size_1D font_size, color_t color, alignment_2D alignment) -> void;
 public:
     text_t() = default;
     text_t(engine_t* engine, std::wstring text, pos_2D text_pos, size_2D text_size
-    , pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment);
+    , pos_2D clip_pos, size_2D clip_size, size_1D font_size, color_t color, alignment_2D alignment);
 
     auto get_text() -> std::wstring;
     auto set_text(std::wstring text) -> void;
@@ -38,6 +41,20 @@ public:
     auto show() -> void override;
     auto hide() -> void override;
 };
+
+auto text_t::init(engine_t* engine, std::wstring text, pos_2D text_pos, size_2D text_size
+, pos_2D clip_pos, size_2D clip_size, size_1D font_size, color_t color, alignment_2D alignment) -> void {
+    m_engine = engine;
+    m_text = text;
+    m_text_pos = text_pos;
+    m_text_size = text_size;
+    m_clip_pos = clip_pos;
+    m_clip_size = clip_size;
+    m_font_size = font_size;
+    m_color = color;
+    m_alignment = alignment;
+    return;
+}
 
 text_t::text_t(engine_t* engine, std::wstring text, pos_2D text_pos, size_2D text_size
 , pos_2D clip_pos, size_2D clip_size, size_1D font_size, color_t color, alignment_2D alignment)

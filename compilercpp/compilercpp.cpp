@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <filesystem>
 #include <functional>
 
 #define UNICODE
@@ -24,7 +25,60 @@
 #pragma comment(lib, "D2d1.lib")
 #pragma comment(lib, "Dwrite.lib")
 
-auto compile(std::istream& source, std::ostream& exe) -> void {
+class setting_t {
+public:
+    std::wstring source_filename{};
+    std::wstring exe_filename{};
+};
+
+auto message_loop(engine_t* engine) -> bool {
+    MSG message{};
+    BOOL message_get_result{ GetMessageW(&message, NULL, 0, 0) };
+    if (!message_get_result) {
+        engine->set_exit();
+        return true;
+    }
+    if (message_get_result == -1) {
+        log_file("message_get\n");
+        engine->set_exit();
+        return true;
+    }
+    TranslateMessage(&message);
+    DispatchMessageW(&message);
+    return false;
+}
+
+auto get_input_callback(state_t* state, std::wstring* out, std::uint64_t input_id, std::uint64_t previous_state) -> void {
+    *out = state->get_object<text_input_t>(input_id).lock()->get_text();
+    state->restore_state(previous_state);
+    state->remove_state(previous_state);
+    return;
+}
+
+auto get_input(state_t* state, std::wstring prompt, std::wstring* out) -> void {
+    std::uint64_t previous_state{ state->save_state() };
+    state->clear_state();
+    state->add_object<text_t>(prompt, pos_2D{ 0x80, 0x80 }, size_2D{ 0x300, 0x40 }
+    , pos_2D{ 0x80, 0x80 }, size_2D{ 0x300, 0x40 }, size_1D{ 0x10 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::center });
+    std::uint64_t input_id{ state->add_object<text_input_t>(pos_2D{ 0x80, 0xC0 }, size_2D{ 0x300, 0x270 }, 0.0f
+    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top }) };
+    state->add_object<button_t>(pos_2D{ 0x1C0, 0x340 }, size_2D{ 0x80, 0x40 }, size_1D{ 0x4 }, L"確定", depth_range_t{ 0.0f, 1.0f }
+    , std::bind(get_input_callback, state, out, input_id, previous_state));
+    return;
+}
+
+auto compile(state_t* state, setting_t* setting) -> void {
+    std::ifstream source{ create_ifstream(setting->source_filename) };
+    if (source.fail()) {
+        get_input(state, L"輸入原始碼檔案位置：", &setting->source_filename);
+        return;
+    }
+    std::ofstream exe{ create_ofstream(setting->exe_filename) };
+    if (exe.fail()) {
+        get_input(state, L"輸入執行檔輸出位置：", &setting->exe_filename);
+        return;
+    }
+
     std::string entrance{ get_string(source) };
 
     std::vector<fun> funs{};
@@ -36,7 +90,7 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
                 funs.push_back(get.to_fun());
                 break;
             default:
-                log_file("global type\r\n");
+                log_file("global type\n");
             }
         }
     }
@@ -101,57 +155,42 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
         pad_section(exe, sections[i], section_header_missing_fields[i], virtual_address);
     }
     fill_integer(exe, optional_header_missing_field_obj.m_size_of_image, virtual_address);
+
+    source.close();
+    exe.close();
     return;
 }
 
-namespace state {
-    enum state: std::uint64_t {
-        normal,
-        input
-    };
+auto change_setting() -> void {
+    return;
 }
 
-auto get_input(state_t* state, std::string* out) -> void {
-    state->save_state(state::normal);
+auto edit(state_t* state, setting_t* setting, std::weak_ptr<text_input_t> source_filename_input) -> void {
+    state->save_state();
     state->clear_state();
-    std::uint64_t text_input{ state->add_object<text_input_t>(pos_2D{ 0x0, 0x0 }, size_2D{ state->get_engine()->get_window_size().x, 0x100 }
-    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top }) };
-    state->add_object<text_scroll_t>(L"有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字有滾動條的字", pos_2D{ 0x0, 0x100 }, size_2D{ state->get_engine()->get_window_size().x, 0x300 }, 0.0f
-    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top });
+    std::wstring source_filename{ source_filename_input.lock()->get_text() };
+    setting->source_filename = source_filename;
+    state->add_object<text_t>(source_filename, pos_2D{ 0x0, 0x0 }, size_2D{ 0x300, 0x40 }
+    , pos_2D{ 0x0, 0x0 }, size_2D{ 0x300, 0x40 }, size_1D{ 0x10 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::center });
+    state->add_object<button_t>(pos_2D{ 0x300, 0x0 }, size_2D{ 0x80, 0x40 }, size_1D{ 0x4 }
+    , L"更改設定", depth_range_t{ 0.0f, 1.0f }, std::bind(change_setting));
+    state->add_object<button_t>(pos_2D{ 0x380, 0x0 }, size_2D{ 0x80, 0x40 }, size_1D{ 0x4 }
+    , L"開始編譯", depth_range_t{ 0.0f, 1.0f }, std::bind(compile, state, setting));
     return;
 }
 
 auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arg, int) -> int {
-    int argc{};
-    LPWSTR* argv{ CommandLineToArgvW(arg, &argc) };
-    if (argc != 3) {
-        log_file("command_line_argument_count");
-    }
-
-    init_logfile(argv[2]);
+    init_logfile(arg);
     init_directx();
     engine_t engine{ instance, size_2D{ 0x400, 0x400 } };
     state_t state{ &engine };
-    std::string input{};
-    state.add_object<button_t>(pos_2D{ 0x100, 0x100 }, size_2D{ 0x50, 0x50 }, size_1D{ 0x4 }, L"按鈕", depth_range_t{ 0.0f, 1.0f }, std::bind(get_input, &state, &input));
-    MSG message{};
-    BOOL message_get_result{};
-    while ((message_get_result = GetMessageW(&message, NULL, 0, 0))) {
-        if (message_get_result == -1) {
-            log_file("message_get\r\n");
-            return -1;
-        }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
+    setting_t setting{};
+    std::uint64_t source_filename_input_id{ state.add_object<text_input_t>(pos_2D{ 0x100, 0x1E0 }, size_2D{ 0x170, 0x40 }, 0.0f
+    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top }) };
+    state.add_object<button_t>(pos_2D{ 0x280, 0x1E0 }, size_2D{ 0x80, 0x40 }, size_1D{ 0x4 }
+    , L"開啟原始碼", depth_range_t{ 0.0f, 1.0f }, std::bind(edit, &state, &setting, state.get_object<text_input_t>(source_filename_input_id)));
+    while (!message_loop(&engine)) {}
 
-    std::ifstream source{ create_ifstream(argv[0], std::ios_base::in | std::ios_base::binary) };
-    std::ofstream exe{ create_ofstream(argv[1], std::ios_base::out
-    | std::ios_base::binary | std::ios_base::trunc) };
-    compile(source, exe);
-
-    source.close();
-    exe.close();
-    log_file("complete\r\n");
+    log_file("complete\n");
     return 0;
 }

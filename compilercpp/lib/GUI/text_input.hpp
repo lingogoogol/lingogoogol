@@ -3,45 +3,50 @@
 
 #include <functional>
 
-#include "object.hpp"
-#include "text.hpp"
+#include "text_scroll.hpp"
 
 #include "../stu.hpp"
 #include "../GUI_primitive/engine_decl.hpp"
 
-class text_input_t: public GUI_object {
+class text_input_t: public text_scroll_t {
 private:
     engine_t* m_engine{};
-    text_t m_text{};
     std::function<void(wchar_t)>* m_callback{};
 
-    auto callback(wchar_t in) -> void;
+    auto text_input_callback(wchar_t in) -> void;
 public:
     text_input_t() = default;
-    text_input_t(engine_t* engine, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment);
+    text_input_t(engine_t* engine, pos_2D pos, size_2D size, float depth, size_1D size_font, color_t color, alignment_2D alignment);
 
     auto show() -> void override;
     auto hide() -> void override;
 };
 
-auto text_input_t::callback(wchar_t in) -> void {
-    std::wstring text{ m_text.get_text() };
-    text.push_back(in);
-    m_text.set_text(text);
+auto text_input_t::text_input_callback(wchar_t in) -> void {
+    std::wstring text{ get_text() };
+    if (in == '\b') {
+        if (!text.empty()) {
+            text.pop_back();
+        }
+    }
+    else {
+        text.push_back(in);
+    }
+    set_text(text);
     return;
 }
 
-text_input_t::text_input_t(engine_t* engine, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment)
-: m_engine{ engine }, m_text{ engine, L"", pos, size, pos, size, size_font, color, alignment } {}
+text_input_t::text_input_t(engine_t* engine, pos_2D pos, size_2D size, float depth, size_1D size_font, color_t color, alignment_2D alignment)
+: text_scroll_t{ engine, L"", pos, size, depth, size_font, color, alignment }, m_engine{ engine } {}
 
 auto text_input_t::show() -> void {
-    m_text.show();
-    m_callback = m_engine->add_charw(std::bind(&text_input_t::callback, this, std::placeholders::_1));
+    text_scroll_t::show();
+    m_callback = m_engine->add_charw(std::bind(&text_input_t::text_input_callback, this, std::placeholders::_1));
     return;
 }
 
 auto text_input_t::hide() -> void {
-    m_text.hide();
+    text_scroll_t::hide();
     m_engine->remove_charw(m_callback);
     return;
 }

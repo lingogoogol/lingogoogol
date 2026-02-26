@@ -21,12 +21,14 @@ private:
     rect_border_t m_rect{};
     text_t m_text{};
     std::function<void(pos_2D)>* m_mouse_move_callback{};
+    std::function<void(void)>* m_mouse_leave_callback{};
     std::function<void(pos_2D)>* m_mouse_left_click_callback{};
     std::function<void(pos_2D)>* m_mouse_left_release_callback{};
     std::function<void(void)> m_callback{};
     bool m_clicked_inside{};
     
     auto mouse_move_callback(pos_2D pos) -> void;
+    auto mouse_leave_callback() -> void;
     auto mouse_left_click_callback(pos_2D pos) -> void;
     auto mouse_left_release_callback(pos_2D pos) -> void;
 public:
@@ -52,6 +54,13 @@ auto button_t::mouse_move_callback(pos_2D pos) -> void {
         m_rect.content_set_color(color_t{ 0.0f, 0.0f, 0.0f });
         m_text.set_color(color_t{ 1.0f, 1.0f, 1.0f });
     }
+    return;
+}
+
+auto button_t::mouse_leave_callback() -> void {
+    m_rect.border_set_color(color_t{ 1.0f, 1.0f, 1.0f });
+    m_rect.content_set_color(color_t{ 0.0f, 0.0f, 0.0f });
+    m_text.set_color(color_t{ 1.0f, 1.0f, 1.0f });
     return;
 }
 
@@ -87,8 +96,10 @@ auto button_t::show() -> void {
     m_rect.show();
     m_text.show();
     m_mouse_move_callback = m_engine->add_mouse_move(std::bind(&button_t::mouse_move_callback, this, std::placeholders::_1));
+    m_mouse_leave_callback = m_engine->add_mouse_leave(std::bind(&button_t::mouse_leave_callback, this));
     m_mouse_left_click_callback = m_engine->add_mouse_left_click(std::bind(&button_t::mouse_left_click_callback, this, std::placeholders::_1));
     m_mouse_left_release_callback = m_engine->add_mouse_left_release(std::bind(&button_t::mouse_left_release_callback, this, std::placeholders::_1));
+    mouse_move_callback(m_engine->get_cursor_pos());
     return;
 }
 
@@ -96,6 +107,7 @@ auto button_t::hide() -> void {
     m_text.hide();
     m_rect.hide();
     m_engine->remove_mouse_move(m_mouse_move_callback);
+    m_engine->remove_mouse_leave(m_mouse_leave_callback);
     m_engine->remove_mouse_left_click(m_mouse_left_click_callback);
     m_engine->remove_mouse_left_release(m_mouse_left_release_callback);
     return;

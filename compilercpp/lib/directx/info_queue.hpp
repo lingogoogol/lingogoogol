@@ -14,7 +14,11 @@ auto log_info_queue(Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue) -> void 
         info_queue->GetMessage(i, nullptr, &message_len);
         D3D12_MESSAGE* info{ reinterpret_cast<D3D12_MESSAGE*>(new std::byte[message_len]{}) };
         info_queue->GetMessage(i, info, &message_len);
-        log_file(std::string{ info->pDescription } + "\r\n");
+        std::string error_message{ info->pDescription };
+        if (error_message != "ID3D12Device::CreateCommittedResource: "
+        "Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.") {
+            log_file(error_message + "\n");
+        }
     }
     return;
 }

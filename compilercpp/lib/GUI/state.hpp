@@ -16,7 +16,8 @@ private:
 
     engine_t* m_engine{};
     instance_t m_current{};
-    std::uint64_t m_current_id{};
+    std::uint64_t m_current_id_object{};
+    std::uint64_t m_current_id_save{};
     std::map<std::uint64_t, instance_t> m_saved{};
 public:
     state_t(engine_t* engine);
@@ -31,7 +32,7 @@ public:
     template<typename t_object>
     auto get_object(std::uint64_t id) -> std::weak_ptr<t_object>;
     auto remove_object(std::uint64_t id) -> void;
-    auto save_state(std::uint64_t id) -> void;
+    auto save_state() -> std::uint64_t;
     auto clear_state() -> void;
     auto restore_state(std::uint64_t id) -> void;
     auto remove_state(std::uint64_t id) -> void;
@@ -50,9 +51,9 @@ auto state_t::get_engine() -> engine_t* {
 
 template<typename t_object, typename... t_arg>
 auto state_t::add_object(t_arg&&... arg) -> std::uint64_t {
-    m_current.emplace(m_current_id, std::make_shared<t_object>(m_engine, std::forward<t_arg&&>(arg)...));
-    m_current[m_current_id]->show();
-    return m_current_id++;
+    m_current.emplace(m_current_id_object, std::make_shared<t_object>(m_engine, std::forward<t_arg&&>(arg)...));
+    m_current[m_current_id_object]->show();
+    return m_current_id_object++;
 }
 
 template<typename t_object>
@@ -66,9 +67,9 @@ auto state_t::remove_object(std::uint64_t id) -> void {
     return;
 }
 
-auto state_t::save_state(std::uint64_t id) -> void {
-    m_saved.emplace(id, m_current);
-    return;
+auto state_t::save_state() -> std::uint64_t {
+    m_saved.emplace(m_current_id_save, m_current);
+    return m_current_id_save++;
 }
 
 auto state_t::clear_state() -> void {
@@ -80,6 +81,7 @@ auto state_t::clear_state() -> void {
 }
 
 auto state_t::restore_state(std::uint64_t id) -> void {
+    clear_state();
     m_current = m_saved[id];
     for (auto i{ m_current.begin() }; i != m_current.end(); ++i) {
         i->second->show();

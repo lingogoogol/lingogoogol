@@ -46,7 +46,7 @@ auto push_section(std::vector<section>& sections, const std::string& name
         section_size.m_uninitialized_data += raw_size;
     }
     else {
-        log_file("section flag\r\n");
+        log_file("section flag\n");
     }
     sections.push_back(section{ name, &segment, raw_size, size, characteristics });
     return;
@@ -55,7 +55,7 @@ auto push_section(std::vector<section>& sections, const std::string& name
 [[nodiscard]]
 auto pad_section_header(std::ostream& ostream, const section& in) -> section_header_missing_field {
     if (in.m_name.size() > 8) {
-        log_file("section name length\r\n");
+        log_file("section name length\n");
     }
     ostream.write(in.m_name.data(), 8);
     pad_integer(ostream, in.m_virtual_size);
