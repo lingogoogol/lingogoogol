@@ -16,6 +16,11 @@ private:
 public:
     fun(std::istream& src) {
         m_name = get_string(src);
+        std::uint64_t stmt_count{ get_integer<std::uint64_t>(src) };
+        for (int i{ 0 }; i < stmt_count; ++i) {
+            m_stmt.push_back(stmt{ src });
+        }
+        return;
     }
 
     virtual ~fun() = default;

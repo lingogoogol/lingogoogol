@@ -27,6 +27,13 @@ auto get_integer(std::istream& src) -> t_out {
     return out;
 }
 
+template<typename t_out>
+auto get_integer(std::istream& src, std::uint8_t size) -> t_out {
+    t_out out{};
+    src.read(reinterpret_cast<char*>(&out), size);
+    return out;
+}
+
 template<typename t_in>
 auto pad_integer(std::ostream& dest, t_in in) -> void {
     dest.write(reinterpret_cast<const char*>(&in), sizeof in);

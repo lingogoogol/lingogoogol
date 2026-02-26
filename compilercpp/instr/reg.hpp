@@ -4,7 +4,9 @@
 #include <cstdint>
 
 namespace reg {
-    enum: std::uint8_t {
+    using reg_t = std::uint8_t;
+
+    enum: reg_t {
         general_begin,
         AL,
         CL,

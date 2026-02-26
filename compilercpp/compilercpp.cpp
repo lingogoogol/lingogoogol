@@ -108,9 +108,11 @@ auto main(int argc, char** argv) -> int {
 
         source.close();
         exe.close();
+        std::cout << "complete\n";
+        return 0;
     //}
     /*catch (std::exception& e) {
         std::cout << "an error occurred: " << e.what() << '\n';
+        return 1;
     }*/
-    return 0;
 }

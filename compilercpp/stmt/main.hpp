@@ -5,6 +5,9 @@
 #include <iostream>
 #include <vector>
 
+#include "../lib/.hpp"
+#include "../instr/.hpp"
+
 #include "pv.hpp"
 
 class stmt {
@@ -13,13 +16,24 @@ public:
 
     enum: type_t {
         expr,
+        instr,
         ret
     };
 private:
     type_t m_type{};
     stmt_pv* m_data{};
 public:
-    stmt(std::istream& src) {}
+    stmt(std::istream& src) {
+        m_type = get_integer<type_t>(src);
+        switch (m_type) {
+        case instr:
+            m_data = new ::instr{ src };
+            break;
+        default:
+            throw internal_error{ "stmt type" };
+        }
+        return;
+    }
 
     auto type() -> type_t {
         return m_type;

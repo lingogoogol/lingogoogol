@@ -3,21 +3,39 @@
 
 #include <vector>
 #include <cstdint>
+#include <iostream>
+
+#include "../lib/.hpp"
+#include "../stmt/pv.hpp"
 
 #include "table.hpp"
 #include "operand.hpp"
 
-struct instr {
+class instr: public stmt_pv {
+public:
     using option_t = std::uint8_t;
 
     enum: option_t {};
-
+private:
     mnemonic::mnemonic_t m_mnemonic{};
     std::vector<option_t> m_option{};
     std::vector<operand> m_operand{};
+public:
+    instr(std::istream& src) {
+        m_mnemonic = get_integer<mnemonic::mnemonic_t>(src);
+        std::uint8_t option_len{ get_integer<std::uint8_t>(src) };
+        for (std::uint8_t i{ 0 }; i < option_len; ++i) {
+            m_option.push_back(get_integer<option_t>(src));
+        }
+        std::uint8_t operand_len{ get_integer<std::uint8_t>(src) };
+        for (std::uint8_t i{ 0 }; i < operand_len; ++i) {
+            m_operand.push_back(operand{ src });
+        }
+        return;
+    }
 
     auto fit(const instr_entry& in) -> bool {
-        bool out{ true };
+        bool out{ m_operand.size() == in.m_operand.size() };
         for (std::uint8_t i{ 0 }; i < m_operand.size(); ++i) {
             out = out && m_operand[i].fit(in.m_operand[i]);
         }
