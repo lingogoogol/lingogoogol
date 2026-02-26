@@ -1,3 +1,5 @@
-1 256 "C:/lingogoogol/programming/output/vertex.cso"
-2 256 "C:/lingogoogol/programming/output/pixel.cso"
-3 256 "C:/lingogoogol/programming/font/NotoSansTC-VariableFont_wght.ttf"
+1 256 "C:/lingogoogol/programming/output/solid_vertex.cso"
+2 256 "C:/lingogoogol/programming/output/solid_pixel.cso"
+3 256 "C:/lingogoogol/programming/output/texture_vertex.cso"
+4 256 "C:/lingogoogol/programming/output/texture_pixel.cso"
+5 256 "C:/lingogoogol/programming/font/NotoSansTC-VariableFont_wght.ttf"

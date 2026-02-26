@@ -14,7 +14,7 @@
 #include "text_def.hpp"
 
 #include "../../lib/stu.hpp"
-#include "../directx/command_queue_smart.hpp"
+#include "../directx/command_queue.hpp"
 #include "../directx/command_list.hpp"
 #include "../directx/create.hpp"
 #include "../directx/init.hpp"
@@ -35,7 +35,7 @@ private:
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_RT{};
     Microsoft::WRL::ComPtr<ID3D12Resource> m_DS{};
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_DSV_heap{};
-    command_queue_smart m_command_queue{};
+    command_queue_t m_command_queue{};
     std::vector<UINT64> m_buffer_fence_value{};
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_RTV_heap{};
     UINT m_RTV_size{};
@@ -84,6 +84,8 @@ public:
     auto get_window_pos() -> pos_2D;
     auto get_window_size() -> size_2D;
     auto get_cursor_pos() -> pos_2D;
+    auto device_get() const -> Microsoft::WRL::ComPtr<ID3D12Device2>;
+    auto command_queue_get() -> command_queue_t&;
 
     auto add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t*;
     auto remove_rect(rect_primitive_t* in) -> void;
@@ -106,14 +108,6 @@ public:
     auto add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>*;
     auto remove_charw(std::function<void(wchar_t)>* in) -> void;
 };
-
-auto directx_api(HRESULT result, engine_t* engine) -> HRESULT {
-    engine->log_info_queue();
-    if (result != S_OK) {
-        throw;
-    }
-    return result;
-}
 
 auto engine_t::track_mouse_event() -> void {
     TRACKMOUSEEVENT stu{};
@@ -193,20 +187,10 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
         viewport.MinDepth = D3D12_MIN_DEPTH;
         viewport.MaxDepth = D3D12_MAX_DEPTH;
         command_list->RSSetViewports(1, &viewport);
-        D3D12_RECT scissor_rect{};
-        scissor_rect.left = 0;
-        scissor_rect.top = 0;
-        scissor_rect.right = static_cast<LONG>(ptr->m_window_size.x);
-        scissor_rect.bottom = static_cast<LONG>(ptr->m_window_size.y);
-        command_list->RSSetScissorRects(1, &scissor_rect);
         command_list->OMSetRenderTargets(1, &RTV_handle, false, &DSV_handle);
-        rect_primitive_t::render_begin(command_list, ptr);
         std::unique_lock rect_lock{ ptr->m_rect_mutex };
-        for (auto i{ ptr->m_rect_primitive.begin() }; i != ptr->m_rect_primitive.end(); ++i) {
-            (*i)->render(command_list);
-        }
+        rect_primitive_t::render(ptr->m_rect_primitive, command_list);
         rect_lock.unlock();
-        rect_primitive_t::render_end();
         ptr->m_command_queue.execute_list(command_list);
         text_primitive_t::render_begin(ptr->m_frame_index);
         std::unique_lock text_lock{ ptr->m_text_mutex };
@@ -268,23 +252,25 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
 engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ window_size } {
     Microsoft::WRL::ComPtr<IDXGIFactory5> factory{ create_factory(true) };
     m_tearing_supported = check_tearing_support(factory);
-    ATOM window_class{ create_window_class(L"window_class", &window_proc, instance
-    , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED))
-    , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED))
-    , reinterpret_cast<HCURSOR>(LoadImageW(NULL, IDC_ARROW, IMAGE_CURSOR, GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR), LR_SHARED))) };
-    m_window = create_window(factory, window_class, L"compilercpp", WS_POPUP
-    , static_cast<LONG>(m_window_size.x), static_cast<LONG>(m_window_size.y), instance, &m_window_pos);
-    SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter{ create_adapter(factory) };
     m_device = create_device(adapter);
     m_info_queue = create_info_queue(m_device);
     m_command_queue.init(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+    
+    ATOM window_class{ create_window_class(L"window_class", &window_proc, instance
+    , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED))
+    , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED))
+    , reinterpret_cast<HCURSOR>(LoadImageW(NULL, IDC_ARROW, IMAGE_CURSOR, GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR), LR_SHARED))) };
+    m_window = create_window(window_class, L"compilercpp", WS_POPUP
+    , static_cast<LONG>(m_window_size.x), static_cast<LONG>(m_window_size.y), instance, &m_window_pos);
+    SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     m_swap_chain = m_command_queue.create_swap_chain(factory, m_window, static_cast<UINT>(m_window_size.x)
     , static_cast<UINT>(m_window_size.y), DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_USAGE_RENDER_TARGET_OUTPUT, buffer_count, m_tearing_supported);
     m_RTV_heap = create_V_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, buffer_count);
     m_RTV_size = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     m_RT = create_RT(m_swap_chain, buffer_count);
     create_RTV(m_device, m_RT, m_RTV_size, m_RTV_heap);
+
     auto heap_property{ create_default_heap_property() };
     D3D12_RESOURCE_DESC DS_resource_description{};
     DS_resource_description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -311,7 +297,8 @@ engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ wind
     DSV_description.Texture2D.MipSlice = 0;
     m_device->CreateDepthStencilView(m_DS.Get(), &DSV_description, m_DSV_heap->GetCPUDescriptorHandleForHeapStart());
     text_primitive_t::init(m_device, m_command_queue.get(), m_window, m_RT);
-    rect_primitive_t::init(this, m_device, m_window_size);
+    rect_primitive_t::init(m_device, m_window_size);
+
     m_frame_index = m_swap_chain->GetCurrentBackBufferIndex();
     m_buffer_fence_value.resize(buffer_count);
     m_initialized = true;
@@ -388,6 +375,14 @@ auto engine_t::get_cursor_pos() -> pos_2D {
     GetCursorPos(&cursor_pos);
     ScreenToClient(m_window, &cursor_pos);
     return pos_2D{ cursor_pos.x, cursor_pos.y };
+}
+
+auto engine_t::device_get() const -> Microsoft::WRL::ComPtr<ID3D12Device2> {
+    return m_device;
+}
+
+auto engine_t::command_queue_get() -> command_queue_t& {
+    return m_command_queue;
 }
 
 auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t* {

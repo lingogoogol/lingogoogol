@@ -9,17 +9,18 @@
 #include "../../lib/file.hpp"
 
 auto log_info_queue(Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue) -> void {
+    if (!info_queue->GetNumStoredMessagesAllowedByRetrievalFilter()) {
+        return;
+    }
     for (UINT64 i{ 0 }; i < info_queue->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i) {
         SIZE_T message_len{};
         info_queue->GetMessage(i, nullptr, &message_len);
         D3D12_MESSAGE* info{ reinterpret_cast<D3D12_MESSAGE*>(new std::byte[message_len]{}) };
         info_queue->GetMessage(i, info, &message_len);
         std::string error_message{ info->pDescription };
-        if (error_message != "ID3D12Device::CreateCommittedResource: "
-        "Ignoring InitialState D3D12_RESOURCE_STATE_GENERIC_READ. Buffers are effectively created in state D3D12_RESOURCE_STATE_COMMON.") {
-            log_file(error_message + "\n");
-        }
+        log_file(error_message + "\n");
     }
+    info_queue->ClearStoredMessages();
     return;
 }
 

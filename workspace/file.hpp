@@ -33,12 +33,18 @@ auto CSV_to_map(std::filesystem::path path) -> std::map<std::string, std::string
         }
         key = file.substr(begin, end - begin);
         begin = end + 1;
-        end = file.find("\r\n", begin);
+        end = file.find('\n', begin);
         if (end == std::string::npos) {
             break;
         }
-        val = file.substr(begin, end - begin);
-        begin = end + 2;
+        std::string val{};
+        if (file[end - 1] == '\r') {
+            val = file.substr(begin, end - begin - 1);
+        }
+        else {
+            val = file.substr(begin, end - begin);
+        }
+        begin = end + 1;
         out[key] = val;
     }
     return out;

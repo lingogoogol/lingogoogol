@@ -16,10 +16,23 @@ private:
     size_2D m_size{};
     float m_depth{};
     color_t m_color{};
+    const SRV_t* m_SRV{};
+    pos_2D m_texture_pos{};
+    size_2D m_texture_axis_x{};
+    size_2D m_texture_axis_y{};
+    bool m_texture_enable{};
     rect_primitive_t* m_primitive{};
+    pos_2D m_clip_pos{};
+    size_2D m_clip_size{};
 public:
     rect_t() = default;
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+    , pos_2D clip_pos, size_2D clip_size);
     rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, color_t color);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, const SRV_t& SRV);
+    rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, pos_2D clip_pos
+    , size_2D clip_size, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y);
 
     auto get_pos() const -> pos_2D override;
     auto set_pos(pos_2D pos) -> void override;
@@ -27,6 +40,9 @@ public:
     auto get_margin() const -> size_1D override;
     auto set_size(size_2D size) -> void;
     auto set_color(color_t color) -> void;
+    auto set_SRV(const SRV_t& SRV) -> void;
+    auto color_enable() -> void;
+    auto texture_enable() -> void;
     
     auto inside(pos_2D pos) -> bool;
 
@@ -34,8 +50,34 @@ public:
     auto hide_impl(bool base) -> void override;
 };
 
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth)
+: rect_t{ engine, depth_tracker, pos, size, depth, pos, size } {}
+
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth
+, pos_2D clip_pos, size_2D clip_size)
+: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth{ depth }
+, m_clip_pos{ clip_pos }, m_clip_size{ clip_size } {}
+
 rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, color_t color)
-: m_engine{ engine }, m_depth_tracker{ depth_tracker }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_color{ color } {}
+: rect_t{ engine, depth_tracker, pos, size, depth } {
+    m_color = color;
+    m_texture_enable = false;
+    return;
+}
+
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, const SRV_t& SRV)
+: rect_t{ engine, depth_tracker, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
+
+rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, float depth, pos_2D clip_pos
+, size_2D clip_size, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y)
+: rect_t{ engine, depth_tracker, pos, size, depth, clip_pos, clip_size } {
+    m_SRV = &SRV;
+    m_texture_pos = texture_pos;
+    m_texture_axis_x = texture_axis_x;
+    m_texture_axis_y = texture_axis_y;
+    m_texture_enable = true;
+    return;
+}
 
 auto rect_t::get_pos() const -> pos_2D {
     std::unique_lock lock{ m_mutex };
@@ -44,6 +86,7 @@ auto rect_t::get_pos() const -> pos_2D {
 
 auto rect_t::set_pos(pos_2D pos) -> void {
     std::unique_lock lock{ m_mutex };
+    m_clip_pos = m_clip_pos + (pos - m_pos);
     m_pos = pos;
     if (m_primitive) {
         m_primitive->set_pos(pos);
@@ -74,6 +117,33 @@ auto rect_t::set_color(color_t color) -> void {
     m_color = color;
     if (m_primitive) {
         m_primitive->set_color(color);
+    }
+    return;
+}
+
+auto rect_t::set_SRV(const SRV_t& SRV) -> void {
+    std::unique_lock lock{ m_mutex };
+    m_SRV = &SRV;
+    if (m_primitive) {
+        m_primitive->set_SRV(SRV);
+    }
+    return;
+}
+
+auto rect_t::color_enable() -> void {
+    std::unique_lock lock{ m_mutex };
+    m_texture_enable = false;
+    if (m_primitive) {
+        m_primitive->color_enable();
+    }
+    return;
+}
+
+auto rect_t::texture_enable() -> void {
+    std::unique_lock lock{ m_mutex };
+    m_texture_enable = true;
+    if (m_primitive) {
+        m_primitive->texture_enable();
     }
     return;
 }

@@ -6,126 +6,147 @@
 
 #include "../../lib/common.hpp"
 
+Microsoft::WRL::ComPtr<ID3D12Device2> rect_primitive_t::m_device{};
+root_signature_t rect_primitive_t::m_solid_root_signature{};
+root_signature_t rect_primitive_t::m_texture_root_signature{};
+pipeline_state_t rect_primitive_t::m_solid_pipeline_state{};
+pipeline_state_t rect_primitive_t::m_texture_pipeline_state{};
+size_2D rect_primitive_t::m_window_size{};
+
 auto rect_primitive_t::upload_vertex_data() -> void {
     std::unique_lock lock{ m_mutex };
     float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };
-    float pos_y{ 1.0f - static_cast<float>(m_pos.y) / static_cast<float>(m_window_size.y) * 2.0f };
+    float pos_y{ static_cast<float>(m_pos.y) / static_cast<float>(m_window_size.y) * 2.0f - 1.0f };
     float size_x{ static_cast<float>(m_size.x) / static_cast<float>(m_window_size.x) * 2.0f };
     float size_y{ static_cast<float>(m_size.y) / static_cast<float>(m_window_size.y) * 2.0f };
-    std::array vertex_data{
-        vertex_data_t{ { pos_x, pos_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
-        vertex_data_t{ { pos_x + size_x, pos_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
-        vertex_data_t{ { pos_x, pos_y - size_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
-        vertex_data_t{ { pos_x + size_x, pos_y - size_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } }
-    };
 
     void* upload_resource_cpu_address{};
-    directx_api(m_vertex_buffer->Map(0, nullptr, &upload_resource_cpu_address), m_engine);
-    std::memcpy(upload_resource_cpu_address, vertex_data.data(), vertex_data_size);
+    hresult(m_vertex_buffer->Map(0, nullptr, &upload_resource_cpu_address));
+    if (m_texture_enable) {
+        auto texture_index{ static_cast<std::uint32_t>(m_SRV->descriptor_heap_index_get()) };
+        std::array vertex_data{
+            vertex_data_texture_t{ { pos_x, pos_y, m_depth, 1.0f }, { 0.0f, 0.0f }, texture_index },
+            vertex_data_texture_t{ { pos_x + size_x, pos_y, m_depth, 1.0f }, { 1.0f, 0.0f }, texture_index },
+            vertex_data_texture_t{ { pos_x, pos_y + size_y, m_depth, 1.0f }, { 0.0f, 1.0f }, texture_index },
+            vertex_data_texture_t{ { pos_x + size_x, pos_y + size_y, m_depth, 1.0f }, { 1.0f, 1.0f }, texture_index }
+        };
+        std::memcpy(upload_resource_cpu_address, vertex_data.data(), vertex_data_texture_size);
+        m_vertex_buffer_view.SizeInBytes = vertex_data_texture_size;
+        m_vertex_buffer_view.StrideInBytes = sizeof(vertex_data_texture_t);
+    }
+    else {
+        std::array vertex_data{
+            vertex_data_solid_t{ { pos_x, pos_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
+            vertex_data_solid_t{ { pos_x + size_x, pos_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
+            vertex_data_solid_t{ { pos_x, pos_y + size_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } },
+            vertex_data_solid_t{ { pos_x + size_x, pos_y + size_y, m_depth, 1.0f }, { m_color.R, m_color.G, m_color.B, 1.0f } }
+        };
+        std::memcpy(upload_resource_cpu_address, vertex_data.data(), vertex_data_solid_size);
+        m_vertex_buffer_view.SizeInBytes = vertex_data_solid_size;
+        m_vertex_buffer_view.StrideInBytes = sizeof(vertex_data_solid_t);
+    }
     m_vertex_buffer->Unmap(0, nullptr);
     m_vertex_buffer_view.BufferLocation = m_vertex_buffer->GetGPUVirtualAddress();
-    m_vertex_buffer_view.SizeInBytes = vertex_data_size;
-    m_vertex_buffer_view.StrideInBytes = sizeof(vertex_data_t);
     m_engine->log_info_queue();
     return;
 }
 
-auto rect_primitive_t::init(engine_t* engine, Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2D window_size) -> void {
+auto rect_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2D window_size) -> void {
     m_device = device;
     m_window_size = window_size;
 
-    engine->log_info_queue();
-    D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_description{};
-    root_signature_description.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-    root_signature_description.Desc_1_1.NumParameters = 0;
-    root_signature_description.Desc_1_1.pParameters = nullptr;
-    root_signature_description.Desc_1_1.NumStaticSamplers = 0;
-    root_signature_description.Desc_1_1.pStaticSamplers = nullptr;
-    root_signature_description.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-    Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
-    Microsoft::WRL::ComPtr<ID3DBlob> error_blob{};
-    directx_api(D3D12SerializeVersionedRootSignature(&root_signature_description, &root_signature_blob, &error_blob), engine);
-    directx_api(m_device->CreateRootSignature(0, root_signature_blob->GetBufferPointer()
-    , root_signature_blob->GetBufferSize(), IID_PPV_ARGS(&m_root_signature)), engine);
-
     std::array<std::string, 2> shader_code{};
-    std::vector<D3D12_INPUT_ELEMENT_DESC> input_element{};
-    std::array<std::string, 2> input_element_name{ "POS", "COLOR" };
-    input_element.push_back(create_input_element(input_element_name[0], DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0));
-    input_element.push_back(create_input_element(input_element_name[1], DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0));
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC pipeline_state_description{};
-    pipeline_state_description.pRootSignature = m_root_signature.Get();
-    pipeline_state_description.VS = create_shader_bytecode(256, 1, shader_code[0]);
-    pipeline_state_description.PS = create_shader_bytecode(256, 2, shader_code[1]);
-    pipeline_state_description.BlendState.AlphaToCoverageEnable = false;
-    pipeline_state_description.BlendState.IndependentBlendEnable = false;
-    pipeline_state_description.BlendState.RenderTarget[0].BlendEnable = false;
-    pipeline_state_description.BlendState.RenderTarget[0].LogicOpEnable = false;
-    pipeline_state_description.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-    pipeline_state_description.SampleMask = static_cast<UINT>(-1);
-    pipeline_state_description.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    pipeline_state_description.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    pipeline_state_description.RasterizerState.FrontCounterClockwise = false;
-    pipeline_state_description.RasterizerState.DepthClipEnable = true;
-    pipeline_state_description.RasterizerState.DepthClipEnable = false;
-    pipeline_state_description.RasterizerState.AntialiasedLineEnable = false;
-    pipeline_state_description.RasterizerState.ForcedSampleCount = 0;
-    pipeline_state_description.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-    pipeline_state_description.DepthStencilState.DepthEnable = true;
-    pipeline_state_description.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    pipeline_state_description.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    pipeline_state_description.DepthStencilState.StencilEnable = false;
-    pipeline_state_description.InputLayout.pInputElementDescs = input_element.data();
-    pipeline_state_description.InputLayout.NumElements = static_cast<UINT>(input_element.size());
-    pipeline_state_description.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    pipeline_state_description.NumRenderTargets = 1;
-    pipeline_state_description.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-    pipeline_state_description.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-    pipeline_state_description.SampleDesc.Count = 1;
-    pipeline_state_description.SampleDesc.Quality = 0;
-    pipeline_state_description.NodeMask = 0;
-    pipeline_state_description.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-    directx_api(m_device->CreateGraphicsPipelineState(&pipeline_state_description, IID_PPV_ARGS(&m_pipeline_state)), engine);
-    engine->log_info_queue();
+    m_solid_root_signature.flag_set(D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    m_solid_root_signature.serialize(m_device);
+    input_layout_t solid_input_layout{};
+    solid_input_layout.element_vertex_add("POS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
+    solid_input_layout.element_vertex_add("COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
+    m_solid_pipeline_state.init(m_solid_root_signature, solid_input_layout
+    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
+    shader_bytecode_t solid_vertex_shader{ 256, 1 };
+    m_solid_pipeline_state.vertex_shader_set(solid_vertex_shader);
+    shader_bytecode_t solid_pixel_shader{ 256, 2 };
+    m_solid_pipeline_state.pixel_shader_set(solid_pixel_shader);
+    m_solid_pipeline_state.create(m_device);
+
+    m_texture_root_signature.flag_set(D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    m_texture_root_signature.static_sampler_add(0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
+    descriptor_table_t descriptor_table{};
+    descriptor_table.range_add(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 0, 0, 0x1000);
+    m_texture_root_signature.descriptor_table_add(descriptor_table, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_texture_root_signature.serialize(m_device);
+    input_layout_t texture_input_layout{};
+    texture_input_layout.element_vertex_add("POS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
+    texture_input_layout.element_vertex_add("Texcoord", 0, DXGI_FORMAT_R32G32_FLOAT, 0);
+    texture_input_layout.element_vertex_add("s_texture_index", 0, DXGI_FORMAT_R32_UINT, 0);
+    m_texture_pipeline_state.init(m_texture_root_signature, texture_input_layout
+    , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
+    shader_bytecode_t texture_vertex_shader{ 256, 3 };
+    m_texture_pipeline_state.vertex_shader_set(texture_vertex_shader);
+    shader_bytecode_t texture_pixel_shader{ 256, 4 };
+    m_texture_pipeline_state.pixel_shader_set(texture_pixel_shader);
+    m_texture_pipeline_state.create(m_device);
     return;
 }
 
 auto rect_primitive_t::uninit() -> void {}
 
-auto rect_primitive_t::render_begin(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, engine_t* engine) -> void {
-    command_list->SetGraphicsRootSignature(m_root_signature.Get());
-    command_list->SetPipelineState(m_pipeline_state.Get());
+auto rect_primitive_t::render(const std::set<rect_primitive_t*>& rect
+, Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void {
+    command_list->SetGraphicsRootSignature(m_solid_root_signature.interface_get().Get());
+    command_list->SetPipelineState(m_solid_pipeline_state.interface_get().Get());
     command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    engine->log_info_queue();
+    for (auto i{ rect.begin() }; i != rect.end(); ++i) {
+        if (!(*i)->m_texture_enable) {
+            (*i)->render(command_list);
+        }
+    }
+    
+    command_list->SetGraphicsRootSignature(m_texture_root_signature.interface_get().Get());
+    command_list->SetPipelineState(m_texture_pipeline_state.interface_get().Get());
+    command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    for (auto i{ rect.begin() }; i != rect.end(); ++i) {
+        if ((*i)->m_texture_enable) {
+            (*i)->render(command_list);
+        }
+    }
     return;
 }
 
-auto rect_primitive_t::render_end() -> void {}
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth)
+: rect_primitive_t{ engine, pos, size, depth, pos, size } {}
+
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size)
+: m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_clip_pos{ clip_pos }, m_clip_size{ clip_size } {}
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, color_t color)
-: m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_color{ color } {
-    auto upload_heap_property{ create_upload_heap_property() };
-    D3D12_RESOURCE_DESC upload_resource_description{};
-    upload_resource_description.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    upload_resource_description.Alignment = 0;
-    upload_resource_description.Width = vertex_data_size;
-    upload_resource_description.Height = 1;
-    upload_resource_description.DepthOrArraySize = 1;
-    upload_resource_description.MipLevels = 1;
-    upload_resource_description.Format = DXGI_FORMAT_UNKNOWN;
-    upload_resource_description.SampleDesc.Count = 1;
-    upload_resource_description.SampleDesc.Quality = 0;
-    upload_resource_description.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    upload_resource_description.Flags = D3D12_RESOURCE_FLAG_NONE;
-    directx_api(m_device->CreateCommittedResource(&upload_heap_property, D3D12_HEAP_FLAG_NONE, &upload_resource_description
-    , D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_vertex_buffer)), m_engine);
+: rect_primitive_t{ engine, pos, size, depth } {
+    m_texture_enable = false;
+    m_color = color;
+    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size));
     upload_vertex_data();
-    engine->log_info_queue();
+    return;
+}
+
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV)
+: rect_primitive_t{ engine, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
+
+rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
+, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y)
+: rect_primitive_t{ engine, pos, size, depth, clip_pos, clip_size } {
+    m_texture_enable = true;
+    m_SRV = &SRV;
+    m_texture_pos = texture_pos;
+    m_texture_axis_x = texture_axis_x;
+    m_texture_axis_y = texture_axis_y;
+    m_vertex_buffer = create_resource_upload(m_device, std::max(vertex_data_solid_size, vertex_data_texture_size));
+    upload_vertex_data();
     return;
 }
 
 auto rect_primitive_t::set_pos(pos_2D pos) -> void {
     std::unique_lock lock{ m_mutex };
+    m_clip_pos = m_clip_pos + (pos - m_pos);
     m_pos = pos;
     m_engine->flush();
     upload_vertex_data();
@@ -151,17 +172,47 @@ auto rect_primitive_t::set_color(color_t color) -> void {
     return;
 }
 
-auto rect_primitive_t::render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void {
+auto rect_primitive_t::set_SRV(const SRV_t& SRV) -> void {
     std::unique_lock lock{ m_mutex };
-    command_list->IASetVertexBuffers(0, 1, &m_vertex_buffer_view);
-    command_list->DrawInstanced(4, 1, 0, 0);
-    m_engine->log_info_queue();
+    m_SRV = &SRV;
+    m_engine->flush();
+    upload_vertex_data();
+    m_engine->redraw();
+    return;
+}
+
+auto rect_primitive_t::color_enable() -> void {
+    std::unique_lock lock{ m_mutex };
+    m_texture_enable = false;
+    return;
+}
+
+auto rect_primitive_t::texture_enable() -> void {
+    std::unique_lock lock{ m_mutex };
+    m_texture_enable = true;
     return;
 }
 
 auto rect_primitive_t::inside(pos_2D pos) -> bool {
     std::unique_lock lock{ m_mutex };
     return ::inside(m_pos, m_size, pos);
+}
+
+auto rect_primitive_t::render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list) -> void {
+    std::unique_lock lock{ m_mutex };
+    //(0, 0) is at the top left corner of the window.
+    D3D12_RECT scissor_rect{};
+    scissor_rect.left = static_cast<LONG>(m_clip_pos.x);
+    scissor_rect.right = static_cast<LONG>(m_clip_pos.x + m_clip_size.x);
+    scissor_rect.bottom = static_cast<LONG>(m_engine->get_window_size().y - m_clip_pos.y);
+    scissor_rect.top = static_cast<LONG>(m_engine->get_window_size().y - (m_clip_pos.y + m_clip_size.y));
+    if (m_texture_enable) {
+        command_list->SetGraphicsRootDescriptorTable(0, m_SRV->handle_GPU_get());
+    }
+    command_list->RSSetScissorRects(1, &scissor_rect);
+    command_list->IASetVertexBuffers(0, 1, &m_vertex_buffer_view);
+    command_list->DrawInstanced(4, 1, 0, 0);
+    return;
 }
 
 #endif

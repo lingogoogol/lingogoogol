@@ -18,7 +18,8 @@ auto push_transition_barrier(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> c
     return;
 }
 
-auto clear_RT(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list, D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle, const std::array<FLOAT, 4>& color) -> void {
+auto clear_RT(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list
+, D3D12_CPU_DESCRIPTOR_HANDLE RTV_handle, const std::array<FLOAT, 4>& color) -> void {
     command_list->ClearRenderTargetView(RTV_handle, color.data(), 0, nullptr);
     return;
 }

@@ -18,5 +18,6 @@
 #include "std.hpp"
 #include "focus.hpp"
 #include "menu.hpp"
+#include "virt.hpp"
 
 #endif

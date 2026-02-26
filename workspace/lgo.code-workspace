@@ -39,9 +39,6 @@
 		{
 			"name": "math",
 			"path": "../math"
-		},
-		{
-			"path": "../homework"
 		}
 	],
 	"settings": {
@@ -138,7 +135,8 @@
 					"release",
 					"${file}",
 					"no_module",
-					"hide_line"
+					"hide_line",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"
@@ -175,7 +173,8 @@
 					"HLSL",
 					"debug",
 					"${file}",
-					"vertex"
+					"vertex",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"
@@ -192,7 +191,8 @@
 					"HLSL",
 					"release",
 					"${file}",
-					"vertex"
+					"vertex",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"
@@ -209,7 +209,8 @@
 					"HLSL",
 					"debug",
 					"${file}",
-					"pixel"
+					"pixel",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"
@@ -226,7 +227,8 @@
 					"HLSL",
 					"release",
 					"${file}",
-					"pixel"
+					"pixel",
+					"show_command"
 				],
 				"options": {
 					"cwd": "${cwd}/../../"

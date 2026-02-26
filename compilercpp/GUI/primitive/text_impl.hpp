@@ -37,7 +37,7 @@ auto text_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device_D3D12, 
     m_factory_DWrite->CreateInMemoryFontFileLoader(&m_font_file_loader);
     m_factory_DWrite->RegisterFontFileLoader(m_font_file_loader.Get());
     Microsoft::WRL::ComPtr<IDWriteFontFile> font_file{};
-    std::string font_file_data{ get_resource(256, 3) };
+    std::string font_file_data{ get_resource(256, 5) };
     m_font_file_loader->CreateInMemoryFontFileReference(m_factory_DWrite.Get(), font_file_data.data(), static_cast<UINT32>(font_file_data.size()), nullptr, &font_file);
     Microsoft::WRL::ComPtr<IDWriteFontSetBuilder1> font_set_builder{};
     m_factory_DWrite->CreateFontSetBuilder(&font_set_builder);

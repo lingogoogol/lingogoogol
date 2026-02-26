@@ -1044,7 +1044,9 @@ auto WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) -> int {
     log_file("CWD:\n");
 	log_file("  " + std::filesystem::current_path().string() + "\n\n");
     init_directx();
-	init_freetype();
+	freetype_t freetype{};
+	font_face_t::freetype_set(&freetype);
+	font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 256 };
     engine_t engine{ instance, size_2D{ 0x600, 0x400 } };
     depth_tracker_t depth_tracker{};
     state_t state{ &engine, &depth_tracker };

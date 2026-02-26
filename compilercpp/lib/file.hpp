@@ -8,6 +8,8 @@
 #include <fstream>
 #include <string>
 
+auto log_stacktrace(std::stacktrace stack = std::stacktrace::current()) -> void;
+
 constexpr inline std::ios_base::iostate file_exception_mask{ std::ios_base::badbit | std::ios_base::failbit | std::ios_base::eofbit };
 
 auto create_ofstream(const std::string& path, std::ios_base::openmode mode) -> std::ofstream {
@@ -29,7 +31,8 @@ auto create_ofstream_preserve(const std::string& path) -> std::ofstream {
     return create_ofstream(path, std::ios_base::binary | std::ios_base::in | std::ios_base::out);
 }
 
-auto create_ifstream(const std::string& path, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::binary) -> std::ifstream {
+auto create_ifstream(const std::string& path
+, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::binary) -> std::ifstream {
     std::ifstream out{};
     out.open(path, mode);
     if (!out.fail()) {
@@ -38,7 +41,8 @@ auto create_ifstream(const std::string& path, std::ios_base::openmode mode = std
     return out;
 }
 
-auto create_fstream(const std::string& path, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary) -> std::fstream {
+auto create_fstream(const std::string& path
+, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary) -> std::fstream {
     std::fstream out{};
     out.open(path, std::ios_base::out | std::ios_base::app);
     out.close();
@@ -92,9 +96,10 @@ auto log_ref_count(t_in in) -> void {
     return;
 }
 
-auto log_blob(Microsoft::WRL::ComPtr<ID3DBlob> in) -> void {
-    for (SIZE_T i{ 0 }; i < in->GetBufferSize(); ++i) {
-        log_file(std::string{ *(reinterpret_cast<const char*>(in->GetBufferPointer()) + i) });
+auto log_stacktrace(std::stacktrace stack) -> void {
+    log_file("  stack:\n");
+    for (auto i : stack) {
+        log_file("    " + std::to_string(i) + "\n");
     }
     return;
 }

@@ -13,7 +13,7 @@
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};
-    CreateDXGIFactory2(debugging ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&out));
+    hresult(CreateDXGIFactory2(debugging ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&out)));
     return out;
 }
 
@@ -34,7 +34,7 @@ auto create_window_class(const std::wstring& name, WNDPROC windows_process, HINS
     return RegisterClassExW(&window_class);
 }
 
-auto create_window(Microsoft::WRL::ComPtr<IDXGIFactory5> factory, ATOM window_class, const std::wstring& name
+auto create_window(ATOM window_class, const std::wstring& name
 , DWORD style, LONG width, LONG height, HINSTANCE instance, pos_2D* window_pos) -> HWND {
     RECT rect{ 0, 0, width, height };
     AdjustWindowRect(&rect, style, false);
@@ -56,18 +56,16 @@ auto create_window(Microsoft::WRL::ComPtr<IDXGIFactory5> factory, ATOM window_cl
 auto create_adapter(Microsoft::WRL::ComPtr<IDXGIFactory5> factory)
 -> Microsoft::WRL::ComPtr<IDXGIAdapter4> {
     Microsoft::WRL::ComPtr<IDXGIAdapter4> out{};
-    SIZE_T max_dedicated_video_memory{ 0 };
     for (UINT i{ 0 }; true; ++i) {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter1{};
         if (factory->EnumAdapters1(i, &adapter1) == DXGI_ERROR_NOT_FOUND) {
             break;
         }
         DXGI_ADAPTER_DESC1 description{};
-        adapter1->GetDesc1(&description);
-        if (description.DedicatedVideoMemory > max_dedicated_video_memory
-        && SUCCEEDED(D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr))) {
-            max_dedicated_video_memory = description.DedicatedVideoMemory;
-            adapter1.As(&out);
+        hresult(adapter1->GetDesc1(&description));
+        if (SUCCEEDED(D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr))) {
+            hresult(adapter1.As(&out));
+            break;
         }
     }
     return out;
@@ -75,18 +73,21 @@ auto create_adapter(Microsoft::WRL::ComPtr<IDXGIFactory5> factory)
 
 auto create_device(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter) -> Microsoft::WRL::ComPtr<ID3D12Device2> {
     Microsoft::WRL::ComPtr<ID3D12Device2> out{};
-    D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&out));
+    hresult(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&out)));
     return out;
 }
 
 auto create_info_queue(Microsoft::WRL::ComPtr<ID3D12Device2> device) -> Microsoft::WRL::ComPtr<ID3D12InfoQueue> {
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> out{};
-    device.As(&out);
+    hresult(device.As(&out));
     D3D12_INFO_QUEUE_FILTER info_queue_filter{};
-    std::array info_queue_filter_severity{ D3D12_MESSAGE_SEVERITY_INFO };
+    std::vector<D3D12_MESSAGE_SEVERITY> info_queue_filter_severity{};
+    if (false) {
+        info_queue_filter_severity.push_back(D3D12_MESSAGE_SEVERITY_INFO);
+    }
     info_queue_filter.DenyList.NumSeverities = static_cast<UINT>(info_queue_filter_severity.size());
     info_queue_filter.DenyList.pSeverityList = info_queue_filter_severity.data();
-    out->PushStorageFilter(&info_queue_filter);
+    hresult(out->PushStorageFilter(&info_queue_filter));
     return out;
 }
 
@@ -97,7 +98,7 @@ auto create_V_heap(Microsoft::WRL::ComPtr<ID3D12Device2> device, D3D12_DESCRIPTO
     description.NumDescriptors = count;
     description.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     description.NodeMask = 0;
-    device->CreateDescriptorHeap(&description, IID_PPV_ARGS(&out));
+    hresult(device->CreateDescriptorHeap(&description, IID_PPV_ARGS(&out)));
     return out;
 }
 
@@ -105,7 +106,7 @@ auto create_RT(Microsoft::WRL::ComPtr<IDXGISwapChain4> swap_chain, UINT count) -
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> out{};
     out.resize(count);
     for (UINT i{ 0 }; i < count; ++i) {
-        swap_chain->GetBuffer(i, IID_PPV_ARGS(&(out[i])));
+        hresult(swap_chain->GetBuffer(i, IID_PPV_ARGS(&(out[i]))));
     }
     return out;
 }
@@ -126,28 +127,10 @@ auto create_V_handle(D3D12_CPU_DESCRIPTOR_HANDLE start, SIZE_T V_size, SIZE_T in
     return out;
 }
 
-auto create_input_element(const std::string& semantic_name, DXGI_FORMAT format, UINT slot, UINT instance_count) -> D3D12_INPUT_ELEMENT_DESC {
-    D3D12_INPUT_ELEMENT_DESC out{};
-    out.SemanticName = semantic_name.data();
-    out.SemanticIndex = 0;
-    out.Format = format;
-    out.InputSlot = slot;
-    out.AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-    out.InstanceDataStepRate = instance_count;
-    return out;
-}
-
-auto create_shader_bytecode(std::uint16_t type, std::uint16_t name, std::string& code) -> D3D12_SHADER_BYTECODE {
-    code = get_resource(type, name);
-    D3D12_SHADER_BYTECODE out{};
-    out.pShaderBytecode = code.data();
-    out.BytecodeLength = code.size();
-    return out;
-}
-
 auto create_upload_heap_property() -> D3D12_HEAP_PROPERTIES {
     D3D12_HEAP_PROPERTIES out{};
     out.Type = D3D12_HEAP_TYPE_UPLOAD;
+    //When Type is not D3D12_HEAP_TYPE_CUSTOM, CPUPageProperty and MemoryPoolPreference must be ..._UNKNOWN.
     out.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
     out.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
     out.CreationNodeMask = 0;
@@ -158,10 +141,64 @@ auto create_upload_heap_property() -> D3D12_HEAP_PROPERTIES {
 auto create_default_heap_property() -> D3D12_HEAP_PROPERTIES {
     D3D12_HEAP_PROPERTIES out{};
     out.Type = D3D12_HEAP_TYPE_DEFAULT;
+    //When Type is not D3D12_HEAP_TYPE_CUSTOM, CPUPageProperty and MemoryPoolPreference must be ..._UNKNOWN.
     out.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
     out.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
     out.CreationNodeMask = 0;
     out.VisibleNodeMask = 0;
+    return out;
+}
+
+auto create_resource_desc_buffer(std::uint64_t size, D3D12_RESOURCE_FLAGS flags) -> D3D12_RESOURCE_DESC {
+    D3D12_RESOURCE_DESC desc{};
+    //When Dimension is _BUFFER, ...
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    //Alignment must be 64KB (D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT) or 0, which is effectively 64KB.
+    desc.Alignment = 0;
+    desc.Width = size;
+    //Height, DepthOrArraySize, and MipLevels must be 1.
+    desc.Height = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    //Format must be DXGI_FORMAT_UNKNOWN.
+    desc.Format = DXGI_FORMAT_UNKNOWN;
+    //SampleDesc.Count must be 1 and Quality must be 0.
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    //Layout must be D3D12_TEXTURE_LAYOUT_ROW_MAJOR.
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags = flags;
+    return desc;
+}
+
+auto create_resource_upload(Microsoft::WRL::ComPtr<ID3D12Device> device, std::uint64_t size)
+-> Microsoft::WRL::ComPtr<ID3D12Resource> {
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
+    D3D12_HEAP_PROPERTIES upload_heap_properties{ create_upload_heap_property() };
+    D3D12_RESOURCE_DESC upload_resource_desc{ create_resource_desc_buffer(size, D3D12_RESOURCE_FLAG_NONE) };
+    //Resources in the upload heap must be created with D3D12_RESOURCE_STATE_GENERIC_READ and cannot be changed away from this.
+    hresult(device->CreateCommittedResource(&upload_heap_properties, D3D12_HEAP_FLAG_NONE
+    , &upload_resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resource)));
+    return resource;
+}
+
+//For buffer.
+auto create_copy_location(Microsoft::WRL::ComPtr<ID3D12Resource> resource
+, const UINT& subresource_index) -> D3D12_TEXTURE_COPY_LOCATION {
+    D3D12_TEXTURE_COPY_LOCATION out{};
+    out.pResource = resource.Get();
+    out.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    out.SubresourceIndex = subresource_index;
+    return out;
+}
+
+//For texture.
+auto create_copy_location(Microsoft::WRL::ComPtr<ID3D12Resource> resource
+, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint) -> D3D12_TEXTURE_COPY_LOCATION {
+    D3D12_TEXTURE_COPY_LOCATION out{};
+    out.pResource = resource.Get();
+    out.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    out.PlacedFootprint = footprint;
     return out;
 }
 

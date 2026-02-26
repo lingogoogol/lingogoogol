@@ -17,13 +17,15 @@ auto roundup(t_in in1, t_in in2) -> t_in {
 }
 
 auto inside(pos_2D rect_pos, size_2D rect_size, pos_2D point_pos) -> bool {
-    return point_pos.x >= rect_pos.x && point_pos.x < rect_pos.x + rect_size.x && point_pos.y >= rect_pos.y && point_pos.y < rect_pos.y + rect_size.y;
+    return point_pos.x >= rect_pos.x && point_pos.x < rect_pos.x + rect_size.x
+    && point_pos.y >= rect_pos.y && point_pos.y < rect_pos.y + rect_size.y;
 }
 
 auto to_wstring(std::string in) -> std::wstring {
     std::wstring out{};
     out.resize(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, in.data(), static_cast<int>(in.size()), nullptr, 0));
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, in.data(), static_cast<int>(in.size()), out.data(), static_cast<int>(out.size()));
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, in.data()
+    , static_cast<int>(in.size()), out.data(), static_cast<int>(out.size()));
     return out;
 }
 
@@ -58,7 +60,8 @@ auto to_int(std::wstring in) -> t_out {
 auto to_string(std::wstring in) -> std::string {
     std::string out{};
     out.resize(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, in.data(), static_cast<int>(in.size()), nullptr, 0, 0, nullptr));
-    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, in.data(), static_cast<int>(in.size()), out.data(), static_cast<int>(out.size()), 0, nullptr);
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, in.data()
+    , static_cast<int>(in.size()), out.data(), static_cast<int>(out.size()), 0, nullptr);
     return out;
 }
 

@@ -546,21 +546,100 @@ auto GUI_div_impl_t<t_y, t_hard>::clear_state() -> void {
     return;
 }
 
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false
+//Neighbor objects' margins overlap.
+//len_get() does not include the outermost objects' margin.
+//space_x() is the input object's size_get().x such that (len_get() == size_get().x) if the object is added to the div.
+//space_y() is size_get().y exactly.
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_2D size,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
+//
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//size_1D size_forward,
+//alignment_2D alignment,
+//bool from_large = false
 using divx_soft_t = GUI_div_impl_t<false, false>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//Neighbor objects' margins overlap.
+//len_get() includes the outermost objects' margin.
+//space_x() is the input object's size_get().x such that (len_get() == size_get().x) if the object is added to the div.
+//space_y() is size_get().y excluding two times the object's margin_get().
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_2D size,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
+//
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//size_1D size_forward,
+//alignment_2D alignment,
+//bool from_large = false
 using divx_hard_t = GUI_div_impl_t<false, true>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//Neighbor objects' margins overlap.
+//len_get() does not include the outermost objects' margin.
+//space_x() is size_get().x exactly.
+//space_y() is the input object's size_get().y such that (len_get() == size_get().y) if the object is added to the div.
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_2D size,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
+//
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//size_1D size_forward,
+//alignment_2D alignment,
+//bool from_large = false
 using divy_soft_t = GUI_div_impl_t<true, false>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//Neighbor objects' margins overlap.
+//len_get() includes the outermost objects' margin.
+//space_x() is size_get().x excluding two times the object's margin_get().
+//space_y() is the input object's size_get().y such that (len_get() == size_get().y) if the object is added to the div.
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, size_1D size_forward, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_2D size,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
+//
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//size_1D size_forward,
+//alignment_2D alignment,
+//bool from_large = false
 using divy_hard_t = GUI_div_impl_t<true, true>;
 
 template<bool t_y, bool t_hard>
@@ -607,21 +686,76 @@ GUI_div_flex_impl_t<t_y, t_hard>::GUI_div_flex_impl_t(engine_t* engine, depth_tr
 , size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large)
 : GUI_div_impl_t<t_y, t_hard>{ engine, depth_tracker, pos, div_create_from_member{}, object_size_sideways, object_margin, size_1D{ 0 }, alignment, from_large } {}
 
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_1D size_sideways,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//alignment_2D alignment,
+//bool from_large = false
 using divx_flex_soft_t = GUI_div_flex_impl_t<false, false>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_1D size_sideways,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//alignment_2D alignment,
+//bool from_large = false
 using divx_flex_hard_t = GUI_div_flex_impl_t<false, true>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_1D size_sideways,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//alignment_2D alignment,
+//bool from_large = false
 using divy_flex_soft_t = GUI_div_flex_impl_t<true, false>;
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_1D size_sideways, size_1D margin, alignment_2D alignment, bool from_large = false
+
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//size_1D size_sideways,
+//size_1D margin,
+//alignment_2D alignment,
+//bool from_large = false
 //
-//engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, div_create_from_member, size_1D object_size_sideways, size_1D object_margin, alignment_2D alignment, bool from_large = false
+//engine_t* engine,
+//depth_tracker_t* depth_tracker,
+//pos_2D pos,
+//div_create_from_member,
+//size_1D object_size_sideways,
+//size_1D object_margin,
+//alignment_2D alignment,
+//bool from_large = false
 using divy_flex_hard_t = GUI_div_flex_impl_t<true, true>;
 
 #endif
