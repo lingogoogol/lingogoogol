@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include "../header.hpp"
+#include "../stu.hpp"
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};
@@ -33,7 +34,7 @@ auto create_window_class(const std::wstring& name, WNDPROC windows_process, HINS
 }
 
 auto create_window(Microsoft::WRL::ComPtr<IDXGIFactory5> factory, ATOM window_class, const std::wstring& name
-, DWORD style, LONG width, LONG height, HINSTANCE instance) -> HWND {
+, DWORD style, LONG width, LONG height, HINSTANCE instance, pos_2D* window_pos) -> HWND {
     RECT rect{ 0, 0, width, height };
     AdjustWindowRect(&rect, style, false);
     int width_adjusted{ rect.right - rect.left };
@@ -45,8 +46,9 @@ auto create_window(Microsoft::WRL::ComPtr<IDXGIFactory5> factory, ATOM window_cl
     GetMonitorInfoW(primary_monitor, &monitor_info);
     int width_screen{ monitor_info.rcWork.right - monitor_info.rcWork.left };
     int height_screen{ monitor_info.rcWork.bottom - monitor_info.rcWork.top };
-    return CreateWindowW((LPCWSTR)window_class, name.data(), style, (width_screen - width_adjusted) / 2
-    , (height_screen - height_adjusted) / 2, width_adjusted, height_adjusted, NULL, NULL, instance, NULL);
+    window_pos->x = (width_screen - width_adjusted) / 2;
+    window_pos->y = (height_screen - height_adjusted) / 2;
+    return CreateWindowW((LPCWSTR)window_class, name.data(), style, window_pos->x, window_pos->y, width_adjusted, height_adjusted, NULL, NULL, instance, NULL);
 }
 
 auto create_adapter(Microsoft::WRL::ComPtr<IDXGIFactory5> factory)

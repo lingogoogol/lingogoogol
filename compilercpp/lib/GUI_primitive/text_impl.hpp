@@ -1,7 +1,7 @@
-#ifndef COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_IMPL
-#define COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_IMPL
+#ifndef COMPILERCPP_LIB_GUI_PRIMITIVE_TEXT_IMPL
+#define COMPILERCPP_LIB_GUI_PRIMITIVE_TEXT_IMPL
 
-#include "text_primitive_def.hpp"
+#include "text_def.hpp"
 #include "engine_def.hpp"
 
 auto text_primitive_t::create_brush(color_t color) -> void {
@@ -76,8 +76,9 @@ auto text_primitive_t::render_end(std::size_t frame_index) -> void {
     return;
 }
 
-text_primitive_t::text_primitive_t(engine_t* engine, std::wstring text, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment)
-: m_engine{ engine }, m_text{ text }, m_pos{ static_cast<float>(pos.x), static_cast<float>(pos.y) } {
+text_primitive_t::text_primitive_t(engine_t* engine, std::wstring text, pos_2D text_pos, size_2D text_size
+, pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment)
+: m_engine{ engine }, m_text{ text }, m_pos{ static_cast<float>(text_pos.x), static_cast<float>(text_pos.y) }, m_clip_pos{ clip_pos }, m_clip_size{ clip_size } {
     Microsoft::WRL::ComPtr<IDWriteTextFormat> format{};
     m_factory_DWrite->CreateTextFormat(L"Noto Sans TC", m_font_collection.Get()
     , DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size_font.x, L"", &format);
@@ -109,7 +110,7 @@ text_primitive_t::text_primitive_t(engine_t* engine, std::wstring text, pos_2D p
         break;
     }
     }
-    m_factory_DWrite->CreateTextLayout(m_text.data(), m_text.size(), format.Get(), static_cast<float>(size.x), static_cast<float>(size.y), &m_layout);
+    m_factory_DWrite->CreateTextLayout(m_text.data(), m_text.size(), format.Get(), static_cast<float>(text_size.x), static_cast<float>(text_size.y), &m_layout);
     create_brush(color);
     return;
 }
@@ -120,8 +121,21 @@ auto text_primitive_t::set_color(color_t color) -> void {
     return;
 }
 
+auto text_primitive_t::get_size() -> size_2D {
+    DWRITE_TEXT_METRICS metric{};
+    m_layout->GetMetrics(&metric);
+    return size_2D{ static_cast<std::uint64_t>(metric.width), static_cast<std::uint64_t>(metric.height) };
+}
+
 auto text_primitive_t::render() -> void {
+    D2D1_RECT_F clip_rect{};
+    clip_rect.left = m_clip_pos.x;
+    clip_rect.right = m_clip_pos.x + m_clip_size.x;
+    clip_rect.top = m_clip_pos.y;
+    clip_rect.bottom = m_clip_pos.y + m_clip_size.y;
+    m_device_context_D2D1->PushAxisAlignedClip(&clip_rect, D2D1_ANTIALIAS_MODE_ALIASED);
     m_device_context_D2D1->DrawTextLayout(m_pos, m_layout.Get(), m_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+    m_device_context_D2D1->PopAxisAlignedClip();
     return;
 }
 

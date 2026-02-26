@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_GUI_ENGINE_DEF
-#define COMPILERCPP_LIB_GUI_ENGINE_DEF
+#ifndef COMPILERCPP_LIB_GUI_PRIMITIVE_ENGINE_DEF
+#define COMPILERCPP_LIB_GUI_PRIMITIVE_ENGINE_DEF
 
 #include <vector>
 #include <memory>
@@ -11,10 +11,10 @@
 #include "../header.hpp"
 
 #include "engine_decl.hpp"
-#include "stu.hpp"
-#include "rect_primitive_def.hpp"
-#include "text_primitive_def.hpp"
+#include "rect_def.hpp"
+#include "text_def.hpp"
 
+#include "../stu.hpp"
 #include "../directx/command_queue_smart.hpp"
 #include "../directx/command_list.hpp"
 #include "../directx/create.hpp"
@@ -25,6 +25,7 @@ constexpr inline UINT buffer_count{ 0x2 };
 class engine_t {
 private:
     HWND m_window{};
+    pos_2D m_window_pos{};
     size_2D m_window_size{};
     bool m_initialized{ false };
     bool m_tearing_supported{};
@@ -43,10 +44,12 @@ private:
     std::set<std::function<void(pos_2D)>*> m_mouse_move{};
     std::set<std::function<void(pos_2D)>*> m_mouse_left_click{};
     std::set<std::function<void(pos_2D)>*> m_mouse_left_release{};
+    std::set<std::function<void(pos_2D, size_1D)>*> m_mouse_scroll{};
     std::set<std::function<void(std::uint16_t)>*> m_key_down{};
     std::set<std::function<void(wchar_t)>*> m_charw{};
     
     static auto call_callback_pos(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void;
+    static auto call_callback_wheel(const std::set<std::function<void(pos_2D, size_1D)>*>& callback, LPARAM lparam, WPARAM wparam, pos_2D window_pos) -> void;
     static auto call_callback_key(const std::set<std::function<void(std::uint16_t)>*>& callback, WPARAM wparam) -> void;
     static auto call_callback_char(const std::set<std::function<void(wchar_t)>*>& callback, WPARAM wparam) -> void;
     static auto CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT;
@@ -58,11 +61,13 @@ public:
 
     auto flush() -> void;
     auto redraw() -> void;
+    auto get_window_pos() -> pos_2D;
     auto get_window_size() -> size_2D;
 
-    auto add_rect(pos_2D pos, size_2D size, color_t color, float depth) -> rect_primitive_t*;
+    auto add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t*;
     auto remove_rect(rect_primitive_t* in) -> void;
-    auto add_text(std::wstring content, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment) -> text_primitive_t*;
+    auto add_text(std::wstring content, pos_2D text_pos, size_2D text_size
+    , pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment) -> text_primitive_t*;
     auto remove_text(text_primitive_t* in) -> void;
 
     auto add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;
@@ -71,6 +76,8 @@ public:
     auto remove_mouse_left_click(std::function<void(pos_2D)>* in) -> void;
     auto add_mouse_left_release(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;
     auto remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void;
+    auto add_mouse_scroll(std::function<void(pos_2D, size_1D)> callback) -> std::function<void(pos_2D, size_1D)>*;
+    auto remove_mouse_scroll(std::function<void(pos_2D, size_1D)>* in) -> void;
     auto add_key_down(std::function<void(std::uint16_t)> callback) -> std::function<void(std::uint16_t)>*;
     auto remove_key_down(std::function<void(std::uint16_t)>* in) -> void;
     auto add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>*;
@@ -82,6 +89,15 @@ auto engine_t::call_callback_pos(const std::set<std::function<void(pos_2D)>*>& c
     for (auto i{ callback.begin() }; i != callback.end(); i = callback.upper_bound(current)) {
         current = *i;
         (*current)(pos_2D{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) });
+    }
+    return;
+}
+
+auto engine_t::call_callback_wheel(const std::set<std::function<void(pos_2D, size_1D)>*>& callback, LPARAM lparam, WPARAM wparam, pos_2D window_pos) -> void {
+    std::function<void(pos_2D, size_1D)>* current{};
+    for (auto i{ callback.begin() }; i != callback.end(); i = callback.upper_bound(current)) {
+        current = *i;
+        (*current)(pos_2D{ GET_X_LPARAM(lparam) - window_pos.x, GET_Y_LPARAM(lparam) - window_pos.y }, size_1D{ GET_WHEEL_DELTA_WPARAM(wparam) / 120 });
     }
     return;
 }
@@ -171,6 +187,10 @@ auto CALLBACK engine_t::window_proc(HWND window, UINT message, WPARAM wparam, LP
         call_callback_pos(ptr->m_mouse_left_release, lparam);
         return 0;
     }
+    case WM_MOUSEWHEEL: {
+        call_callback_wheel(ptr->m_mouse_scroll, lparam, wparam, ptr->m_window_pos);
+        return 0;
+    }
     case WM_KEYDOWN: {
         call_callback_key(ptr->m_key_down, wparam);
         return 0;
@@ -192,7 +212,7 @@ engine_t::engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ wind
     , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED))
     , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED))
     , reinterpret_cast<HCURSOR>(LoadImageW(NULL, IDC_ARROW, IMAGE_CURSOR, GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR), LR_SHARED))) };
-    m_window = create_window(factory, window_class, L"compilercpp", WS_POPUP, m_window_size.x, m_window_size.y, instance);
+    m_window = create_window(factory, window_class, L"compilercpp", WS_POPUP, m_window_size.x, m_window_size.y, instance, &m_window_pos);
     SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter{ create_adapter(factory) };
     Microsoft::WRL::ComPtr<ID3D12Device2> device{ create_device(adapter) };
@@ -260,11 +280,15 @@ auto engine_t::redraw() -> void {
     return;
 }
 
+auto engine_t::get_window_pos() -> pos_2D {
+    return m_window_pos;
+}
+
 auto engine_t::get_window_size() -> size_2D {
     return m_window_size;
 }
 
-auto engine_t::add_rect(pos_2D pos, size_2D size, color_t color, float depth) -> rect_primitive_t* {
+auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color) -> rect_primitive_t* {
     rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color } };
     m_rect_primitive.emplace(out);
     redraw();
@@ -279,8 +303,9 @@ auto engine_t::remove_rect(rect_primitive_t* in) -> void {
     return;
 }
 
-auto engine_t::add_text(std::wstring content, pos_2D pos, size_2D size, size_1D size_font, color_t color, alignment_2D alignment) -> text_primitive_t* {
-    text_primitive_t* out{ new text_primitive_t{ this, content, pos, size, size_font, color, alignment } };
+auto engine_t::add_text(std::wstring content, pos_2D text_pos, size_2D text_size
+, pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment) -> text_primitive_t* {
+    text_primitive_t* out{ new text_primitive_t{ this, content, text_pos, text_size, clip_pos, clip_size, size_font, color, alignment } };
     m_text_primitive.emplace(out);
     redraw();
     return out;
@@ -326,6 +351,18 @@ auto engine_t::add_mouse_left_release(std::function<void(pos_2D)> callback) -> s
 
 auto engine_t::remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void {
     m_mouse_left_release.erase(in);
+    delete in;
+    return;
+}
+
+auto engine_t::add_mouse_scroll(std::function<void(pos_2D, size_1D)> callback) -> std::function<void(pos_2D, size_1D)>* {
+    std::function<void(pos_2D, size_1D)>* out{ new std::function<void(pos_2D, size_1D)>{ callback } };
+    m_mouse_scroll.emplace(out);
+    return out;
+}
+
+auto engine_t::remove_mouse_scroll(std::function<void(pos_2D, size_1D)>* in) -> void {
+    m_mouse_scroll.erase(in);
     delete in;
     return;
 }

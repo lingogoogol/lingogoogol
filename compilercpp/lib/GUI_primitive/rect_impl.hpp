@@ -1,8 +1,10 @@
-#ifndef COMPILERCPP_LIB_GUI_RECT_PRIMITIVE_IMPL
-#define COMPILERCPP_LIB_GUI_RECT_PRIMITIVE_IMPL
+#ifndef COMPILERCPP_LIB_GUI_PRIMITIVE_RECT_IMPL
+#define COMPILERCPP_LIB_GUI_PRIMITIVE_RECT_IMPL
 
-#include "rect_primitive_def.hpp"
+#include "rect_def.hpp"
 #include "engine_def.hpp"
+
+#include "../common.hpp"
 
 auto rect_primitive_t::upload_vertex_data() -> void {
     float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };
@@ -131,7 +133,7 @@ auto rect_primitive_t::render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> 
 }
 
 auto rect_primitive_t::inside(pos_2D pos) -> bool {
-    return pos.x >= m_pos.x && pos.x < m_pos.x + m_size.x && pos.y >= m_pos.y && pos.y < m_pos.y + m_size.y;
+    return ::inside(m_pos, m_size, pos);
 }
 
 #endif

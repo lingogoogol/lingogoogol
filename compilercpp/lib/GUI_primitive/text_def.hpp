@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_DEF
-#define COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_DEF
+#ifndef COMPILERCPP_LIB_GUI_PRIMITIVE_TEXT_DEF
+#define COMPILERCPP_LIB_GUI_PRIMITIVE_TEXT_DEF
 
 #include <vector>
 #include <string>
@@ -7,8 +7,9 @@
 
 #include "../header.hpp"
 
-#include "stu.hpp"
 #include "engine_decl.hpp"
+
+#include "../stu.hpp"
 
 class text_primitive_t {
 private:
@@ -23,6 +24,8 @@ private:
     engine_t* m_engine{};
     std::wstring m_text{};
     D2D1_POINT_2F m_pos{};
+    pos_2D m_clip_pos{};
+    size_2D m_clip_size{};
     Microsoft::WRL::ComPtr<IDWriteTextLayout> m_layout{};
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush{};
 
@@ -34,9 +37,11 @@ public:
     static auto render_end(std::size_t frame_index) -> void;
 
     text_primitive_t() = default;
-    text_primitive_t(engine_t* engine, std::wstring content, pos_2D pos, size_2D size_box, size_1D size_font, color_t color, alignment_2D alignment);
+    text_primitive_t(engine_t* engine, std::wstring content, pos_2D text_pos, size_2D text_size
+    , pos_2D clip_pos, size_2D clip_size, size_1D size_font, color_t color, alignment_2D alignment);
     
     auto set_color(color_t color) -> void;
+    auto get_size() -> size_2D;
     auto render() -> void;
 };
 

@@ -5,11 +5,10 @@
 #include <memory>
 #include <cstdint>
 
-#include "stu.hpp"
-#include "engine_def.hpp"
-#include "text_def.hpp"
-#include "text_input_def.hpp"
-#include "button_def.hpp"
+#include "object.hpp"
+
+#include "../stu.hpp"
+#include "../GUI_primitive/engine_def.hpp"
 
 class state_t {
 private:
@@ -29,6 +28,8 @@ public:
 
     template<typename t_object, typename... t_arg>
     auto add_object(t_arg&&... arg) -> std::uint64_t;
+    template<typename t_object>
+    auto get_object(std::uint64_t id) -> std::weak_ptr<t_object>;
     auto remove_object(std::uint64_t id) -> void;
     auto save_state(std::uint64_t id) -> void;
     auto clear_state() -> void;
@@ -52,6 +53,11 @@ auto state_t::add_object(t_arg&&... arg) -> std::uint64_t {
     m_current.emplace(m_current_id, std::make_shared<t_object>(m_engine, std::forward<t_arg&&>(arg)...));
     m_current[m_current_id]->show();
     return m_current_id++;
+}
+
+template<typename t_object>
+auto state_t::get_object(std::uint64_t id) -> std::weak_ptr<t_object> {
+    return std::dynamic_pointer_cast<t_object>(m_current[id]);
 }
 
 auto state_t::remove_object(std::uint64_t id) -> void {

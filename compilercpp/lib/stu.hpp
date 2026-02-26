@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_GUI_STU
-#define COMPILERCPP_LIB_GUI_STU
+#ifndef COMPILERCPP_LIB_STU
+#define COMPILERCPP_LIB_STU
 
 #include <cstdint>
 
@@ -12,11 +12,11 @@ struct depth_range_t {
 };
 
 struct size_1D {
-    std::uint64_t x{};
+    std::int64_t x{};
 };
 
 struct size_2D {
-    std::uint64_t x{}, y{};
+    std::int64_t x{}, y{};
 };
 
 struct color_t {

@@ -114,8 +114,10 @@ namespace state {
 auto get_input(state_t* state, std::string* out) -> void {
     state->save_state(state::normal);
     state->clear_state();
-    state->add_object<text_input_t>(pos_2D{ 0x0, 0x0 }, state->get_engine()->get_window_size(), size_1D{ 0x20 }
-    , color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top });
+    std::uint64_t text_input{ state->add_object<text_input_t>(pos_2D{ 0x0, 0x0 }, size_2D{ state->get_engine()->get_window_size().x, 0x100 }
+    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top }) };
+    state->add_object<text_scroll_t>(L"有滾動條的字", pos_2D{ 0x0, 0x100 }, state->get_engine()->get_window_size(), 0.0f
+    , size_1D{ 0x20 }, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::left, alignment_y::top });
     return;
 }
 

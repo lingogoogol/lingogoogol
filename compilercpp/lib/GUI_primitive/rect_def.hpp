@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_LIB_GUI_RECT_PRIMITIVE_DEF
-#define COMPILERCPP_LIB_GUI_RECT_PRIMITIVE_DEF
+#ifndef COMPILERCPP_LIB_GUI_PRIMITIVE_RECT_DEF
+#define COMPILERCPP_LIB_GUI_PRIMITIVE_RECT_DEF
 
 #include <array>
 #include <cstring>
@@ -8,9 +8,9 @@
 
 #include "../header.hpp"
 
-#include "stu.hpp"
 #include "engine_decl.hpp"
 
+#include "../stu.hpp"
 #include "../directx/create.hpp"
 
 class rect_primitive_t {
