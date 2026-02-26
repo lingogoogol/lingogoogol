@@ -3,80 +3,12 @@
 #include <cstdint>
 #include <string>
 
-#include "constant.hpp"
-#include "setting.hpp"
-#include "common.hpp"
-#include "io.hpp"
-#include "error.hpp"
-#include "header.hpp"
-#include "section.hpp"
-
-class global_pv {
-public:
-    virtual ~global_pv() = default;
-};
-
-class fun: public global_pv {
-private:
-    std::string m_name{};
-public:
-    fun(std::istream& istream) {
-        m_name = get_string(istream);
-    }
-
-    virtual ~fun() = default;
-
-    auto name() const -> const std::string& {
-        return m_name;
-    }
-
-    auto compile(std::vector<unsigned char>& dest) const -> void {}
-};
-
-class global {
-public:
-    using type_t = std::uint8_t;
-
-    enum: type_t {
-        fun,
-        var,
-        data_type
-    };
-private:
-    type_t m_type{};
-    global_pv* m_data{};
-public:
-    global(std::istream& istream) {
-        int type{};
-        try {
-            type = istream.get();
-        }
-        catch (std::ios_base::failure&) {
-            if (istream.eof()) {
-                throw error{ error::eof };
-            }
-            else {
-                throw internal_error{ "source reading" };
-            }
-        }
-
-        switch (type) {
-        case fun:
-            m_data = new ::fun{ istream };
-            break;
-        default:
-            throw error{ error::global_type };
-        }
-    }
-
-    auto type() const -> type_t {
-        return m_type;
-    }
-
-    auto to_fun() -> ::fun& {
-        return *dynamic_cast<::fun*>(m_data);
-    }
-};
+#include "lib/.hpp"
+#include "out/.hpp"
+#include "global/.hpp"
+#include "stmt/.hpp"
+#include "expr/.hpp"
+#include "instr/.hpp"
 
 auto compile(std::istream& source, std::ostream& exe) -> void {
     std::string entrance{ get_string(source) };
@@ -117,7 +49,8 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
     coff_file_header_missing_field coff_file_header_missing_field_obj{ coff_file_header(exe) };
     const std::streamoff start_of_optional_header{ exe.tellp() };
     optional_header_missing_field optional_header_missing_field_obj{ optional_header(exe) };
-    fill_integer(exe, coff_file_header_missing_field_obj.size_of_optional_header, static_cast<std::uint16_t>(static_cast<std::streamoff>(exe.tellp()) - start_of_optional_header));
+    fill_integer(exe, coff_file_header_missing_field_obj.m_size_of_optional_header
+    , static_cast<std::uint16_t>(static_cast<std::streamoff>(exe.tellp()) - start_of_optional_header));
 
     std::vector<section> sections{};
     size_entry size_obj{};
@@ -142,23 +75,23 @@ auto compile(std::istream& source, std::ostream& exe) -> void {
     }
     std::uint32_t virtual_address{ static_cast<std::uint32_t>(exe.tellp()) };
     align_file(exe, virtual_address);
-    fill_integer(exe, coff_file_header_missing_field_obj.number_of_sections, static_cast<std::uint16_t>(sections.size()));
-    fill_integer(exe, optional_header_missing_field_obj.size_of_code, size_obj.code);
-    fill_integer(exe, optional_header_missing_field_obj.size_of_initialized_data, size_obj.initialized_data);
-    fill_integer(exe, optional_header_missing_field_obj.size_of_uninitialized_data, size_obj.uninitialized_data);
-    fill_integer(exe, optional_header_missing_field_obj.size_of_headers, static_cast<std::uint32_t>(exe.tellp()));
-    fill_integer(exe, optional_header_missing_field_obj.address_of_entry_point, virtual_address + entry_point_address);
-    fill_integer(exe, optional_header_missing_field_obj.base_of_code, virtual_address);
+    fill_integer(exe, coff_file_header_missing_field_obj.m_number_of_sections, static_cast<std::uint16_t>(sections.size()));
+    fill_integer(exe, optional_header_missing_field_obj.m_size_of_code, size_obj.m_code);
+    fill_integer(exe, optional_header_missing_field_obj.m_size_of_initialized_data, size_obj.m_initialized_data);
+    fill_integer(exe, optional_header_missing_field_obj.m_size_of_uninitialized_data, size_obj.m_uninitialized_data);
+    fill_integer(exe, optional_header_missing_field_obj.m_size_of_headers, static_cast<std::uint32_t>(exe.tellp()));
+    fill_integer(exe, optional_header_missing_field_obj.m_address_of_entry_point, virtual_address + entry_point_address);
+    fill_integer(exe, optional_header_missing_field_obj.m_base_of_code, virtual_address);
 
     for (std::uint8_t i{ 0 }; i < sections.size(); ++i) {
         pad_section(exe, sections[i], section_header_missing_fields[i], virtual_address);
     }
-    fill_integer(exe, optional_header_missing_field_obj.size_of_image, virtual_address);
+    fill_integer(exe, optional_header_missing_field_obj.m_size_of_image, virtual_address);
     return;
 }
 
 auto main(int argc, char** argv) -> int {
-    try {
+    //try {
         if (argc != 3) {
             throw error{ error::command_line_argument };
         }
@@ -175,9 +108,9 @@ auto main(int argc, char** argv) -> int {
 
         source.close();
         exe.close();
-    }
-    catch (std::exception& e) {
+    //}
+    /*catch (std::exception& e) {
         std::cout << "an error occurred: " << e.what() << '\n';
-    }
+    }*/
     return 0;
 }

@@ -1,13 +1,14 @@
-#ifndef COMPILERCPP_HEADER
-#define COMPILERCPP_HEADER
+#ifndef COMPILERCPP_OUT_HEADER
+#define COMPILERCPP_OUT_HEADER
 
 #include <iostream>
 #include <cstdint>
 #include <chrono>
 
+#include "../lib/.hpp"
+
 #include "constant.hpp"
 #include "setting.hpp"
-#include "io.hpp"
 
 auto dos_header(std::ostream& ostream) -> void {
     pad_integer(ostream, std::uint16_t{ 0x5A4D });
@@ -26,8 +27,8 @@ auto signature(std::ostream& ostream) -> void {
 }
 
 struct coff_file_header_missing_field {
-    std::streampos number_of_sections{};
-    std::streampos size_of_optional_header{};
+    std::streampos m_number_of_sections{};
+    std::streampos m_size_of_optional_header{};
 };
 
 [[nodiscard]]
@@ -45,40 +46,40 @@ auto coff_file_header(std::ostream& ostream) -> coff_file_header_missing_field {
 }
 
 struct optional_header_missing_field {
-    std::streampos size_of_code{};
-    std::streampos size_of_initialized_data{};
-    std::streampos size_of_uninitialized_data{};
-    std::streampos address_of_entry_point{};
-    std::streampos base_of_code{};
+    std::streampos m_size_of_code{};
+    std::streampos m_size_of_initialized_data{};
+    std::streampos m_size_of_uninitialized_data{};
+    std::streampos m_address_of_entry_point{};
+    std::streampos m_base_of_code{};
     
-    std::streampos size_of_image{};
-    std::streampos size_of_headers{};
+    std::streampos m_size_of_image{};
+    std::streampos m_size_of_headers{};
 
-    std::streampos export_table{};
-    std::streampos import_table{};
-    std::streampos resource_table{};
-    std::streampos exception_table{};
-    std::streampos certificate_table{};
-    std::streampos base_relocation_table{};
-    std::streampos tls_table{};
-    std::streampos load_config_table{};
-    std::streampos IAT{};
-    std::streampos delay_import_descriptor{};
+    std::streampos m_export_table{};
+    std::streampos m_import_table{};
+    std::streampos m_resource_table{};
+    std::streampos m_exception_table{};
+    std::streampos m_certificate_table{};
+    std::streampos m_base_relocation_table{};
+    std::streampos m_tls_table{};
+    std::streampos m_load_config_table{};
+    std::streampos m_IAT{};
+    std::streampos m_delay_import_descriptor{};
 };
 
 auto optional_header_standard(std::ostream& ostream, optional_header_missing_field& missing_field) -> void {
     pad_integer(ostream, std::uint16_t{ 0x20B });
     pad_integer(ostream, setting::linker_version_major);
     pad_integer(ostream, setting::linker_version_minor);
-    missing_field.size_of_code = ostream.tellp();
+    missing_field.m_size_of_code = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
-    missing_field.size_of_initialized_data = ostream.tellp();
+    missing_field.m_size_of_initialized_data = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
-    missing_field.size_of_uninitialized_data = ostream.tellp();
+    missing_field.m_size_of_uninitialized_data = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
-    missing_field.address_of_entry_point = ostream.tellp();
+    missing_field.m_address_of_entry_point = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
-    missing_field.base_of_code = ostream.tellp();
+    missing_field.m_base_of_code = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
     return;
 }
@@ -94,9 +95,9 @@ auto optional_header_windows(std::ostream& ostream, optional_header_missing_fiel
     pad_integer(ostream, setting::subsystem_version_major);
     pad_integer(ostream, setting::subsystem_version_minor);
     pad_integer(ostream, std::uint32_t{ 0 });
-    missing_field.size_of_image = ostream.tellp();
+    missing_field.m_size_of_image = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
-    missing_field.size_of_headers = ostream.tellp();
+    missing_field.m_size_of_headers = ostream.tellp();
     pad_integer(ostream, std::uint32_t{});
     pad_integer(ostream, std::uint32_t{ 0 });
     pad_integer(ostream, windows_subsystem::WINDOWS_CUI);
@@ -111,40 +112,40 @@ auto optional_header_windows(std::ostream& ostream, optional_header_missing_fiel
 }
 
 struct data_directory {
-    std::uint32_t virtual_address{ 0 };
-    std::uint32_t size{ 0 };
+    std::uint32_t m_virtual_address{ 0 };
+    std::uint32_t m_size{ 0 };
 };
 
 auto pad_data_directory(std::ostream& ostream, const data_directory& in) -> void {
-    pad_integer(ostream, in.virtual_address);
-    pad_integer(ostream, in.size);
+    pad_integer(ostream, in.m_virtual_address);
+    pad_integer(ostream, in.m_size);
     return;
 }
 
 auto optional_header_data_directory(std::ostream& ostream, optional_header_missing_field& missing_field) -> void {
-    missing_field.export_table = ostream.tellp();
+    missing_field.m_export_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.import_table = ostream.tellp();
+    missing_field.m_import_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.resource_table = ostream.tellp();
+    missing_field.m_resource_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.exception_table = ostream.tellp();
+    missing_field.m_exception_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.certificate_table = ostream.tellp();
+    missing_field.m_certificate_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.base_relocation_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    pad_data_directory(ostream, { 0, 0 });
-    pad_data_directory(ostream, { 0, 0 });
-    pad_data_directory(ostream, { 0, 0 });
-    missing_field.tls_table = ostream.tellp();
-    pad_data_directory(ostream, {});
-    missing_field.load_config_table = ostream.tellp();
+    missing_field.m_base_relocation_table = ostream.tellp();
     pad_data_directory(ostream, {});
     pad_data_directory(ostream, { 0, 0 });
-    missing_field.IAT = ostream.tellp();
+    pad_data_directory(ostream, { 0, 0 });
+    pad_data_directory(ostream, { 0, 0 });
+    missing_field.m_tls_table = ostream.tellp();
     pad_data_directory(ostream, {});
-    missing_field.delay_import_descriptor = ostream.tellp();
+    missing_field.m_load_config_table = ostream.tellp();
+    pad_data_directory(ostream, {});
+    pad_data_directory(ostream, { 0, 0 });
+    missing_field.m_IAT = ostream.tellp();
+    pad_data_directory(ostream, {});
+    missing_field.m_delay_import_descriptor = ostream.tellp();
     pad_data_directory(ostream, {});
     pad_data_directory(ostream, { 0, 0 });
     pad_data_directory(ostream, { 0, 0 });

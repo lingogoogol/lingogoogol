@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_SETTING
-#define COMPILERCPP_SETTING
+#ifndef COMPILERCPP_OUT_SETTING
+#define COMPILERCPP_OUT_SETTING
 
 #include <cstdint>
 

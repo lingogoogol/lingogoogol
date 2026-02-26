@@ -17,15 +17,24 @@
 			"path": "../installer"
 		},
 		{
-			"name": "test",
-			"path": "../test"
+			"name": "compilercpp",
+			"path": "../compilercpp"
 		},
 		{
 			"name": "other",
 			"path": "../other"
 		},
 		{
-			"path": "../compilercpp"
+			"name": "test",
+			"path": "../test"
+		},
+		{
+			"name": "temp",
+			"path": "../temp"
+		},
+		{
+			"name": "bug",
+			"path": "../bug"
 		}
 	],
 	"settings": {
@@ -258,8 +267,8 @@
 				"program": "${cwd}/output/${fileBasenameNoExtension}.exe",
 				"cwd": "${cwd}",
 				"args": [
-					"source/test/compiler",
-					"source/test/compiler.exe"
+					"source/temp/compiler",
+					"source/temp/compiler.exe"
 				],
 				"symbolSearchPath": "C:\\lingogoogol\\programming\\middle\\pdbl\\",
 				"requireExactSource": true,

@@ -1,0 +1,4 @@
+#ifndef COMPILERCPP_DATA_TYPE_REF
+#define COMPILERCPP_DATA_TYPE_REF
+
+#endif

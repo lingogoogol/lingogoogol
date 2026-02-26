@@ -1,5 +1,5 @@
-#ifndef COMPILERCPP_COMMON
-#define COMPILERCPP_COMMON
+#ifndef COMPILERCPP_LIB_COMMON
+#define COMPILERCPP_LIB_COMMON
 
 template<typename t_in>
 auto divup(t_in in1, t_in in2) -> t_in {
