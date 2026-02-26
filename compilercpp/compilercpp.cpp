@@ -104,22 +104,66 @@ auto input() -> std::string {
 class button_t {
 private:
     engine_t* m_engine{};
-    rect_t* m_outer_rect{};
-    rect_t* m_inner_rect{};
-    text_t* m_text{};
+    rect_primitive_t* m_outer_rect{};
+    rect_primitive_t* m_inner_rect{};
+    text_primitive_t* m_text{};
     std::function<void(void)> m_callback{};
+    bool m_clicked_inside{};
 public:
     button_t() {}
+
+    auto mouse_move_callback(pos_2D pos) -> void {
+        if (m_outer_rect->inside(pos)) {
+            if (GetAsyncKeyState(VK_LBUTTON) < 0) {
+                m_clicked_inside = false;
+            }
+            else {
+                m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 0.0f });
+                m_text->set_color(color_t{ 1.0f, 1.0f, 0.0f });
+            }
+        }
+        else {
+            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
+            m_inner_rect->set_color(color_t{ 0.0f, 0.0f, 0.0f });
+            m_text->set_color(color_t{ 1.0f, 1.0f, 1.0f });
+        }
+        return;
+    }
+
+    auto mouse_left_click_callback(pos_2D pos) -> void {
+        if (m_outer_rect->inside(pos)) {
+            m_clicked_inside = true;
+            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
+            m_inner_rect->set_color(color_t{ 1.0f, 1.0f, 1.0f });
+            m_text->set_color(color_t{ 0.0f, 0.0f, 0.0f });
+        }
+        return;
+    }
+
+    auto mouse_left_release_callback(pos_2D pos) -> void {
+        if (m_outer_rect->inside(pos)) {
+            m_outer_rect->set_color(color_t{ 1.0f, 1.0f, 0.0f });
+            m_inner_rect->set_color(color_t{ 0.0f, 0.0f, 0.0f });
+            m_text->set_color(color_t{ 1.0f, 1.0f, 0.0f });
+            if (m_clicked_inside) {
+                m_callback();
+            }
+        }
+        return;
+    }
 
     button_t(engine_t* engine, pos_2D pos, size_2D size, std::uint64_t border_size
     , std::wstring display_text, depth_range_t depth_range, std::function<void(void)> callback)
     : m_engine{ engine }, m_callback{ callback } {
         float depth_distance{ (depth_range.far - depth_range.near) / 2 };
-        m_outer_rect = m_engine->add_rect(rect_t{ pos, size, color_t{ 1.0f, 1.0f, 1.0f }, depth_range.far - depth_distance });
+        m_outer_rect = m_engine->add_rect(pos, size, color_t{ 1.0f, 1.0f, 1.0f }, depth_range.far - depth_distance);
         pos_2D inner_pos{ pos.x + border_size, pos.y + border_size };
         size_2D inner_size{ size.x - border_size * 2, size.y - border_size * 2 };
-        m_inner_rect = m_engine->add_rect(rect_t{ inner_pos, inner_size, color_t{ 0.0f, 0.0f, 0.0f }, depth_range.far - depth_distance * 2 });
-        m_text = m_engine->add_text(text_t{ display_text, inner_pos, inner_size, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::center, alignment_y::center } });
+        m_inner_rect = m_engine->add_rect(inner_pos, inner_size, color_t{ 0.0f, 0.0f, 0.0f }, depth_range.far - depth_distance * 2);
+        m_text = m_engine->add_text(display_text, inner_pos, inner_size, color_t{ 1.0f, 1.0f, 1.0f }, alignment_2D{ alignment_x::center, alignment_y::center });
+        m_engine->add_mouse_move(std::bind(&button_t::mouse_move_callback, this, std::placeholders::_1));
+        m_engine->add_mouse_left_click(std::bind(&button_t::mouse_left_click_callback, this, std::placeholders::_1));
+        m_engine->add_mouse_left_release(std::bind(&button_t::mouse_left_release_callback, this, std::placeholders::_1));
         return;
     }
 

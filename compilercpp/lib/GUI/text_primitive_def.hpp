@@ -1,0 +1,50 @@
+#ifndef COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_DEF
+#define COMPILERCPP_LIB_GUI_TEXT_PRIMITIVE_DEF
+
+#include <vector>
+#include <string>
+#include <array>
+
+#include "../header.hpp"
+
+#include "stu.hpp"
+#include "engine_decl.hpp"
+
+class text_primitive_t {
+private:
+    constexpr static std::size_t format_count{ static_cast<std::size_t>(alignment_x::count) * static_cast<std::size_t>(alignment_y::count) };
+    static Microsoft::WRL::ComPtr<IDWriteFactory5> m_factory_DWrite;
+    static Microsoft::WRL::ComPtr<ID3D11On12Device> m_device_D3D11on12;
+    static Microsoft::WRL::ComPtr<ID2D1DeviceContext> m_device_context_D2D1;
+    static Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_device_context_D3D11;
+    static std::vector<Microsoft::WRL::ComPtr<ID3D11Resource>> m_RT_D3D11;
+    static std::vector<Microsoft::WRL::ComPtr<ID2D1Bitmap1>> m_RT_D2D1;
+    static std::array<Microsoft::WRL::ComPtr<IDWriteTextFormat>, text_primitive_t::format_count> m_format;
+
+    engine_t* m_engine{};
+    std::wstring m_text{};
+    D2D1_POINT_2F m_pos{};
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> m_layout{};
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_brush{};
+
+    auto create_brush(color_t color) -> void;
+public:
+    static auto init(Microsoft::WRL::ComPtr<ID3D12Device2> device_D3D12, Microsoft::WRL::ComPtr<ID3D12CommandQueue> command_queue
+    , HWND window, const std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& RT) -> void;
+    static auto render_begin(std::size_t frame_index) -> void;
+    static auto render_end(std::size_t frame_index) -> void;
+    text_primitive_t();
+    text_primitive_t(engine_t* engine, std::wstring content, pos_2D pos, size_2D size, color_t color, alignment_2D alignment);
+    auto set_color(color_t color) -> void;
+    auto render() -> void;
+};
+
+Microsoft::WRL::ComPtr<IDWriteFactory5> text_primitive_t::m_factory_DWrite{};
+Microsoft::WRL::ComPtr<ID3D11On12Device> text_primitive_t::m_device_D3D11on12{};
+Microsoft::WRL::ComPtr<ID2D1DeviceContext> text_primitive_t::m_device_context_D2D1{};
+Microsoft::WRL::ComPtr<ID3D11DeviceContext> text_primitive_t::m_device_context_D3D11{};
+std::vector<Microsoft::WRL::ComPtr<ID3D11Resource>> text_primitive_t::m_RT_D3D11{};
+std::vector<Microsoft::WRL::ComPtr<ID2D1Bitmap1>> text_primitive_t::m_RT_D2D1{};
+std::array<Microsoft::WRL::ComPtr<IDWriteTextFormat>, text_primitive_t::format_count> text_primitive_t::m_format{};
+
+#endif

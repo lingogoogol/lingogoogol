@@ -4,7 +4,7 @@
 #include <cstdint>
 
 struct pos_2D {
-    std::uint64_t x{}, y{};
+    std::int64_t x{}, y{};
 };
 
 struct depth_range_t {

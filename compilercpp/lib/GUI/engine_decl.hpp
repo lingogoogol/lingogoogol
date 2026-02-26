@@ -1,0 +1,6 @@
+#ifndef COMPILERCPP_LIB_GUI_ENGINE_DECL
+#define COMPILERCPP_LIB_GUI_ENGINE_DECL
+
+class engine_t;
+
+#endif

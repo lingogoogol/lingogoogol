@@ -1,14 +1,15 @@
-#ifndef COMPILERCPP_LIB_GUI_ENGINE
-#define COMPILERCPP_LIB_GUI_ENGINE
+#ifndef COMPILERCPP_LIB_GUI_ENGINE_DEF
+#define COMPILERCPP_LIB_GUI_ENGINE_DEF
 
 #include <vector>
 #include <set>
 
 #include "../header.hpp"
 
+#include "engine_decl.hpp"
 #include "stu.hpp"
-#include "rect.hpp"
-#include "text.hpp"
+#include "rect_primitive_def.hpp"
+#include "text_primitive_def.hpp"
 
 #include "../directx/command_queue_smart.hpp"
 #include "../directx/command_list.hpp"
@@ -33,13 +34,23 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_RTV_heap{};
     UINT m_RTV_size{};
     UINT m_frame_index{};
-    std::set<rect_t*> m_rect{};
-    std::set<text_t*> m_text{};
+    std::set<rect_primitive_t*> m_rect{};
+    std::set<text_primitive_t*> m_text{};
+    std::set<std::function<void(pos_2D)>*> m_mouse_move{};
+    std::set<std::function<void(pos_2D)>*> m_mouse_left_click{};
+    std::set<std::function<void(pos_2D)>*> m_mouse_left_release{};
 
-    static auto CALLBACK window_proc(HWND window, UINT message, WPARAM param_1, LPARAM param_2) -> LRESULT {
+    static auto call_callback(const std::set<std::function<void(pos_2D)>*>& callback, LPARAM lparam) -> void {
+        for (auto i{ callback.begin() }; i != callback.end(); ++i) {
+            (**i)(pos_2D{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) });
+        }
+        return;
+    }
+
+    static auto CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) -> LRESULT {
         engine_t* ptr{ reinterpret_cast<engine_t*>(GetWindowLongPtrW(window, GWLP_USERDATA)) };
         if (!ptr || !ptr->m_initialized) {
-            return DefWindowProcW(window, message, param_1, param_2);
+            return DefWindowProcW(window, message, wparam, lparam);
         }
         switch (message) {
         case WM_PAINT: {
@@ -68,17 +79,17 @@ private:
             scissor_rect.bottom = ptr->m_window_size.y;
             command_list->RSSetScissorRects(1, &scissor_rect);
             command_list->OMSetRenderTargets(1, &RTV_handle, false, &DSV_handle);
-            rect_t::render_begin(command_list);
+            rect_primitive_t::render_begin(command_list);
             for (auto i{ ptr->m_rect.begin() }; i != ptr->m_rect.end(); ++i) {
                 (*i)->render(command_list);
             }
-            rect_t::render_end();
+            rect_primitive_t::render_end();
             ptr->m_command_queue.execute_list(command_list);
-            text_t::render_begin(ptr->m_frame_index);
+            text_primitive_t::render_begin(ptr->m_frame_index);
             for (auto i{ ptr->m_text.begin() }; i != ptr->m_text.end(); ++i) {
                 (*i)->render();
             }
-            text_t::render_end(ptr->m_frame_index);
+            text_primitive_t::render_end(ptr->m_frame_index);
 
             ptr->m_buffer_fence_value[ptr->m_frame_index] = ptr->m_command_queue.set_fence();
             ptr->m_swap_chain->Present(0, ptr->m_tearing_supported ? DXGI_PRESENT_ALLOW_TEARING : 0);
@@ -91,15 +102,22 @@ private:
             PostQuitMessage(0);
             return 0;
         }
+        case WM_MOUSEMOVE: {
+            call_callback(ptr->m_mouse_move, lparam);
+            return 0;
+        }
+        case WM_LBUTTONDOWN: {
+            call_callback(ptr->m_mouse_left_click, lparam);
+            return 0;
+        }
+        case WM_LBUTTONUP: {
+            call_callback(ptr->m_mouse_left_release, lparam);
+            return 0;
+        }
         default: {
-            return DefWindowProcW(window, message, param_1, param_2);
+            return DefWindowProcW(window, message, wparam, lparam);
         }
         }
-    }
-
-    auto redraw() -> void {
-        RedrawWindow(m_window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
-        return;
     }
 public:
     engine_t(HINSTANCE instance, size_2D window_size): m_window_size{ window_size } {
@@ -146,8 +164,8 @@ public:
         DSV_description.Flags = D3D12_DSV_FLAG_NONE;
         DSV_description.Texture2D.MipSlice = 0;
         device->CreateDepthStencilView(m_DS.Get(), &DSV_description, m_DSV_heap->GetCPUDescriptorHandleForHeapStart());
-        text_t::init(device, m_command_queue.get(), m_window, m_RT);
-        rect_t::init(device, m_window_size);
+        text_primitive_t::init(device, m_command_queue.get(), m_window, m_RT);
+        rect_primitive_t::init(device, m_window_size);
         m_frame_index = m_swap_chain->GetCurrentBackBufferIndex();
         m_buffer_fence_value.resize(buffer_count);
         m_initialized = true;
@@ -161,38 +179,84 @@ public:
         return;
     }
 
-    auto add_rect(const rect_t& in) -> rect_t* {
-        rect_t* out{ new rect_t{ in } };
+    auto flush() -> void {
+        m_command_queue.flush();
+        return;
+    }
+
+    auto redraw() -> void {
+        InvalidateRect(m_window, nullptr, false);
+        return;
+    }
+
+    auto add_rect(pos_2D pos, size_2D size, color_t color, float depth) -> rect_primitive_t* {
+        rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color } };
         m_rect.emplace(out);
         redraw();
         return out;
     }
 
-    auto add_text(const text_t& in) -> text_t* {
-        text_t* out{ new text_t{ in } };
+    auto add_text(std::wstring content, pos_2D pos, size_2D size, color_t color, alignment_2D alignment) -> text_primitive_t* {
+        text_primitive_t* out{ new text_primitive_t{ this, content, pos, size, color, alignment } };
         m_text.emplace(out);
         redraw();
         return out;
     }
 
-    auto remove_rect(rect_t* in) -> void {
+    auto add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
+        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
+        m_mouse_move.emplace(out);
+        return out;
+    }
+
+    auto add_mouse_left_click(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
+        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
+        m_mouse_left_click.emplace(out);
+        return out;
+    }
+
+    auto add_mouse_left_release(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
+        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
+        m_mouse_left_release.emplace(out);
+        return out;
+    }
+
+    auto remove_rect(rect_primitive_t* in) -> void {
         m_rect.erase(in);
-        m_command_queue.flush();
+        flush();
         delete in;
         redraw();
         return;
     }
 
-    auto remove_text(text_t* in) -> void {
+    auto remove_text(text_primitive_t* in) -> void {
         m_text.erase(in);
-        m_command_queue.flush();
+        flush();
         delete in;
         redraw();
+        return;
+    }
+
+    auto remove_mouse_move(std::function<void(pos_2D)>* in) -> void {
+        m_mouse_move.erase(in);
+        delete in;
+        return;
+    }
+
+    auto remove_mouse_left_click(std::function<void(pos_2D)>* in) -> void {
+        m_mouse_left_click.erase(in);
+        delete in;
+        return;
+    }
+
+    auto remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void {
+        m_mouse_left_release.erase(in);
+        delete in;
         return;
     }
 
     ~engine_t() {
-        m_command_queue.flush();
+        flush();
         for (auto i{ m_rect.begin() }; i != m_rect.end(); ++i) {
             delete *i;
         }
