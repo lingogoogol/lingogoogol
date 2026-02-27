@@ -23,8 +23,7 @@
 		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
 		"editor.unicodeHighlight.includeStrings": false,
 		"explorer.autoReveal": false,
-		"terminal.integrated.cwd": "../",
-		"window.zoomLevel": 1
+		"terminal.integrated.cwd": "../"
 	},
 	"tasks": {
 		"version": "2.0.0",
