@@ -11,6 +11,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
+set(
+    CMAKE_INTERPROCEDURAL_OPTIMIZATION
+    $<$<CONFIG:Debug>:OFF>$
+    $<$<CONFIG:Release>:ON>$
+    $<$<CONFIG:RelWithDebInfo>:OFF>$
+    $<$<CONFIG:MinSizeRel>:ON>$
+)
 
 add_library(common INTERFACE)
 target_compile_options(
