@@ -10,10 +10,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
+
 add_library(common INTERFACE)
 target_compile_options(
     common
     INTERFACE
+        $<$<CXX_COMPILER_ID:MSVC>:/permissive->
+        $<$<CXX_COMPILER_ID:MSVC>:/volatile:iso>
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+        $<$<CXX_COMPILER_ID:MSVC>:/Zc:enumTypes>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+        $<$<CXX_COMPILER_ID:MSVC>:/options:strict>
+        $<$<CXX_COMPILER_ID:MSVC>:/diagnostics:caret>
 )
 target_include_directories(
     common
