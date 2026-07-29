@@ -1,0 +1,34 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"C_Cpp.default.compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe",
+		"C_Cpp.default.defines": [
+			"_DEBUG",
+			"UNICODE",
+			"_UNICODE"
+		],
+		"C_Cpp.default.intelliSenseMode": "windows-msvc-x64",
+		"C_Cpp.default.includePath": [
+			"C:/lingogoogol/programming/include/",
+			"C:/lingogoogol/programming/source/",
+			"C:/lingogoogol/Application/vcpkg/installed/x64-windows/include/"
+		],
+		"C_Cpp.default.cppStandard": "c++23",
+		"editor.smoothScrolling": true,
+		"editor.unicodeHighlight.includeStrings": false,
+		"terminal.integrated.smoothScrolling": true,
+		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
+		"terminal.integrated.cwd": "../",
+		"explorer.autoReveal": false,
+		"cmake.buildDirectory": "${workspaceFolder}/../build_${buildType}",
+		"cmake.generator": "Ninja",
+		"cmake.debugConfig": {
+			"cwd": "${workspaceFolder}/../cwd/"
+		},
+		"window.zoomLevel": 1
+	}
+}
