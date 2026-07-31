@@ -1,34 +1,35 @@
-#ifndef STORAGE_MULTIPART
-#define STORAGE_MULTIPART
+module;
 
-#include <map>
-#include <vector>
-#include <cstdint>
-#include <chrono>
-#include <thread>
+#define UNICODE
 
-#include "../compilercpp/lib/.hpp"
+#include <fstream>
 
-class error_curl_t: public error_t {
+#include "../../compilercpp/lib/.hpp"
+
+export module storage.multipart;
+
+import std;
+
+export class error_curl_t: public error_t {
 public:
 	error_curl_t(std::string message): error_t{ message } {}
 };
 
-auto api_curl(CURLcode code) -> void {
+export auto api_curl(CURLcode code) -> void {
 	if (code != CURLE_OK) {
 		throw error_curl_t{ curl_easy_strerror(code) };
 	}
 	return;
 }
 
-auto api_curlh(CURLHcode code) -> void {
+export auto api_curlh(CURLHcode code) -> void {
 	if (code != CURLHE_OK) {
 		throw error_curl_t{ "error curlh: " + std::to_string(code) };
 	}
 	return;
 }
 
-auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t {
+export auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t {
 	auto dest{ static_cast<std::string*>(dest_void) };
 	auto size_orig{ dest->size() };
 	dest->resize(size_orig + size);
@@ -38,12 +39,12 @@ auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -
 	return size;
 }
 
-struct read_src_t {
+export struct read_src_t {
 	std::string m_data{};
 	std::uint64_t m_progress{};
 };
 
-auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t {
+export auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t {
 	auto src{ static_cast<read_src_t*>(src_void) };
 	size = std::min(size, src->m_data.size() - src->m_progress);
 	for (std::size_t i{ 0 }; i < size; ++i) {
@@ -53,12 +54,12 @@ auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) ->
 	return size;
 }
 
-struct debug_str_t {
+export struct debug_str_t {
 	std::string m_text{};
 	std::string m_request_header{};
 };
 
-auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void* str_void) -> int {
+export auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void* str_void) -> int {
 	auto str_list{ static_cast<debug_str_t*>(str_void) };
 	std::string* str{};
 	switch (type) {
@@ -78,7 +79,7 @@ auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, voi
 	return 0;
 }
 
-class http_request_t {
+export class http_request_t {
 private:
     std::string m_method{};
     std::string m_path{};
@@ -176,7 +177,7 @@ auto http_request_t::to_str() const -> std::string {
     return out;
 }
 
-class http_response_t {
+export class http_response_t {
 private:
     std::string m_protocol{};
     std::string m_status_code{};
@@ -242,7 +243,7 @@ auto http_response_t::body_get() const -> std::string {
     return m_body;
 }
 
-class curl_multipart_t {
+export class curl_multipart_t {
 private:
     struct http_t {
         http_request_t m_request{};
@@ -440,5 +441,3 @@ auto curl_multipart_t::action() -> void {
     }
     return;
 }
-
-#endif

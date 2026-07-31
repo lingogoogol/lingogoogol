@@ -1,17 +1,18 @@
-#ifndef STORAGE_API
-#define STORAGE_API
+module;
 
-#include <deque>
-#include <mutex>
-#include <condition_variable>
-#include <string>
-#include <filesystem>
-#include <atomic>
-#include <chrono>
+#define UNICODE
 
-#include "multipart.h"
+#include <fstream>
 
-auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::string {
+#include "../../compilercpp/lib/.hpp"
+
+export module storage.api;
+
+import std;
+
+import storage.multipart;
+
+export auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::string {
 	std::string response{};
     while (true) {
         try {
@@ -35,7 +36,7 @@ auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::str
 	return response;
 }
 
-auto base64url_encode(std::string in) -> std::string {
+export auto base64url_encode(std::string in) -> std::string {
 	DWORD out_size{};
 	CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
 	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, nullptr, &out_size);
@@ -47,7 +48,7 @@ auto base64url_encode(std::string in) -> std::string {
 	return out;
 }
 
-auto base64url_decode(std::string in) -> std::string {
+export auto base64url_decode(std::string in) -> std::string {
 	DWORD out_size{};
 	CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
 	, CRYPT_STRING_BASE64, nullptr, &out_size, 0, nullptr);
@@ -58,7 +59,7 @@ auto base64url_decode(std::string in) -> std::string {
 	return out;
 }
 
-auto sha256withrsa(std::string in, std::string key) -> std::string {
+export auto sha256withrsa(std::string in, std::string key) -> std::string {
 	EVP_PKEY* private_key{};
 	OSSL_DECODER_CTX* ossl_decoder{
 		OSSL_DECODER_CTX_new_for_pkey(&private_key, "PEM", nullptr, "RSA", EVP_PKEY_KEYPAIR, nullptr, nullptr)
@@ -78,7 +79,7 @@ auto sha256withrsa(std::string in, std::string key) -> std::string {
 	return out;
 }
 
-class account_t {
+export class account_t {
 private:
 	std::string m_address{};
 	std::string m_key{};
@@ -152,12 +153,12 @@ auto account_t::get_token() -> std::string {
 	return m_token;
 }
 
-struct data_t {
+export struct data_t {
 	std::string m_name{};
 	std::string m_content{};
 };
 
-auto http_api_multipart(CURL* curl, account_t& account) -> curl_multipart_t {
+export auto http_api_multipart(CURL* curl, account_t& account) -> curl_multipart_t {
 	curl_multipart_t multipart{ curl };
 	multipart.host_set("https://www.googleapis.com");
 	multipart.path_set("/batch/drive/v3");
@@ -166,13 +167,13 @@ auto http_api_multipart(CURL* curl, account_t& account) -> curl_multipart_t {
 	return multipart;
 }
 
-auto http_api_request(curl_multipart_t& multipart) -> http_request_t& {
+export auto http_api_request(curl_multipart_t& multipart) -> http_request_t& {
 	http_request_t& request{ multipart.request_get(multipart.request_add()) };
 	request.host_set("https://www.googleapis.com");
 	return request;
 }
 
-auto http_api_request_action(curl_multipart_t& multipart) -> void {
+export auto http_api_request_action(curl_multipart_t& multipart) -> void {
 	if (multipart.size() >= 100) {
 		multipart.action();
 		multipart.clear();
@@ -180,7 +181,7 @@ auto http_api_request_action(curl_multipart_t& multipart) -> void {
 	return;
 }
 
-auto data_upload_request(curl_multipart_t& multipart, std::string name, std::string content) -> void {
+export auto data_upload_request(curl_multipart_t& multipart, std::string name, std::string content) -> void {
 	http_request_t& request{ http_api_request(multipart) };
 	request.method_set("POST");
 	request.path_set("/drive/v3/files");
@@ -193,7 +194,7 @@ auto data_upload_request(curl_multipart_t& multipart, std::string name, std::str
 	return;
 }
 
-auto data_update_request(curl_multipart_t& multipart, std::string id, std::string body) -> void {
+export auto data_update_request(curl_multipart_t& multipart, std::string id, std::string body) -> void {
 	http_request_t& request{ http_api_request(multipart) };
 	request.method_set("PATCH");
 	request.path_set("/drive/v3/files/" + id);
@@ -201,7 +202,7 @@ auto data_update_request(curl_multipart_t& multipart, std::string id, std::strin
 	return;
 }
 
-auto data_set_request(curl_multipart_t& multipart, std::string id, data_t data) -> void {
+export auto data_set_request(curl_multipart_t& multipart, std::string id, data_t data) -> void {
 	data_update_request(multipart, id, nlohmann::json{
 		{ "name", data.m_name },
 		{ "description", data.m_content }
@@ -209,13 +210,13 @@ auto data_set_request(curl_multipart_t& multipart, std::string id, data_t data) 
 	return;
 }
 
-struct blob_t {
+export struct blob_t {
 	std::string m_id{};
 	nlohmann::json m_name{};
 	nlohmann::json m_content{};
 };
 
-auto data_set_request(curl_multipart_t& multipart, blob_t blob) -> void {
+export auto data_set_request(curl_multipart_t& multipart, blob_t blob) -> void {
 	data_t data{};
 	data.m_name = blob.m_name.dump();
 	data.m_content = blob.m_content.dump();
@@ -223,21 +224,21 @@ auto data_set_request(curl_multipart_t& multipart, blob_t blob) -> void {
 	return;
 }
 
-auto data_name_set_request(curl_multipart_t& multipart, std::string id, std::string name) -> void {
+export auto data_name_set_request(curl_multipart_t& multipart, std::string id, std::string name) -> void {
 	data_update_request(multipart, id, nlohmann::json{
 		{ "name", name }
 	}.dump());
 	return;
 }
 
-auto data_content_set_request(curl_multipart_t& multipart, std::string id, std::string content) -> void {
+export auto data_content_set_request(curl_multipart_t& multipart, std::string id, std::string content) -> void {
 	data_update_request(multipart, id, nlohmann::json{
 		{ "description", content }
 	}.dump());
 	return;
 }
 
-auto data_download_request(curl_multipart_t& multipart, std::string id) -> void {
+export auto data_download_request(curl_multipart_t& multipart, std::string id) -> void {
 	http_request_t& request{ http_api_request(multipart) };
 	request.method_set("GET");
 	request.path_set("/drive/v3/files/" + id);
@@ -245,7 +246,7 @@ auto data_download_request(curl_multipart_t& multipart, std::string id) -> void 
 	return;
 }
 
-class blob_empty_queue_t {
+export class blob_empty_queue_t {
 private:
 	std::deque<std::string> m_id{};
 	std::mutex m_mutex{};
@@ -347,5 +348,3 @@ public:
 		return;
 	}
 };
-
-#endif

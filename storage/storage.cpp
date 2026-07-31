@@ -1,20 +1,14 @@
-﻿#include <iostream>
-#include <vector>
-#include <string>
-#include <atomic>
-#include <deque>
-#include <mutex>
-#include <thread>
+﻿#define UNICODE
+
 #include <fstream>
-#include <map>
-
-#define UNICODE
-
-#include "multipart.h"
-#include "api.h"
 
 #include "../compilercpp/lib/.hpp"
 #include "../compilercpp/GUI/.hpp"
+
+import std;
+
+import storage.multipart;
+import storage.api;
 
 auto curl_main() -> CURL*& {
 	static CURL* out{};
