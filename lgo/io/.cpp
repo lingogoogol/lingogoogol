@@ -1,5 +1,7 @@
 module lgo.io;
 
+import std;
+
 namespace lgo {
     auto get_string(std::istream& istream) -> std::string {
         std::string out{};

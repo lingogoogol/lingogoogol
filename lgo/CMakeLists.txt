@@ -1,5 +1,6 @@
 add_subdirectory(io)
 add_subdirectory(math)
+add_subdirectory(GUI)
 
 add_library(lgo OBJECT)
 
@@ -17,4 +18,5 @@ target_link_libraries(
         common
         lgo.io
         lgo.math
+        lgo.GUI
 )

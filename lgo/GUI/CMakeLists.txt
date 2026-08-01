@@ -1,10 +1,9 @@
-add_subdirectory(vec)
-add_subdirectory(ver)
+add_subdirectory(misc)
 
-add_library(lgo.math OBJECT)
+add_library(lgo.GUI OBJECT)
 
 target_sources(
-    lgo.math
+    lgo.GUI
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
@@ -12,9 +11,8 @@ target_sources(
 )
 
 target_link_libraries(
-    lgo.math
+    lgo.GUI
     PRIVATE
         common
-        lgo.math.vec
-        lgo.math.ver
+        lgo.GUI.misc
 )
