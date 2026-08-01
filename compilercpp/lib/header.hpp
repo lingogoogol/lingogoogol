@@ -1,10 +1,6 @@
 #ifndef COMPILERCPP_LIB_HEADER
 #define COMPILERCPP_LIB_HEADER
 
-//This include fixes some conflicting language linkage in GCC. Example:
-//error: conflicting language linkage for imported declaration '__m128i _mm_set_epi64x(long long int, long long int)'
-#include <immintrin.h>
-
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <windowsx.h>
