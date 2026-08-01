@@ -63,9 +63,9 @@ auto rect_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2
     solid_input_layout.element_vertex_add("COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0);
     m_solid_pipeline_state.init(m_solid_root_signature, solid_input_layout
     , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT, "rect_primitive_t::m_solid_pipeline_state");
-    shader_bytecode_t solid_vertex_shader{ 256, 1 };
+    shader_bytecode_t solid_vertex_shader{ 256, 1, "" };
     m_solid_pipeline_state.vertex_shader_set(solid_vertex_shader);
-    shader_bytecode_t solid_pixel_shader{ 256, 2 };
+    shader_bytecode_t solid_pixel_shader{ 256, 2, "" };
     m_solid_pipeline_state.pixel_shader_set(solid_pixel_shader);
     m_solid_pipeline_state.create(m_device);
 
@@ -81,9 +81,9 @@ auto rect_primitive_t::init(Microsoft::WRL::ComPtr<ID3D12Device2> device, size_2
     texture_input_layout.element_vertex_add("s_texture_index", 0, DXGI_FORMAT_R32_UINT, 0);
     m_texture_pipeline_state.init(m_texture_root_signature, texture_input_layout
     , DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT, "rect_primitive_t::m_texture_pipeline_state");
-    shader_bytecode_t texture_vertex_shader{ 256, 3 };
+    shader_bytecode_t texture_vertex_shader{ 256, 3, "" };
     m_texture_pipeline_state.vertex_shader_set(texture_vertex_shader);
-    shader_bytecode_t texture_pixel_shader{ 256, 4 };
+    shader_bytecode_t texture_pixel_shader{ 256, 4, "" };
     m_texture_pipeline_state.pixel_shader_set(texture_pixel_shader);
     m_texture_pipeline_state.create(m_device);
     return;

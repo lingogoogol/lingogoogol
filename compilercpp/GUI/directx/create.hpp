@@ -9,7 +9,6 @@
 
 #include "../../lib/header.hpp"
 #include "../../lib/stu.hpp"
-#include "../../lib/io.hpp"
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};

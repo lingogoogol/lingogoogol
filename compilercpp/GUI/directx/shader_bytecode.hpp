@@ -3,18 +3,16 @@
 
 #include <string>
 
-#include "../../lib/io.hpp"
-
 class shader_bytecode_t {
 public:
-    shader_bytecode_t(std::uint16_t type, std::uint16_t name);
+    shader_bytecode_t(std::uint16_t type, std::uint16_t name, std::string bytecode);
 
     auto desc_get() const -> D3D12_SHADER_BYTECODE;
 private:
     std::string m_bytecode{};
 };
 
-shader_bytecode_t::shader_bytecode_t(std::uint16_t type, std::uint16_t name): m_bytecode{ get_resource(type, name) } {}
+shader_bytecode_t::shader_bytecode_t(std::uint16_t type, std::uint16_t name, std::string bytecode): m_bytecode{ bytecode } {}
 
 auto shader_bytecode_t::desc_get() const -> D3D12_SHADER_BYTECODE {
     D3D12_SHADER_BYTECODE out{};
