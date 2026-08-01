@@ -2,8 +2,6 @@ module;
 
 #define UNICODE
 
-#include <fstream>
-
 #include "../../compilercpp/lib/.hpp"
 
 export module storage.api;

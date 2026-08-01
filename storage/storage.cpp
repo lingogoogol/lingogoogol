@@ -1,7 +1,5 @@
 ﻿#define UNICODE
 
-#include <fstream>
-
 #include "../compilercpp/lib/.hpp"
 #include "../compilercpp/GUI/.hpp"
 
