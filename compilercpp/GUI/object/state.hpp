@@ -84,14 +84,14 @@ auto state_t::add_object(t_arg&&... arg) -> std::uint64_t {
 
 template<typename t_object, typename t_self, typename... t_arg>
 auto state_t::add_object_weak(this t_self&& self, t_arg&&... arg) -> std::weak_ptr<t_object> {
-    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg>(arg)...) };
-    return self.get_object_weak<t_object>(id);
+    std::uint64_t id{ self.template add_object<t_object>(std::forward<t_arg>(arg)...) };
+    return self.template get_object_weak<t_object>(id);
 }
 
 template<typename t_object, typename t_self, typename... t_arg>
 auto state_t::add_object_shared(this t_self&& self, t_arg&&... arg) -> std::shared_ptr<t_object> {
-    std::uint64_t id{ self.add_object<t_object>(std::forward<t_arg>(arg)...) };
-    return self.get_object_shared<t_object>(id);
+    std::uint64_t id{ self.template add_object<t_object>(std::forward<t_arg>(arg)...) };
+    return self.template get_object_shared<t_object>(id);
 }
 
 template<typename t_object>

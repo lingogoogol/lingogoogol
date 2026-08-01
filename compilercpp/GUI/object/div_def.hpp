@@ -49,7 +49,7 @@ public:
     auto get_pos() const -> pos_2D override;
     auto set_pos(pos_2D pos) -> void override;
     auto get_size() const -> size_2D override;
-    virtual auto set_size(size_2D size) -> void;
+    virtual auto set_size(size_2D size) -> void override;
     virtual auto get_div_size() const -> size_2D;
     virtual auto set_div_size(size_2D size) -> void;
     auto get_margin() const -> size_1D override;
@@ -446,29 +446,29 @@ auto GUI_div_impl_t<t_y, t_hard>::hide_impl(bool base) -> void {
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
 auto GUI_div_impl_t<t_y, t_hard>::add_object(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
-    return self.add_object_impl<t_object, false>(depth_range, std::forward<t_arg>(arg)...);
+    return self.template add_object_impl<t_object, false>(depth_range, std::forward<t_arg>(arg)...);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
 auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t {
-    return self.add_object_impl<t_object, true>(depth_range, std::forward<t_arg>(arg)...);
+    return self.template add_object_impl<t_object, true>(depth_range, std::forward<t_arg>(arg)...);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
 auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_weak(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::weak_ptr<t_object> {
     std::unique_lock lock{ self.m_mutex };
-    std::uint64_t id{ self.add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
-    return self.get_object_weak<t_object>(id);
+    std::uint64_t id{ self.template add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
+    return self.template get_object_weak<t_object>(id);
 }
 
 template<bool t_y, bool t_hard>
 template<typename t_object, typename t_self, typename... t_arg>
 auto GUI_div_impl_t<t_y, t_hard>::add_object_ghost_shared(this t_self&& self, depth_range_t depth_range, t_arg&&... arg) -> std::shared_ptr<t_object> {
     std::unique_lock lock{ self.m_mutex };
-    std::uint64_t id{ self.add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
-    return self.get_object_shared<t_object>(id);
+    std::uint64_t id{ self.template add_object_ghost<t_object>(depth_range, std::forward<t_arg>(arg)...) };
+    return self.template get_object_shared<t_object>(id);
 }
 
 template<bool t_y, bool t_hard>
@@ -666,7 +666,7 @@ protected:
     auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
     auto child_set_size(std::uint64_t id, size_2D size) -> void override;
 
-    template<bool t_y, bool t_hard>
+    template<bool u_y, bool u_hard>
     friend class GUI_div_impl_t;
 public:
     GUI_div_flex_impl_t() = default;

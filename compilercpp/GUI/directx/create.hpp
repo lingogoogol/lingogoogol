@@ -49,7 +49,8 @@ auto create_window(ATOM window_class, const std::wstring& name
     int height_screen{ monitor_info.rcWork.bottom - monitor_info.rcWork.top };
     window_pos->x = (width_screen - width_adjusted) / 2;
     window_pos->y = (height_screen - height_adjusted) / 2;
-    return CreateWindowW((LPCWSTR)window_class, name.data(), style, static_cast<int>(window_pos->x), static_cast<int>(window_pos->y)
+    return CreateWindowW(reinterpret_cast<LPCWSTR>(window_class), name.data()
+    , style, static_cast<int>(window_pos->x), static_cast<int>(window_pos->y)
     , width_adjusted, height_adjusted, NULL, NULL, instance, NULL);
 }
 

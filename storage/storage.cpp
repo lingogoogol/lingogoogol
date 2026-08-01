@@ -362,7 +362,7 @@ auto folder_add(CURL* curl, std::string pos, nlohmann::json obj) -> void {
 	else {
 		data_content_set(curl, folder["end"], content);
 	}
-	folder["count"] = folder["count"] + 1;
+	folder["count"] = static_cast<int>(folder["count"]) + 1;
 	data_name_set(curl, pos, folder.dump());
 	return;
 }
@@ -425,7 +425,7 @@ auto folder_add(blob_empty_queue_t& empty_blob, blob_t& main, std::map<std::stri
 	else {
 		data[main.m_name["end"]].m_content = last_content;
 	}
-	main.m_name["count"] = main.m_name["count"] + 1;
+	main.m_name["count"] = static_cast<int>(main.m_name["count"]) + 1;
 	return;
 }
 

@@ -38,7 +38,7 @@ public:
     auto set_pos(pos_2D pos) -> void override;
     auto get_size() const -> size_2D override;
     auto get_margin() const -> size_1D override;
-    auto set_size(size_2D size) -> void;
+    auto set_size(size_2D size) -> void override;
     auto set_color(color_t color) -> void;
     auto set_SRV(const SRV_t& SRV) -> void;
     auto color_enable() -> void;

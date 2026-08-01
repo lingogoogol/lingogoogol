@@ -7,6 +7,5 @@
 #include "error.hpp"
 #include "file.hpp"
 #include "ver.hpp"
-#include "debug.hpp"
 
 #endif

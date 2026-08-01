@@ -183,7 +183,7 @@ protected:
     template<typename t_object, bool t_ghost, typename... t_arg>
     auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
 
-    template<bool t_y, bool t_hard>
+    template<bool u_y, bool u_hard>
     friend class GUI_div_impl_t;
 public:
     div_flex_border_impl_t() = default;
@@ -304,7 +304,7 @@ template<bool t_y, bool t_hard>
 auto div_flex_border_impl_t<t_y, t_hard>::hide_impl(bool base) -> void {
     if (!this->hide_begin(base)) { return; }
     std::unique_lock lock{ this->m_mutex };
-    m_border.hide(false);
+    m_border.hide();
     GUI_div_flex_impl_t<t_y, t_hard>::hide_impl(false);
     this->hide_end(base);
     return;
