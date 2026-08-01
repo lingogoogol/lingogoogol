@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.0...4.4 FATAL_ERROR)
 
 set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "f35a9ac6-8463-4d38-8eec-5d6008153e7d")
-set(CMAKE_CXX_MODULE_STD 1)
+set(CMAKE_CXX_MODULE_STD ON)
 
 project(
     lingogoogol
@@ -21,6 +21,7 @@ set(
     $<$<CONFIG:RelWithDebInfo>:OFF>$
     $<$<CONFIG:MinSizeRel>:ON>$
 )
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(common INTERFACE)
 target_compile_options(
@@ -33,6 +34,9 @@ target_compile_options(
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
         $<$<CXX_COMPILER_ID:MSVC>:/options:strict>
         $<$<CXX_COMPILER_ID:MSVC>:/diagnostics:caret>
+        $<$<CXX_COMPILER_ID:MSVC>:/Wall>
+        $<$<CXX_COMPILER_ID:MSVC>:/Wextra>
+        $<$<CXX_COMPILER_ID:MSVC>:/pedantic-error>
 )
 target_include_directories(
     common

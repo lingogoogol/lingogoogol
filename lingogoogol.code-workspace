@@ -29,6 +29,12 @@
 		"cmake.debugConfig": {
 			"cwd": "${workspaceFolder}/../cwd/"
 		},
-		"window.zoomLevel": 1
+		"window.zoomLevel": 1,
+		"clangd.arguments": [
+			"--compile-commands-dir=../build_Debug",
+			"--background-index",
+			"--clang-tidy",
+			"--experimental-modules-support"
+		]
 	}
 }
