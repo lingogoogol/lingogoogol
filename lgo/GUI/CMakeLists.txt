@@ -1,5 +1,3 @@
-add_subdirectory(misc)
-
 add_library(lgo.GUI OBJECT)
 
 target_sources(
@@ -9,6 +7,8 @@ target_sources(
         FILES
             .cppm
 )
+
+add_subdirectory(misc)
 
 target_link_libraries(
     lgo.GUI

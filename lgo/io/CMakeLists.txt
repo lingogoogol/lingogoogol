@@ -9,3 +9,9 @@ target_sources(
     PRIVATE
         .cpp
 )
+
+target_link_libraries(
+    lgo.io
+    PRIVATE
+        common
+)

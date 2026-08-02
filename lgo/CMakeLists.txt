@@ -1,7 +1,3 @@
-add_subdirectory(io)
-add_subdirectory(math)
-add_subdirectory(GUI)
-
 add_library(lgo OBJECT)
 
 target_sources(
@@ -12,11 +8,17 @@ target_sources(
             .cppm
 )
 
+add_subdirectory(container)
+add_subdirectory(math)
+add_subdirectory(io)
+add_subdirectory(GUI)
+
 target_link_libraries(
-    storage
+    lgo
     PRIVATE
         common
-        lgo.io
+        lgo.container
         lgo.math
+        lgo.io
         lgo.GUI
 )

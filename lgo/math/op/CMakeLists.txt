@@ -1,15 +1,17 @@
-add_library(lgo.GUI.misc OBJECT)
+add_library(lgo.math.op OBJECT)
 
 target_sources(
-    lgo.GUI.misc
+    lgo.math.op
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
 target_link_libraries(
-    lgo.GUI.misc
+    lgo.math.op
     PRIVATE
         common
 )

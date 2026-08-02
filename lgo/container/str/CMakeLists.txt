@@ -1,15 +1,18 @@
-add_library(lgo.GUI.misc OBJECT)
+add_library(lgo.container.str OBJECT)
 
 target_sources(
-    lgo.GUI.misc
+    lgo.container.str
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
 target_link_libraries(
-    lgo.GUI.misc
+    lgo.container
     PRIVATE
         common
+        external.Windows
 )

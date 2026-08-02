@@ -1,7 +1,7 @@
-add_library(lgo.GUI.misc OBJECT)
+add_library(external.Windows OBJECT)
 
 target_sources(
-    lgo.GUI.misc
+    external.Windows
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
@@ -9,7 +9,7 @@ target_sources(
 )
 
 target_link_libraries(
-    lgo.GUI.misc
+    external.Windows
     PRIVATE
         common
 )

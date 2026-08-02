@@ -52,4 +52,6 @@ target_link_directories(
         "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
 )
 
+add_subdirectory(external)
+add_subdirectory(lgo)
 add_subdirectory(storage)

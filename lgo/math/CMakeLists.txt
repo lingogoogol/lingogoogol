@@ -1,6 +1,3 @@
-add_subdirectory(vec)
-add_subdirectory(ver)
-
 add_library(lgo.math OBJECT)
 
 target_sources(
@@ -11,10 +8,15 @@ target_sources(
             .cppm
 )
 
+add_subdirectory(vec)
+add_subdirectory(op)
+add_subdirectory(ver)
+
 target_link_libraries(
     lgo.math
     PRIVATE
         common
         lgo.math.vec
+        lgo.math.op
         lgo.math.ver
 )

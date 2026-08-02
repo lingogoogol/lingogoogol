@@ -1,8 +1,6 @@
 #ifndef COMPILERCPP_LIB_HEADER
 #define COMPILERCPP_LIB_HEADER
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
 #include <windowsx.h>
 #include <wrl/client.h>
 #include <d2d1_3.h>
