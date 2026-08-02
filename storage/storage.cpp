@@ -1,7 +1,4 @@
-﻿#define UNICODE
-
-#include "../compilercpp/lib/.hpp"
-#include "../compilercpp/GUI/.hpp"
+﻿#include "../compilercpp/GUI/.hpp"
 
 import std;
 
