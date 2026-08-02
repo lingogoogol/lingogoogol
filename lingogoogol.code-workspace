@@ -33,6 +33,7 @@
 		"window.zoomLevel": 1,
 		"clangd.arguments": [
 			"--compile-commands-dir=../build_Debug",
+			"--query-driver=C:/msys64/clang64/bin/clang.exe",
 			"--background-index",
 			"--clang-tidy",
 			"--experimental-modules-support"
