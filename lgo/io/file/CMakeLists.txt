@@ -1,20 +1,17 @@
-add_library(lgo.io OBJECT)
+add_library(lgo.io.file OBJECT)
 
 target_sources(
-    lgo.io
+    lgo.io.file
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
-add_subdirectory(stream)
-add_subdirectory(file)
-
 target_link_libraries(
-    lgo.io
+    lgo.io.file
     PRIVATE
         common
-        lgo.io.stream
-        lgo.io.file
 )
