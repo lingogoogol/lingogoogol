@@ -34,9 +34,9 @@ target_compile_options(
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
         $<$<CXX_COMPILER_ID:MSVC>:/options:strict>
         $<$<CXX_COMPILER_ID:MSVC>:/diagnostics:caret>
-        $<$<CXX_COMPILER_ID:Clang>:/Wall>
-        $<$<CXX_COMPILER_ID:Clang>:/Wextra>
-        $<$<CXX_COMPILER_ID:Clang>:/pedantic-error>
+        $<$<CXX_COMPILER_ID:Clang>:-Wall>
+        $<$<CXX_COMPILER_ID:Clang>:-Wextra>
+        $<$<CXX_COMPILER_ID:Clang>:-pedantic-errors>
 )
 target_include_directories(
     common
