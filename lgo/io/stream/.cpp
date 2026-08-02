@@ -1,4 +1,4 @@
-module lgo.io;
+module lgo.io.stream;
 
 import std;
 
