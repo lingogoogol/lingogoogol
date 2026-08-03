@@ -23,6 +23,11 @@ set(
 )
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+list(
+    APPEND CMAKE_MODULE_PATH
+    "${CMAKE_CURRENT_LIST_DIR}/../CMake"
+)
+
 add_library(common INTERFACE)
 target_compile_options(
     common
