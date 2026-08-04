@@ -1,4 +1,5 @@
 import external.Vulkan;
+import external.GLFW;
 
 namespace lgo {
     auto engine_t::track_mouse_event() -> void {
@@ -135,7 +136,130 @@ namespace lgo {
         }
     }
 
-    engine_t::engine_t(HINSTANCE instance, size_2D window_size, std::string name): m_window_size{ window_size } {
+    VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback(
+        vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+        vk::DebugUtilsMessageTypeFlagBitsEXT type,
+        const vk::DebugUtilsMessengerCallbackDataEXT* data,
+        void* engine_voidptr
+    ) -> VkBool32 {
+        std::string severity_str{};
+        switch (severity) {
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose: {
+            severity_str = "verbose";
+            break;
+        }
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo: {
+            severity_str = "info";
+            break;
+        }
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning: {
+            severity_str = "warning";
+            break;
+        }
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError: {
+            severity_str = "error";
+            break;
+        }
+        default: {
+            severity_str = "unknown";
+            break;
+        }
+        }
+        std::string type_str{};
+        switch (type) {
+        case vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral: {
+            severity_str = "general";
+            break;
+        }
+        case vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation: {
+            severity_str = "validation";
+            break;
+        }
+        case vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance: {
+            severity_str = "performance";
+            break;
+        }
+        default: {
+            severity_str = "unknown";
+            break;
+        }
+        }
+        log_file(
+            "debug_message:\n"
+            "    severity: " + severity_str + " (code: " + severity + ")\n"
+            "    type: " + type_str + " (code: " + type + ")\n"
+            "    message_id: " + data->pMessageIdName + " (code: " + data->messageIdNumber + ")\n"
+            "    message: " + data->pMessage + "\n"
+        );
+        for (int i{ 0 }; i < data->objectCount; ++i) {
+            log_file(
+                "    object:\n"
+                "        type: " "(code: " + data->pOjbects->objectType + ")\n"
+                "        handle: " + data->pOjbects->objectHandle + "\n"
+                "        name: " + data->pOjbects->pobjectName + "\n"
+            );
+        }
+        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
+            throw;
+        }
+        return vk::False;
+    }
+
+    engine_t::engine_t(
+        HINSTANCE instance,
+        size_2D window_size,
+        std::string name
+    ):
+    m_window_size{ window_size }
+    {
+        //Create an instance.
+        vk::ApplicationInfo app_info
+        {
+            .pApplicationName{ "app" },
+            .applicationVersion{ Vulkan_make_version(0, 0, 5, 0) },
+            .pEngineName{ "lgo" },
+            .engineVersion{ Vulkan_make_version(0, 0, 5, 0) },
+            .apiVersion{ Vulkan_make_version(0, 1, 4, 0) }
+        };
+        std::vector<const char*> layer
+        {
+            "VK_LAYER_KHRONOS_validation"
+        };
+        std::uint32_t glfw_extension_count{};
+        const char** glfw_extension{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
+        std::vector<const char*> extension( glfw_extension, glfw_extension + glfw_extension_count );
+        extension.push_back("VK_EXT_debug_utils");
+        vk::InstanceCreateInfo instance_info
+        {
+            .pApplicationInfo{ &app_info },
+            .enabledLayerCount{ static_cast<std::uint32_t>(layer.size()) },
+            .ppEnabledLayerNames{ layer.data() }
+            .enabledExtensionCount{ static_cast<std::uint32_t>(extension.size()) },
+            .ppEnabledExtensionNames{ extension.data() }
+        };
+        m_instance = vk::raii::Instance{ m_context, instance_info };
+
+        //Create a debug messenger.
+        vk::DebugUtilsMessengerCreateInfoEXT messenger_info
+        {
+            .messageSeverity
+            {
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose ||
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo ||
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning ||
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
+            }
+            .messageType
+            {
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral ||
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation ||
+                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+            }
+            .pfnUserCallback{ &debug_callback },
+            .pUserData{ this }
+        };
+        m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+
         Microsoft::WRL::ComPtr<IDXGIFactory5> factory{ create_factory(true) };
         m_tearing_supported = check_tearing_support(factory);
         Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter{ create_adapter(factory) };
@@ -143,12 +267,18 @@ namespace lgo {
         m_info_queue = create_info_queue(m_device);
         m_command_queue.init(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT, name + ".m_command_queue");
         
-        ATOM window_class{ create_window_class(L"window_class", &window_proc, instance
-        , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED))
-        , reinterpret_cast<HICON>(LoadImageW(NULL, IDI_APPLICATION, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED))
-        , reinterpret_cast<HCURSOR>(LoadImageW(NULL, IDC_ARROW, IMAGE_CURSOR, GetSystemMetrics(SM_CXCURSOR), GetSystemMetrics(SM_CYCURSOR), LR_SHARED))) };
-        m_window = create_window(window_class, L"compilercpp", WS_POPUP
-        , static_cast<LONG>(m_window_size.x), static_cast<LONG>(m_window_size.y), instance, &m_window_pos);
+        //Create a window.
+        glfwInit();
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        m_window = glfwCreateWindow(
+            static_cast<int>(m_window_size.x),
+            static_cast<int>(m_window_size.y),
+            "window",
+            nullptr,
+            nullptr
+        );
+
         SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
         m_swap_chain = m_command_queue.create_swap_chain(factory, m_window, static_cast<UINT>(m_window_size.x)
         , static_cast<UINT>(m_window_size.y), DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_USAGE_RENDER_TARGET_OUTPUT, buffer_count, m_tearing_supported);
@@ -202,6 +332,8 @@ namespace lgo {
     engine_t::~engine_t() {
         flush();
         rect_primitive_t::uninit();
+        glfwDestroyWindow(m_window);
+        glfwTerminate();
         log_info_queue();
         return;
     }
@@ -228,9 +360,8 @@ namespace lgo {
             set_exit();
             return true;
         }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-        return false;
+        glfwPollEvents();
+        return glfwWindowShouldClose(m_window);
     }
 
     auto engine_t::log_info_queue() -> void {

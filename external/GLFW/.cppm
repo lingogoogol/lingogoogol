@@ -5,4 +5,16 @@ module;
 
 export module external.GLFW;
 
-export {}
+export {
+    using ::glfwInit;
+    using ::glfwTerminate;
+
+    using ::glfwGetRequiredInstanceExtensions;
+
+    using ::glfwCreateWindow;
+    using ::glfwDestroyWindow;
+    using ::glfwWindowHint;
+
+    using ::glfwPollEvents;
+    using ::glfwWindowShouldClose;
+}

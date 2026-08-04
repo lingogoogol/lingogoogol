@@ -3,6 +3,7 @@ export lgo.GUI.engine;
 import std;
 
 import external.Vulkan;
+import external.GLFW;
 
 import lgo.math.vec;
 
@@ -18,9 +19,14 @@ export namespace lgo {
 
     class engine_t {
     private:
-        HWND m_window{};
+        GLFWwindow* m_window{};
         pos_2D m_window_pos{};
         size_2D m_window_size{};
+
+        vk::raii::Context m_context{};
+        vk::raii::Instance m_instance{};
+        vk::raii::DebugUtilsMessengerEXT m_debug_messenger{};
+        vk::raii::PhysicalDevice m_device_physical{};
         bool m_exit{ false };
         bool m_initialized{ false };
         bool m_tearing_supported{};
