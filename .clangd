@@ -1,3 +1,6 @@
+CompileFlags:
+  Add: [-ferror-limit=0]
+  Compiler: clang++
 Completion:
     ArgumentLists: None
     HeaderInsertion: Never
