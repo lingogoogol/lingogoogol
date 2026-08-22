@@ -32,14 +32,14 @@ function(add_slang_target TARGET)
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/shader.spv
         COMMAND
             slangc
-            ${SHADER_SOURCES}
+            ${SLANG_SOURCES}
             -target spirv
             -profile spirv_1_4
             -emit-spirv-directly
             -fvk-use-entrypoint-name
             ${ENTRY_POINTS}
-            -o slang.spv
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            -o ${CMAKE_CURRENT_BINARY_DIR}/slang.spv
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         VERBATIM
     )
 
@@ -50,4 +50,8 @@ function(add_slang_target TARGET)
     )
 endfunction()
 
-add_slang_target(lgo.GUI.engine.shader)
+add_slang_target(
+    lgo.GUI.engine.shader
+    SOURCES
+        shader.slang
+)
