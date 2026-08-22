@@ -1,6 +1,6 @@
-﻿#include "../compilercpp/GUI/.hpp"
+﻿import std;
 
-import std;
+import lgo.GUI;
 
 import storage.multipart;
 import storage.api;

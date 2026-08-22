@@ -6,6 +6,8 @@ module;
 export module external.GLFW;
 
 export {
+    using ::GLFWwindow;
+    
     using ::glfwInit;
     using ::glfwTerminate;
 

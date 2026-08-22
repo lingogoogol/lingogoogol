@@ -1,4 +1,4 @@
-add_library(external.Vulkan)
+add_library(external.Vulkan OBJECT)
 
 find_package(Vulkan REQUIRED)
 
@@ -17,12 +17,10 @@ target_include_directories(
 target_sources(
     external.Vulkan
     PUBLIC
-        FILE_SET module_public
-        TYPE CXX_MODULES
+        FILE_SET CXX_MODULES
         FILES
             .cppm
-    PRIVATE
-        FILE_SET module_private
+        FILE_SET vulkan
         TYPE CXX_MODULES
         BASE_DIRS "${Vulkan_INCLUDE_DIR}"
         FILES

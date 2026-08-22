@@ -12,4 +12,5 @@ target_link_libraries(
         common
         storage.multipart
         storage.api
+        lgo.GUI
 )

@@ -1,5 +1,11 @@
 add_library(external.GLFW OBJECT)
 
+target_include_directories(
+    external.GLFW
+    PRIVATE
+        "${Vulkan_INCLUDE_DIR}"
+)
+
 target_sources(
     external.GLFW
     PUBLIC
