@@ -37,7 +37,9 @@ auto depth_tracker_t::remove(std::uint64_t id) -> void {
 auto depth_tracker_t::top(pos_2D pos, std::uint64_t id) -> bool {
     float depth{ m_depth_data[id].m_depth };
     for (auto i{ m_depth_data.begin() }; i != m_depth_data.end(); ++i) {
-        if (inside(i->second.m_pos, i->second.m_size, pos) && i->second.m_depth < depth && i->second.m_opaque) {
+        bool is_in_front{ i->second.m_depth < depth
+            || (i->second.m_depth == depth && i->first > id) };
+        if (inside(i->second.m_pos, i->second.m_size, pos) && is_in_front && i->second.m_opaque) {
             return false;
         }
     }

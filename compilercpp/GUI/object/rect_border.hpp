@@ -55,9 +55,9 @@ auto rect_border_t::compute_inner_size() -> size_2D {
 rect_border_t::rect_border_t(engine_t* engine, depth_tracker_t* depth_tracker, pos_2D pos, size_2D size
 , color_t content_color, size_1D border_size, color_t border_color, depth_range_t depth_range)
 : m_border_size{ border_size }, m_depth_range{ depth_range } {
-    float depth_distance{ (m_depth_range.far - m_depth_range.near) / 2 };
-    m_outer_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near, m_depth_range.far - depth_distance }, pos, size, border_color };
-    m_inner_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near, m_depth_range.far - depth_distance * 2 }, compute_inner_pos(), compute_inner_size(), content_color };
+    float depth_distance{ (m_depth_range.far - m_depth_range.near) / 3 };
+    m_outer_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near + depth_distance * 2, m_depth_range.far }, pos, size, border_color };
+    m_inner_rect = rect_t{ engine, depth_tracker, depth_range_t{ m_depth_range.near + depth_distance, m_depth_range.near + depth_distance * 2 }, compute_inner_pos(), compute_inner_size(), content_color };
     return;
 }
 

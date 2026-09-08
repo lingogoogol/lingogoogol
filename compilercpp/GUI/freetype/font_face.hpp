@@ -49,19 +49,19 @@ auto font_face_t::handle_get() const -> FT_Face {
 }
 
 auto font_face_t::leading_get() const -> std::int16_t {
-    return m_handle->height;
+    return static_cast<std::int16_t>(m_handle->size->metrics.height >> 6);
 }
 
 auto font_face_t::ascender_get() const -> std::int16_t {
-    return m_handle->ascender;
+    return static_cast<std::int16_t>(m_handle->size->metrics.ascender >> 6);
 }
 
 auto font_face_t::descender_get() const -> std::int16_t {
-    return m_handle->descender;
+    return static_cast<std::int16_t>(m_handle->size->metrics.descender >> 6);
 }
 
 auto font_face_t::height_get() const -> std::int16_t {
-    return m_handle->ascender - m_handle->descender;
+    return static_cast<std::int16_t>((m_handle->size->metrics.ascender - m_handle->size->metrics.descender) >> 6);
 }
 
 auto font_face_t::family_get() const -> std::string {

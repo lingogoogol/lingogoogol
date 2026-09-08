@@ -4,42 +4,66 @@ import std;
 
 import external.Vulkan;
 import external.GLFW;
+import lgo.io.file;
 
 namespace lgo {
-    auto engine_t::track_mouse_event() -> void {
-        TRACKMOUSEEVENT stu{};
-        stu.cbSize = sizeof stu;
-        stu.dwFlags = TME_LEAVE;
-        stu.hwndTrack = m_window;
-        TrackMouseEvent(&stu);
-        return;
-    }
-
     template<typename t_callback_set, typename t_caller, typename... t_in>
     auto engine_t::call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void {
         callback.m_calling_callback = true;
-        static std::uint64_t depth{ 0 };
-        ++depth;
-        typename decltype(callback.m_effective)::key_type current{};
-        for (auto i{ callback.m_effective.begin() }; i != callback.m_effective.end(); i = callback.m_effective.upper_bound(current)) {
-            current = *i;
-            caller(current, in...);
+        ++callback.m_call_depth;
+        const std::vector<typename decltype(callback.m_effective)::key_type> callbacks(
+            callback.m_effective.begin(), callback.m_effective.end());
+        for (auto* current : callbacks) {
+            if (callback.m_effective.contains(current)) {
+                try {
+                    caller(current, in...);
+                }
+                catch (const std::exception& error) {
+                    log_file(std::string{ "event callback failed: " } + error.what() + "\n");
+                }
+                catch (...) {
+                    log_file("event callback failed with an unknown exception\n");
+                }
+            }
         }
-        --depth;
-        if (!depth) {
+        --callback.m_call_depth;
+        if (!callback.m_call_depth) {
             callback.m_effective.insert(callback.m_pending.begin(), callback.m_pending.end());
             callback.m_pending.clear();
+            for (auto* retired : callback.m_retired) {
+                delete retired;
+            }
+            callback.m_retired.clear();
+            callback.m_calling_callback = false;
         }
-        callback.m_calling_callback = false;
-        return;
     }
 
-    VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback(
+    template<typename... t_arg>
+    auto engine_t::remove_callback(callback_set<t_arg...>& callbacks, std::function<void(t_arg...)>* callback) -> void {
+        if (!callback) {
+            return;
+        }
+        if (callbacks.m_pending.erase(callback)) {
+            delete callback;
+            return;
+        }
+        if (!callbacks.m_effective.erase(callback)) {
+            return;
+        }
+        if (callbacks.m_calling_callback) {
+            callbacks.m_retired.emplace(callback);
+        }
+        else {
+            delete callback;
+        }
+    }
+
+    auto __stdcall engine_t::debug_callback(
         vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
-        vk::DebugUtilsMessageTypeFlagBitsEXT type,
+        vk::DebugUtilsMessageTypeFlagsEXT type,
         const vk::DebugUtilsMessengerCallbackDataEXT* data,
-        void* engine_voidptr
-    ) -> VkBool32 {
+        void*
+    ) -> vk::Bool32 {
         std::string severity_str{};
         switch (severity) {
         case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose: {
@@ -64,41 +88,40 @@ namespace lgo {
         }
         }
         std::string type_str{};
-        switch (type) {
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral: {
-            severity_str = "general";
-            break;
+        if (type & vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral) {
+            type_str = "general";
         }
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation: {
-            severity_str = "validation";
-            break;
+        if (type & vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation) {
+            if (!type_str.empty()) type_str += "|";
+            type_str += "validation";
         }
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance: {
-            severity_str = "performance";
-            break;
+        if (type & vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance) {
+            if (!type_str.empty()) type_str += "|";
+            type_str += "performance";
         }
-        default: {
-            severity_str = "unknown";
-            break;
+        if (type_str.empty()) {
+            type_str = "unknown";
         }
-        }
+        const std::string message_id_name{ data && data->pMessageIdName ? data->pMessageIdName : "" };
+        const std::string message{ data && data->pMessage ? data->pMessage : "" };
         log_file(
             "debug_message:\n"
-            "    severity: " + severity_str + " (code: " + severity + ")\n"
-            "    type: " + type_str + " (code: " + type + ")\n"
-            "    message_id: " + data->pMessageIdName + " (code: " + data->messageIdNumber + ")\n"
-            "    message: " + data->pMessage + "\n"
+            "    severity: " + severity_str + " (code: " + std::to_string(static_cast<std::uint32_t>(severity)) + ")\n"
+            "    type: " + type_str + " (code: " + std::to_string(static_cast<std::uint32_t>(type)) + ")\n"
+            "    message_id: " + message_id_name + " (code: " + std::to_string(data ? data->messageIdNumber : 0) + ")\n"
+            "    message: " + message + "\n"
         );
-        for (int i{ 0 }; i < data->objectCount; ++i) {
+        if (!data) {
+            return vk::False;
+        }
+        for (std::uint32_t i{}; i < data->objectCount; ++i) {
+            const auto& object{ data->pObjects[i] };
             log_file(
                 "    object:\n"
-                "        type: " "(code: " + data->pOjbects[i]->objectType + ")\n"
-                "        handle: " + data->pOjbects[i]->objectHandle + "\n"
-                "        name: " + data->pOjbects[i]->pobjectName + "\n"
+                "        type code: " + std::to_string(static_cast<std::uint32_t>(object.objectType)) + "\n"
+                "        handle: " + std::to_string(object.objectHandle) + "\n"
+                "        name: " + (object.pObjectName ? std::string{ object.pObjectName } : std::string{}) + "\n"
             );
-        }
-        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
-            throw;
         }
         return vk::False;
     }
@@ -119,12 +142,12 @@ namespace lgo {
         {
             .srcStageMask{ src_stage_mask },
             .srcAccessMask{ src_access_mask },
-            .dstStageMask{ dst_stage_mask },
-            .dstAccessMask{ dst_access_mask },
+            .dstStageMask{ dest_stage_mask },
+            .dstAccessMask{ dest_access_mask },
             .oldLayout{ old_layout },
             .newLayout{ new_layout },
-            .srcQueueFamilyIndex{ VK_QUEUE_FAMILY_IGNORED },
-            .dstQueueFamilyIndex{ VK_QUEUE_FAMILY_IGNORED },
+            .srcQueueFamilyIndex{ vk::QueueFamilyIgnored },
+            .dstQueueFamilyIndex{ vk::QueueFamilyIgnored },
             .image{ m_swap_chain_image[image_index] },
             .subresourceRange
             {
@@ -153,9 +176,11 @@ namespace lgo {
     m_window_size{ window_size }
     {
         //Create a window.
-        glfwInit();
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        if (!glfwInit()) {
+            throw std::runtime_error{ "GLFW initialization failed" };
+        }
+        glfwWindowHint(glfw_client_api, glfw_no_api);
+        glfwWindowHint(glfw_resizable, glfw_false);
         m_window = glfwCreateWindow
         (
             static_cast<int>(m_window_size.x),
@@ -164,31 +189,88 @@ namespace lgo {
             nullptr,
             nullptr
         );
+        if (!m_window) {
+            glfwTerminate();
+            throw std::runtime_error{ "GLFW window creation failed" };
+        }
+        glfwSetWindowUserPointer(m_window, this);
+        glfwSetCursorPosCallback(m_window, [] (GLFWwindow* window, double x, double y) {
+            auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+            call_callback([] (auto* callback, pos_2D pos) { (*callback)(pos); }, engine->m_mouse_move,
+                pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) });
+        });
+        glfwSetCursorEnterCallback(m_window, [] (GLFWwindow* window, int entered) {
+            if (!entered) {
+                auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+                call_callback([] (auto* callback) { (*callback)(); }, engine->m_mouse_leave);
+            }
+        });
+        glfwSetMouseButtonCallback(m_window, [] (GLFWwindow* window, int button, int action, int) {
+            if (button != glfw_mouse_button_left) return;
+            auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+            const auto pos{ engine->get_cursor_pos() };
+            if (action == glfw_press) {
+                call_callback([] (auto* callback, pos_2D value) { (*callback)(value); }, engine->m_mouse_left_click, pos);
+            }
+            else if (action == glfw_release) {
+                call_callback([] (auto* callback, pos_2D value) { (*callback)(value); }, engine->m_mouse_left_release, pos);
+            }
+        });
+        glfwSetScrollCallback(m_window, [] (GLFWwindow* window, double, double y) {
+            auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+            call_callback([] (auto* callback, pos_2D pos, size_1D amount) { (*callback)(pos, amount); },
+                engine->m_mouse_scroll, engine->get_cursor_pos(), size_1D{ static_cast<std::int64_t>(y) });
+        });
+        glfwSetKeyCallback(m_window, [] (GLFWwindow* window, int key, int, int action, int) {
+            if (action == glfw_press || action == glfw_repeat) {
+                auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+                call_callback([] (auto* callback, std::uint16_t value) { (*callback)(value); },
+                    engine->m_key_down, static_cast<std::uint16_t>(key));
+            }
+        });
+        glfwSetCharCallback(m_window, [] (GLFWwindow* window, unsigned int codepoint) {
+            if (codepoint <= std::numeric_limits<wchar_t>::max()) {
+                auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+                call_callback([] (auto* callback, wchar_t value) { (*callback)(value); },
+                    engine->m_charw, static_cast<wchar_t>(codepoint));
+            }
+        });
 
         //Create an instance.
         vk::ApplicationInfo app_info
         {
-            .pApplicationName{ name },
+            .pApplicationName{ name.c_str() },
             .applicationVersion{ Vulkan_version_encode(0, 0, 5, 0) },
             .pEngineName{ "lgo" },
             .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
-            .apiVersion{ Vulkan_version_encode(0, 1, 4, 0) }
+            .apiVersion{ Vulkan_version_encode(0, 1, 3, 0) }
         };
-        std::vector<const char*> layer
-        {
-            "VK_LAYER_KHRONOS_validation"
-        };
+        std::vector<const char*> layer{};
+#ifndef NDEBUG
+        const auto available_layers{ m_context.enumerateInstanceLayerProperties() };
+        if (std::ranges::any_of(available_layers, [] (const vk::LayerProperties& candidate) {
+            return std::string_view{ candidate.layerName.data() } == "VK_LAYER_KHRONOS_validation";
+        })) {
+            layer.push_back("VK_LAYER_KHRONOS_validation");
+        }
+#endif
         std::uint32_t glfw_extension_count{};
         const char** glfw_extension{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
-        std::vector<const char*> extension( glfw_extension, glfw_extension + glfw_extension_count );
-        extension.push_back("VK_EXT_debug_utils");
+        std::vector<const char*> instance_extensions( glfw_extension, glfw_extension + glfw_extension_count );
+        const auto available_instance_extensions{ m_context.enumerateInstanceExtensionProperties() };
+        const bool has_debug_utils{ std::ranges::any_of(available_instance_extensions, [] (const vk::ExtensionProperties& candidate) {
+            return std::string_view{ candidate.extensionName.data() } == vk::EXTDebugUtilsExtensionName;
+        }) };
+        if (has_debug_utils) {
+            instance_extensions.push_back(vk::EXTDebugUtilsExtensionName);
+        }
         vk::InstanceCreateInfo instance_info
         {
             .pApplicationInfo{ &app_info },
             .enabledLayerCount{ static_cast<std::uint32_t>(layer.size()) },
-            .ppEnabledLayerNames{ layer.data() }
-            .enabledExtensionCount{ static_cast<std::uint32_t>(extension.size()) },
-            .ppEnabledExtensionNames{ extension.data() }
+            .ppEnabledLayerNames{ layer.data() },
+            .enabledExtensionCount{ static_cast<std::uint32_t>(instance_extensions.size()) },
+            .ppEnabledExtensionNames{ instance_extensions.data() }
         };
         m_instance = vk::raii::Instance{ m_context, instance_info };
 
@@ -197,80 +279,76 @@ namespace lgo {
         {
             .messageSeverity
             {
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose ||
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo ||
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning ||
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
                 vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
-            }
+            },
             .messageType
             {
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral ||
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation ||
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
-            }
+            },
             .pfnUserCallback{ &debug_callback },
             .pUserData{ this }
         };
-        m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+        if (has_debug_utils) {
+            m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+        }
 
         //Create a surface.
         //The window surface needs to be created right after the instance creation,
         //because it can actually influence the physical device selection.
-        VkSurfaceKHR surface_c{};
-        glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface_c);
-        m_surface = vk::raii::SurfaceKHR{ m_instance, surface_c };
+        const vk::SurfaceKHR surface{ glfwCreateVulkanWindowSurface(*m_instance, m_window) };
+        if (!surface) {
+            throw std::runtime_error{ "Vulkan surface creation failed" };
+        }
+        m_surface = vk::raii::SurfaceKHR{ m_instance, surface };
 
         //Create a physical device.
         std::vector<vk::raii::PhysicalDevice> device_available{ m_instance.enumeratePhysicalDevices() };
-        std::multimap<int, vk::raii::PhysicalDevice> device_score{};
-        std::vector<std::string> extension{ "VK_KHR_swapchain" };
-        for (vk::raii::PhysicalDevice device : device_available)
+        std::multimap<int, std::size_t> device_score{};
+        std::vector<std::string> device_extensions{ vk::KHRSwapchainExtensionName };
+        for (std::size_t device_index{}; device_index < device_available.size(); ++device_index)
         {
-            device_property{ device.getProperties() };
-            device_queue_family{ device.getQueueFamilyProperties() };
-            device_extension{ device.enumerateDeviceExtensionProperties() };
-            device_feature
+            auto& device{ device_available[device_index] };
+            const auto device_property{ device.getProperties() };
+            const auto device_queue_family{ device.getQueueFamilyProperties() };
+            const auto device_extension{ device.enumerateDeviceExtensionProperties() };
+            auto device_feature
             {
                 device.getFeatures2
                 <
                     vk::PhysicalDeviceFeatures2,
                     vk::PhysicalDeviceVulkan11Features,
-                    vk::PhysicalDeviceVulkan13Features,
-                    vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                    vk::PhysicalDeviceVulkan13Features
                 >()
             };
             if
             (
-                device_property.apiVersion < Vulkan_version_encode(0, 1, 4, 0) ||
-                std::ranges::all_of
-                (
-                    device_queue_family | std::ranges::views::enumerate,
-                    [device&] (const std::tuple<>& pair) -> bool
-                    {
-                        auto [index, queue_family]{ pair };
-                        return
-                            (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) &&
-                            device.getSurfaceSupportKHR(index, *m_surface);
-                    }
-                ) ||
+                device_property.apiVersion < Vulkan_version_encode(0, 1, 3, 0) ||
+                std::ranges::none_of(std::views::iota(std::size_t{}, device_queue_family.size()), [&] (std::size_t index) {
+                    return static_cast<bool>(device_queue_family[index].queueFlags & vk::QueueFlagBits::eGraphics)
+                        && device.getSurfaceSupportKHR(static_cast<std::uint32_t>(index), *m_surface);
+                }) ||
                 std::ranges::any_of
                 (
-                    extension,
-                    [device_extension] (const & extension)
+                    device_extensions,
+                    [&device_extension] (const std::string& extension_required)
                     {
                         return std::ranges::all_of
                         (
                             device_extension,
-                            [extension] (const & device_extension)
+                            [&extension_required] (const vk::ExtensionProperties& extension_available)
                             {
-                                return device_extension.extensionName != extension;
+                                return extension_available.extensionName != extension_required;
                             }
                         );
                     }
                 ) ||
                 !device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters ||
-                !device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
-                !device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState
+                !device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering
             ) {
                 continue;
             }
@@ -279,34 +357,32 @@ namespace lgo {
             {
                 score += 1;
             }
-            device_score.emplace(score, device);
+            device_score.emplace(score, device_index);
         }
         if (device_score.empty())
         {
-            throw;
+            throw std::runtime_error{ "no suitable Vulkan physical device was found" };
         }
         else
         {
-            m_device_physical = *device_score.rbegin();
+            m_device_physical = std::move(device_available[device_score.rbegin()->second]);
         }
 
         //Create a logical device.
-        std::vector<vk::QueueFamilyProperties2> queue_family_arr{ m_device_physical.getQueueFamilyProperties2() };
-        auto queue_family_iter
-        {
-            std::ranges::find_if
-            (
-                queue_family_arr,
-                [m_device_physical&] (const vk::QueueFamilyProperties2& queue_family) -> bool
-                {
-                    return
-                        (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) &&
-                        m_device_physical.getSurfaceSupportKHR(index, *m_surface);
-                }
-            )
-        };
+        const auto queue_family_arr{ m_device_physical.getQueueFamilyProperties() };
+        std::optional<std::uint32_t> queue_family_index_found{};
+        for (std::size_t index{}; index < queue_family_arr.size(); ++index) {
+            if (static_cast<bool>(queue_family_arr[index].queueFlags & vk::QueueFlagBits::eGraphics)
+            && m_device_physical.getSurfaceSupportKHR(static_cast<std::uint32_t>(index), *m_surface)) {
+                queue_family_index_found = static_cast<std::uint32_t>(index);
+                break;
+            }
+        }
+        if (!queue_family_index_found) {
+            throw std::runtime_error{ "no Vulkan graphics/present queue family was found" };
+        }
         float queue_priority{ 1.0 };
-        std::uint32_t queue_family_index{ std::ranges::distance(queue_family_arr.begin(), queue_family_iter) };
+        const std::uint32_t queue_family_index{ *queue_family_index_found };
         vk::DeviceQueueCreateInfo device_queue
         {
             .queueFamilyIndex{ queue_family_index },
@@ -323,16 +399,12 @@ namespace lgo {
             vk::PhysicalDeviceVulkan13Features
             {
                 .dynamicRendering{ true }
-            },
-            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            {
-                .extendedDynamicState{ true }
             }
         };
         std::vector<const char*> extension_cstr_arr
         {
             std::from_range_t{},
-            extension | std::ranges::views::transform([] (const std::string& str) -> const char*
+            device_extensions | std::ranges::views::transform([] (const std::string& str) -> const char*
             {
                 return str.c_str();
             })
@@ -341,17 +413,20 @@ namespace lgo {
         {
             .pNext{ &feature.get<vk::PhysicalDeviceFeatures2>() },
             .queueCreateInfoCount{ 1 },
-            .ppQueueCreateInfos{ &device_queue },
-            .enabledExtensionCount{ extension_cstr_arr.size() },
+            .pQueueCreateInfos{ &device_queue },
+            .enabledExtensionCount{ static_cast<std::uint32_t>(extension_cstr_arr.size()) },
             .ppEnabledExtensionNames{ extension_cstr_arr.data() }
         };
         m_device = vk::raii::Device{ m_device_physical, device_info };
 
         //Create a queue.
-        m_queue = vk::raii::Queue{ device, queue_family_index, 0 };
+        m_command_queue = vk::raii::Queue{ m_device, queue_family_index, 0 };
 
         //Create a swapchain.
-        std::vector<vk::SurfaceFormatKHR> surface_format_arr{ m_device_physical.getSurfaceFormats2KHR(*m_surface) };
+        std::vector<vk::SurfaceFormatKHR> surface_format_arr{ m_device_physical.getSurfaceFormatsKHR(*m_surface) };
+        if (surface_format_arr.empty()) {
+            throw std::runtime_error{ "the selected Vulkan device has no surface formats" };
+        }
         auto surface_format_it
         {
             std::ranges::find_if
@@ -363,11 +438,11 @@ namespace lgo {
                 }
             )
         };
-        vk::SurfaceFormatKHR surface_format{ *surface_format_it };
+        vk::SurfaceFormatKHR surface_format{ surface_format_it == surface_format_arr.end() ? surface_format_arr.front() : *surface_format_it };
         std::vector<vk::PresentModeKHR> surface_present_mode_arr{ m_device_physical.getSurfacePresentModesKHR(*m_surface) };
         //The vk::PresentModeKHR::eFifo mode is guaranteed to be available.
         vk::PresentModeKHR surface_present_mode{ vk::PresentModeKHR::eFifo };
-        vk::SurfaceCapabilitiesKHR surface_capability{ m_device_physical.getSurfaceCapabilities2KHR(*m_surface) };
+        vk::SurfaceCapabilitiesKHR surface_capability{ m_device_physical.getSurfaceCapabilitiesKHR(*m_surface) };
         vk::Extent2D extent{};
         if (surface_capability.currentExtent.width == std::numeric_limits<std::uint32_t>::max())
         {
@@ -375,13 +450,13 @@ namespace lgo {
             glfwGetFramebufferSize(m_window, &width, &height);
             extent.width = std::clamp
             (
-                width,
+                static_cast<std::uint32_t>(width),
                 surface_capability.minImageExtent.width,
                 surface_capability.maxImageExtent.width
             );
             extent.height = std::clamp
             (
-                height,
+                static_cast<std::uint32_t>(height),
                 surface_capability.minImageExtent.height,
                 surface_capability.maxImageExtent.height
             );
@@ -390,6 +465,7 @@ namespace lgo {
         {
             extent = surface_capability.currentExtent;
         }
+        m_swap_chain_extent = extent;
         std::uint32_t image_count_min{ surface_capability.minImageCount + 1 };
         if (surface_capability.maxImageCount && (image_count_min > surface_capability.maxImageCount))
         {
@@ -435,29 +511,34 @@ namespace lgo {
         }
 
         //Create shader module.
-        std::vector<unsigned char> shader_code{ get_file("slang.spv") };
-        //The default allocator of std::vector already ensures that the data satisfies the alignment requirements of uint32_t.
+        const std::vector<unsigned char> shader_bytes{ get_file(LGO_SHADER_PATH) };
+        if (shader_bytes.empty() || shader_bytes.size() % sizeof(std::uint32_t) != 0) {
+            throw std::runtime_error{ "the compiled SPIR-V shader is empty or malformed" };
+        }
+        std::vector<std::uint32_t> shader_code(shader_bytes.size() / sizeof(std::uint32_t));
+        std::memcpy(shader_code.data(), shader_bytes.data(), shader_bytes.size());
         vk::ShaderModuleCreateInfo shader_module_info
         {
-            .codeSize{ shader_code.size() },
-            .pCode{ reinterpret_cast<const uint32_t*>(shader_code.data()) }
+            .codeSize{ shader_bytes.size() },
+            .pCode{ shader_code.data() }
         };
         vk::raii::ShaderModule shader_module{ m_device, shader_module_info };
 
         //Create graphics pipeline.
-        auto shader_stage
+        const std::array shader_stage
         {
-            std::make_array<vk::PipelineShaderStageCreateInfo>(
+            vk::PipelineShaderStageCreateInfo
             {
                 .stage{ vk::ShaderStageFlagBits::eVertex },
-                .module{ shader_module },
+                .module{ *shader_module },
                 .pName{ "vertex_main" }
             },
+            vk::PipelineShaderStageCreateInfo
             {
                 .stage{ vk::ShaderStageFlagBits::eFragment },
-                .module{ shader_module },
+                .module{ *shader_module },
                 .pName{ "fragment_main" }
-            })
+            }
         };
         std::vector<vk::DynamicState> dynamic_state_arr
         {
@@ -478,8 +559,8 @@ namespace lgo {
         {
             .x{ 0.0f },
             .y{ 0.0f },
-            .width{ static_cast<float>(swapChainExtent.width) },
-            .height{ static_cast<float>(swapChainExtent.height) },
+            .width{ static_cast<float>(m_swap_chain_extent.width) },
+            .height{ static_cast<float>(m_swap_chain_extent.height) },
             .minDepth{ 0.0f },
             .maxDepth{ 1.0f }
         };
@@ -499,7 +580,7 @@ namespace lgo {
             .rasterizerDiscardEnable{ vk::False },
             .polygonMode{ vk::PolygonMode::eFill },
             .cullMode{ vk::CullModeFlagBits::eBack },
-            .frontFace{ vk::FrontFace::eCounterclockwise },
+            .frontFace{ vk::FrontFace::eCounterClockwise },
             .depthBiasEnable{ vk::False },
             .lineWidth{ 1.0f }
         };
@@ -539,21 +620,21 @@ namespace lgo {
         pipeline_info
         {
             {
-                .stageCount{ shader_stage.size() },
+                .stageCount{ static_cast<std::uint32_t>(shader_stage.size()) },
                 .pStages{ shader_stage.data() },
-                .pVertexInputState{ &vertexInputInfo },
-                .pInputAssemblyState{ &inputAssembly },
-                .pViewportState{ &viewportState },
-                .pRasterizationState{ &rasterizer },
-                .pMultisampleState{ &multisampling },
-                .pColorBlendState{ &colorBlending },
-                .pDynamicState{ &dynamicState },
-                .layout{ m_pipeline_layout },
+                .pVertexInputState{ &vertex_input_info },
+                .pInputAssemblyState{ &input_assembly },
+                .pViewportState{ &viewport_state },
+                .pRasterizationState{ &rasterization },
+                .pMultisampleState{ &multisample },
+                .pColorBlendState{ &color_blend },
+                .pDynamicState{ &dynamic_state_info },
+                .layout{ *m_pipeline_layout },
                 .renderPass{ nullptr }
             },
             {
                 .colorAttachmentCount{ 1 },
-                .pColorAttachmentFormats{ &swapChainSurfaceFormat.format }
+                .pColorAttachmentFormats{ &surface_format.format }
             }
         };
         m_pipeline = vk::raii::Pipeline{ m_device, nullptr, pipeline_info.get<vk::GraphicsPipelineCreateInfo>() };
@@ -562,18 +643,18 @@ namespace lgo {
         vk::CommandPoolCreateInfo command_pool_info
         {
             .flags{ vk::CommandPoolCreateFlagBits::eResetCommandBuffer },
-            .queueFamilyIndex = queue_family_index
+            .queueFamilyIndex{ queue_family_index }
         };
         m_command_pool = vk::raii::CommandPool{ m_device, command_pool_info };
 
         //Create a command buffer.
         vk::CommandBufferAllocateInfo command_buffer_info
         {
-            .commandPool{ m_command_pool },
+            .commandPool{ *m_command_pool },
             .level{ vk::CommandBufferLevel::ePrimary },
             .commandBufferCount{ 1 }
         };
-        m_command_buffer = std::move(vk::raii::CommandBuffers{ device, allocInfo }.front());
+        m_command_buffer = std::move(vk::raii::CommandBuffers{ m_device, command_buffer_info }.front());
 
         //Create semaphores.
         m_semaphore_image = vk::raii::Semaphore{ m_device, vk::SemaphoreCreateInfo{} };
@@ -592,44 +673,44 @@ namespace lgo {
     }
 
     engine_t::~engine_t() {
-        m_device.waitIdle();
-        rect_primitive_t::uninit();
+        if (*m_device) {
+            m_device.waitIdle();
+        }
         glfwDestroyWindow(m_window);
         glfwTerminate();
-        log_info_queue();
-        return;
     }
 
     auto engine_t::flush() -> void {
-        m_command_queue.flush();
-        return;
+        m_device.waitIdle();
     }
 
     auto engine_t::redraw() -> void {
-        InvalidateRect(m_window, nullptr, false);
-        return;
+        glfwPostEmptyEvent();
     }
 
     auto engine_t::message_loop() -> bool {
         glfwPollEvents();
 
         //Acquire next image.
-		if (m_device.waitForFences(*drawFence, vk::True, std::numeric_limits<std::uint64_t>::max()) != vk::Result::eSuccess)
+		if (m_device.waitForFences(*m_fence, vk::True, std::numeric_limits<std::uint64_t>::max()) != vk::Result::eSuccess)
 		{
-			throw;
+			throw std::runtime_error{ "waiting for the Vulkan draw fence failed" };
 		}
-		device.resetFences(*drawFence);
         auto [result, image_index]
         {
             m_swap_chain.acquireNextImage
             (
                 std::numeric_limits<std::uint64_t>::max(),
                 *m_semaphore_image,
-                VK_NULL_HANDLE
+                nullptr
             )
         };
+        if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
+            throw std::runtime_error{ "acquiring the next Vulkan swap-chain image failed" };
+        }
 
         //Record the command buffer.
+        m_command_buffer.reset();
         m_command_buffer.begin({});
         transition_image_layout
         (
@@ -641,10 +722,10 @@ namespace lgo {
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             vk::PipelineStageFlagBits2::eColorAttachmentOutput
         );
-        vk::ClearValue clear_color{ vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f) };
+        vk::ClearValue clear_color{ vk::ClearColorValue{ std::array{ 0.0f, 0.0f, 0.0f, 1.0f } } };
         vk::RenderingAttachmentInfo attachment_info
         {
-            .imageView{ m_swap_chain_image_view[image_index] },
+            .imageView{ *m_swap_chain_image_view[image_index] },
             .imageLayout{ vk::ImageLayout::eColorAttachmentOptimal },
             .loadOp{ vk::AttachmentLoadOp::eClear },
             .storeOp{ vk::AttachmentStoreOp::eStore },
@@ -698,10 +779,6 @@ namespace lgo {
             vk::PipelineStageFlagBits2::eBottomOfPipe
         );
         m_command_buffer.end();
-        /*std::unique_lock rect_lock{ ptr->m_rect_mutex };
-        rect_primitive_t::render(ptr->m_rect_primitive, command_list);
-        rect_lock.unlock();*/
-
         //Submit the command buffer.
         vk::PipelineStageFlags stage_wait{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
         const vk::SubmitInfo submit_info
@@ -714,7 +791,11 @@ namespace lgo {
             .signalSemaphoreCount{ 1 },
             .pSignalSemaphores{ &*m_semaphore_draw }
         };
-        m_queue.submit(submit_info, *m_fence);
+        // Only make the fence unsignalled once there is work ready to signal it.
+        // Resetting before image acquisition can leave the next frame blocked
+        // forever when acquireNextImage fails.
+        m_device.resetFences(*m_fence);
+        m_command_queue.submit(submit_info, *m_fence);
 
         //Present the image.
         const vk::PresentInfoKHR present_info
@@ -725,19 +806,22 @@ namespace lgo {
             .pSwapchains{ &*m_swap_chain },
             .pImageIndices{ &image_index }
         };
-        result = m_queue.presentKHR(present_info);
+        result = m_command_queue.presentKHR(present_info);
+        if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
+            throw std::runtime_error{ "presenting the Vulkan swap-chain image failed" };
+        }
 
-        return glfwWindowShouldClose(m_window);
+        return m_exit || glfwWindowShouldClose(m_window);
     }
 
     auto engine_t::log_info_queue() -> void {
-        ::log_info_queue(m_info_queue);
-        return;
+        // Vulkan validation output is handled synchronously by debug_callback.
     }
 
     auto engine_t::set_exit() -> void {
         m_exit = true;
-        return;
+        glfwSetWindowShouldClose(m_window, 1);
+        glfwPostEmptyEvent();
     }
 
     auto engine_t::get_exit() -> bool {
@@ -745,53 +829,29 @@ namespace lgo {
     }
 
     auto engine_t::get_window_pos() -> pos_2D {
-        return m_window_pos;
+        int x{}, y{};
+        glfwGetWindowPos(m_window, &x, &y);
+        return pos_2D{ x, y };
     }
 
     auto engine_t::get_window_size() -> size_2D {
-        return m_window_size;
+        int width{}, height{};
+        glfwGetFramebufferSize(m_window, &width, &height);
+        return size_2D{ width, height };
     }
 
     auto engine_t::get_cursor_pos() -> pos_2D {
-        POINT cursor_pos{};
-        GetCursorPos(&cursor_pos);
-        ScreenToClient(m_window, &cursor_pos);
-        return pos_2D{ cursor_pos.x, cursor_pos.y };
+        double x{}, y{};
+        glfwGetCursorPos(m_window, &x, &y);
+        return pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) };
     }
 
-    auto engine_t::device_get() const -> Microsoft::WRL::ComPtr<ID3D12Device2> {
+    auto engine_t::device_get() const -> const vk::raii::Device& {
         return m_device;
     }
 
-    auto engine_t::command_queue_get() -> command_queue_t& {
+    auto engine_t::command_queue_get() -> vk::raii::Queue& {
         return m_command_queue;
-    }
-
-    auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t* {
-        rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color, name } };
-        std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.emplace(out);
-        redraw();
-        return out;
-    }
-
-    auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
-    , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name) -> rect_primitive_t* {
-        rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth
-        , clip_pos, clip_size, SRV, texture_pos, texture_axis_x, texture_axis_y, name } };
-        std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.emplace(out);
-        redraw();
-        return out;
-    }
-
-    auto engine_t::remove_rect(rect_primitive_t* in) -> void {
-        std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.erase(in);
-        flush();
-        delete in;
-        redraw();
-        return;
     }
 
     auto engine_t::add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
@@ -806,11 +866,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_mouse_move(std::function<void(pos_2D)>* in) -> void {
-        if (!m_mouse_move.m_effective.erase(in)) {
-            m_mouse_move.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_mouse_move, in);
     }
 
     auto engine_t::add_mouse_leave(std::function<void(void)> callback) -> std::function<void(void)>* {
@@ -825,11 +881,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_mouse_leave(std::function<void(void)>* in) -> void {
-        if (!m_mouse_leave.m_effective.erase(in)) {
-            m_mouse_leave.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_mouse_leave, in);
     }
 
     auto engine_t::add_mouse_left_click(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
@@ -844,11 +896,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_mouse_left_click(std::function<void(pos_2D)>* in) -> void {
-        if (!m_mouse_left_click.m_effective.erase(in)) {
-            m_mouse_left_click.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_mouse_left_click, in);
     }
 
     auto engine_t::add_mouse_left_release(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
@@ -863,11 +911,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void {
-        if (!m_mouse_left_release.m_effective.erase(in)) {
-            m_mouse_left_release.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_mouse_left_release, in);
     }
 
     auto engine_t::add_mouse_scroll(std::function<void(pos_2D, size_1D)> callback) -> std::function<void(pos_2D, size_1D)>* {
@@ -882,11 +926,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_mouse_scroll(std::function<void(pos_2D, size_1D)>* in) -> void {
-        if (!m_mouse_scroll.m_effective.erase(in)) {
-            m_mouse_scroll.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_mouse_scroll, in);
     }
 
     auto engine_t::add_key_down(std::function<void(std::uint16_t)> callback) -> std::function<void(std::uint16_t)>* {
@@ -901,11 +941,7 @@ namespace lgo {
     }
 
     auto engine_t::remove_key_down(std::function<void(std::uint16_t)>* in) -> void {
-        if (!m_key_down.m_effective.erase(in)) {
-            m_key_down.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_key_down, in);
     }
 
     auto engine_t::add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>* {
@@ -920,10 +956,6 @@ namespace lgo {
     }
 
     auto engine_t::remove_charw(std::function<void(wchar_t)>* in) -> void {
-        if (!m_charw.m_effective.erase(in)) {
-            m_charw.m_pending.erase(in);
-        }
-        delete in;
-        return;
+        remove_callback(m_charw, in);
     }
 }

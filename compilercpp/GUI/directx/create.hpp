@@ -8,11 +8,18 @@
 #include <fstream>
 
 #include "../../lib/header.hpp"
+#include "../../lib/error.hpp"
 #include "../../lib/stu.hpp"
 
 auto create_factory(bool debugging) -> Microsoft::WRL::ComPtr<IDXGIFactory5> {
     Microsoft::WRL::ComPtr<IDXGIFactory5> out{};
-    hresult(CreateDXGIFactory2(debugging ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&out)));
+	HRESULT result{ CreateDXGIFactory2(debugging ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&out)) };
+	if (FAILED(result) && debugging) {
+		result = CreateDXGIFactory2(0, IID_PPV_ARGS(&out));
+	}
+	if (FAILED(result)) {
+		throw internal_error_t{ "failed to create a DXGI factory" };
+	}
     return out;
 }
 
@@ -80,7 +87,9 @@ auto create_device(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter, std::string na
 
 auto create_info_queue(Microsoft::WRL::ComPtr<ID3D12Device2> device) -> Microsoft::WRL::ComPtr<ID3D12InfoQueue> {
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> out{};
-    hresult(device.As(&out));
+    if (FAILED(device.As(&out))) {
+        return out;
+    }
     D3D12_INFO_QUEUE_FILTER info_queue_filter{};
     std::vector<D3D12_MESSAGE_SEVERITY> info_queue_filter_severity{};
     if (false) {

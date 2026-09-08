@@ -12,6 +12,7 @@ sampler tex_sampler: register(s0);
 
 out_stu pixel(in_stu input) {
     out_stu output;
-    output.color = tex[input.texture_index].Sample(tex_sampler, input.texcoord);
+    float coverage = tex[input.texture_index].Sample(tex_sampler, input.texcoord);
+    output.color = float4(1.0f, 1.0f, 1.0f, coverage);
     return output;
 }

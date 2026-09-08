@@ -14,4 +14,5 @@ target_link_libraries(
     lgo.math.op
     PRIVATE
         common
+        lgo.math.vec
 )

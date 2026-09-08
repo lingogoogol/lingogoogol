@@ -1,5 +1,7 @@
 add_library(external.GLFW OBJECT)
 
+find_package(glfw3 CONFIG REQUIRED)
+
 target_include_directories(
     external.GLFW
     PRIVATE
@@ -16,6 +18,8 @@ target_sources(
 
 target_link_libraries(
     external.GLFW
-    PRIVATE
+    PUBLIC
         common
+        external.Vulkan
+        glfw
 )

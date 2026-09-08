@@ -84,10 +84,11 @@ auto font_char_t::bbox_size_get() const -> size_2D {
 auto font_char_t::init1(std::uint32_t index) -> void {
     FT_Face face_handle{ m_face->handle_get() };
     FT_Load_Glyph(face_handle, index, FT_LOAD_RENDER);
-    m_advance.x = face_handle->glyph->advance.x;
+    m_advance.x = face_handle->glyph->advance.x >> 6;
     m_advance.y = 0;
     m_bbox_pos.x = face_handle->glyph->bitmap_left;
-    m_bbox_pos.y = face_handle->glyph->bitmap_top - face_handle->glyph->bitmap.rows;
+    m_bbox_pos.y = static_cast<std::int64_t>(face_handle->glyph->bitmap_top)
+        - static_cast<std::int64_t>(face_handle->glyph->bitmap.rows);
     m_bbox_size.x = face_handle->glyph->bitmap.width;
     m_bbox_size.y = face_handle->glyph->bitmap.rows;
     m_pixmap.size_set(face_handle->glyph->bitmap.width, face_handle->glyph->bitmap.rows);

@@ -49,6 +49,7 @@ private:
     bool m_texture_enable{};
     pos_2D m_clip_pos{};
     size_2D m_clip_size{};
+    bool m_clip_follows_size{};
     std::string m_name{};
 
     constexpr static std::size_t vertex_data_len{ 4 };

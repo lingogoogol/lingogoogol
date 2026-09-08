@@ -121,7 +121,15 @@ auto click_area_t::click_area_mouse_left_release_callback(pos_2D pos) -> void {
         if (m_clicked_inside) {
             auto callback_copy{ m_callback };
             lock.unlock();
-            callback_copy();
+            try {
+                callback_copy();
+            }
+            catch (const std::exception& error) {
+                log_file(std::string{ "GUI action failed: " } + error.what() + "\n");
+            }
+            catch (...) {
+                log_file("GUI action failed: unknown error\n");
+            }
         }
     }
     return;

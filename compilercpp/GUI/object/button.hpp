@@ -62,7 +62,7 @@ auto button_template_t<t_type>::button_template_mouse_left_release_callback(pos_
 
 template<typename t_type>
 button_template_t<t_type>::button_template_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, std::function<void(void)> callback, t_type* object)
-: m_engine{ engine }, m_click_area{ engine, depth_tracker, depth_range, object->get_pos(), object->get_size(), std::bind(&button_template_t<t_type>::button_template_mouse_move_callback, this, std::placeholders::_1)
+: m_engine{ engine }, m_click_area{ engine, depth_tracker, depth_range_t{ depth_range.near - 1.0f, depth_range.far - 1.0f }, object->get_pos(), object->get_size(), std::bind(&button_template_t<t_type>::button_template_mouse_move_callback, this, std::placeholders::_1)
 , std::bind(&button_template_t<t_type>::button_template_mouse_leave_callback, this), std::bind(&button_template_t<t_type>::button_template_mouse_left_click_callback, this, std::placeholders::_1)
 , std::bind(&button_template_t<t_type>::button_template_mouse_left_release_callback, this, std::placeholders::_1), callback }
 , m_object{ object } {}

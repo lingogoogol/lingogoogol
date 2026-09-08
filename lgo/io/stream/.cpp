@@ -3,19 +3,35 @@ module lgo.io.stream;
 import std;
 
 namespace lgo {
-    auto get_string(std::istream& istream) -> std::string {
-        std::string out{};
-        std::uint8_t len{ static_cast<std::uint8_t>(istream.get()) };
-        for (std::uint8_t i{ 0 }; i < len; i++) {
-            out.push_back(static_cast<char>(istream.get()));
+    namespace {
+        auto read_char(std::istream& stream) -> char {
+            const auto value{ stream.get() };
+            if (value == std::char_traits<char>::eof()) {
+                throw std::ios_base::failure{ "unexpected end of string" };
+            }
+            return static_cast<char>(value);
         }
-        return out;
+
+        template<typename t_string>
+        auto check_length(const t_string& value) -> std::uint8_t {
+            constexpr auto max_length{ std::numeric_limits<std::uint8_t>::max() };
+            if (value.size() > max_length) {
+                throw std::length_error{ "length-prefixed string exceeds 255 elements" };
+            }
+            return static_cast<std::uint8_t>(value.size());
+        }
+    }
+
+    auto get_string(std::istream& istream) -> std::string {
+        const auto len{ static_cast<std::uint8_t>(read_char(istream)) };
+        return get_string(istream, len);
     }
 
     auto get_string(std::istream& istream, std::size_t len) -> std::string {
-        std::string out{};
-        for (std::uint8_t i{ 0 }; i < len; i++) {
-            out.push_back(static_cast<char>(istream.get()));
+        std::string out(len, '\0');
+        istream.read(out.data(), static_cast<std::streamsize>(len));
+        if (!istream) {
+            throw std::ios_base::failure{ "unexpected end of string" };
         }
         return out;
     }
@@ -23,34 +39,33 @@ namespace lgo {
     auto get_string_null_terminated(std::istream& istream) -> std::string {
         std::string out{};
         char current{};
-        while ((current = static_cast<char>(istream.get()))) {
+        while ((current = read_char(istream)) != '\0') {
             out.push_back(current);
         }
         return out;
     }
 
     auto pad_string(std::ostream& dest, const std::string& in) -> void {
-        pad_integer(dest, static_cast<std::uint8_t>(in.size()));
-        for (std::uint8_t i{ 0 }; i < in.size(); ++i) {
-            dest.put(in[i]);
+        pad_integer(dest, check_length(in));
+        dest.write(in.data(), static_cast<std::streamsize>(in.size()));
+        if (!dest) {
+            throw std::ios_base::failure{ "failed to write string" };
         }
-        return;
     }
 
     auto get_stringw(std::istream& src) -> std::wstring {
         std::wstring out{};
-        std::uint8_t len{ static_cast<std::uint8_t>(src.get()) };
-        for (std::uint8_t i{ 0 }; i < len; i++) {
+        const auto len{ static_cast<std::uint8_t>(read_char(src)) };
+        for (std::size_t i{ 0 }; i < len; ++i) {
             out.push_back(get_integer<wchar_t>(src));
         }
         return out;
     }
 
     auto pad_stringw(std::ostream& dest, const std::wstring& in) -> void {
-        pad_integer(dest, static_cast<std::uint8_t>(in.size()));
-        for (std::uint8_t i{ 0 }; i < in.size(); ++i) {
-            pad_integer<wchar_t>(dest, in[i]);
+        pad_integer(dest, check_length(in));
+        for (const auto character : in) {
+            pad_integer<wchar_t>(dest, character);
         }
-        return;
     }
 }

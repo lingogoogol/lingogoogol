@@ -9,6 +9,9 @@
 #include "../../lib/file.hpp"
 
 auto log_info_queue(Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue) -> void {
+    if (!info_queue) {
+        return;
+    }
     if (!info_queue->GetNumStoredMessagesAllowedByRetrievalFilter()) {
         return;
     }

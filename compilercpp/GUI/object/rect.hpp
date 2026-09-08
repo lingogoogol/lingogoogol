@@ -66,7 +66,7 @@ rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t d
 }
 
 rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, const SRV_t& SRV)
-: rect_t{ engine, depth_tracker, depth_range, pos, size, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
+: rect_t{ engine, depth_tracker, depth_range, pos, size, pos, size, SRV, pos_2D{ 0, 0 }, size_2D{ size.x, 0 }, size_2D{ 0, size.y } } {}
 
 rect_t::rect_t(engine_t* engine, depth_tracker_t* depth_tracker, depth_range_t depth_range, pos_2D pos, size_2D size, pos_2D clip_pos
 , size_2D clip_size, const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y)
@@ -164,11 +164,11 @@ auto rect_t::show_impl(bool base) -> void {
     lock.unlock();
     rect_primitive_t* primitive{};
     if (m_texture_enable) {
-        engine->add_rect(pos, size, depth_range.near, m_clip_pos, m_clip_size
+        primitive = engine->add_rect(pos, size, depth_range.near, m_clip_pos, m_clip_size
         , *m_SRV, m_texture_pos, m_texture_axis_x, m_texture_axis_y, m_name + ".m_primitive");
     }
     else {
-        engine->add_rect(pos, size, depth_range.near, color, m_name + ".m_primitive");
+        primitive = engine->add_rect(pos, size, depth_range.near, color, m_name + ".m_primitive");
     }
     lock.lock();
     m_primitive = primitive;

@@ -14,4 +14,5 @@ target_link_libraries(
     lgo.math.ver
     PRIVATE
         common
+        lgo.io.stream
 )

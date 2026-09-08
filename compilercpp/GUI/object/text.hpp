@@ -121,6 +121,8 @@ text_line_t::text_line_t(
     m_engine{ engine },
     m_div{ engine, depth_tracker, depth_range, pos, size, size_1D{ 0 }, alignment, false },
     m_depth_range{ depth_range },
+    m_clip_pos{ pos },
+    m_clip_size{ size },
     m_text{ text },
     m_font_preference{ &font_preference },
     m_margin{ margin },
@@ -145,9 +147,13 @@ auto text_line_t::init(
     m_engine = engine;
     m_div.init(engine, depth_tracker, depth_range, pos, size, size_1D{ 0 }, alignment, false);
     m_depth_range = depth_range;
+    m_clip_pos = pos;
+    m_clip_size = size;
     m_text = text;
     m_font_preference = &font_preference;
+    m_margin = margin;
     m_color = color;
+    init1();
     return;
 }
 

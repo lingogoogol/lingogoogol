@@ -2,6 +2,7 @@ module lgo.io.file;
 
 import std;
 
+import external.Windows;
 import lgo.dev.error;
 
 namespace lgo {
@@ -24,8 +25,7 @@ namespace lgo {
         return create_ofstream(path, std::ios_base::binary | std::ios_base::in | std::ios_base::out);
     }
 
-    auto create_ifstream(const std::string& path
-    , std::ios_base::openmode mode = std::ios_base::in | std::ios_base::binary) -> std::ifstream {
+    auto create_ifstream(const std::string& path, std::ios_base::openmode mode) -> std::ifstream {
         std::ifstream out{};
         out.open(path, mode);
         if (!out.fail()) {
@@ -34,8 +34,7 @@ namespace lgo {
         return out;
     }
 
-    auto create_fstream(const std::string& path
-    , std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary) -> std::fstream {
+    auto create_fstream(const std::string& path, std::ios_base::openmode mode) -> std::fstream {
         std::fstream out{};
         out.open(path, std::ios_base::out | std::ios_base::app);
         out.close();
@@ -50,9 +49,13 @@ namespace lgo {
     auto get_file(const std::string& path) -> std::vector<unsigned char> {
         std::vector<unsigned char> out{};
         std::ifstream file{ create_ifstream(path, std::ios_base::in | std::ios_base::binary | std::ios_base::ate) };
-        out.resize(file.tellg());
+        const std::streampos end_position{ file.tellg() };
+        if (end_position < 0) {
+            throw internal_error_t{ "failed to determine file size" };
+        }
+        out.resize(static_cast<std::size_t>(end_position));
         file.seekg(0, std::ios::beg);
-        file.read(out.data(), static_cast<std::streamsize>(out.size()));
+        file.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(out.size()));
         return out;
     }
 
@@ -87,7 +90,7 @@ namespace lgo {
     }
 
     auto log_console(const std::string& in) -> void {
-        OutputDebugStringW(to_wstring(in).data());
+        OutputDebugStringA(in.c_str());
         return;
     }
 

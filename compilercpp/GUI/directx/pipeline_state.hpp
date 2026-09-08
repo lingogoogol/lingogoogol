@@ -59,7 +59,7 @@ auto pipeline_state_t::init(const root_signature_t& root_signature, const input_
     //         |
     //       -1.0f
     m_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
-    m_desc.RasterizerState.FrontCounterClockwise = true;
+    m_desc.RasterizerState.FrontCounterClockwise = false;
     m_desc.RasterizerState.DepthBias = 0;
     m_desc.RasterizerState.SlopeScaledDepthBias = 0.0f;
     m_desc.RasterizerState.DepthBiasClamp = 0.0f;

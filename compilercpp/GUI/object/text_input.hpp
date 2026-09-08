@@ -114,12 +114,19 @@ auto text_input_constraint_impl_t<t_text>::clear_callback() -> void {
 template<typename t_text>
 auto text_input_constraint_impl_t<t_text>::constraint_default(std::string* text, wchar_t in) -> void {
     if (in == L'\b') {
-        if (!text->empty()) {
-            text->pop_back();
+        auto wide_text{ to_wstring(*text) };
+        if (!wide_text.empty()) {
+            auto last{ wide_text.back() };
+            wide_text.pop_back();
+            if (last >= 0xDC00 && last <= 0xDFFF && !wide_text.empty()
+                && wide_text.back() >= 0xD800 && wide_text.back() <= 0xDBFF) {
+                wide_text.pop_back();
+            }
+            *text = to_string(wide_text);
         }
     }
     else {
-        text->push_back(static_cast<char>(in));//...you cannot do this cast
+        *text += to_string(std::wstring{ in });
     }
     return;
 }
@@ -173,7 +180,7 @@ text_input_constraint_impl_t<t_text>::text_input_constraint_impl_t(
     m_click_area{
         engine,
         depth_tracker,
-        depth_range,
+        depth_range_t{ depth_range.near - 1.0f, depth_range.far - 1.0f },
         pos,
         t_text::get_size(),
         [] (pos_2D) {},

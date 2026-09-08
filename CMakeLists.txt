@@ -23,11 +23,6 @@ set(
 )
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-list(
-    APPEND CMAKE_MODULE_PATH
-    "${CMAKE_CURRENT_LIST_DIR}/../CMake"
-)
-
 add_library(common INTERFACE)
 target_compile_options(
     common
@@ -43,20 +38,22 @@ target_compile_options(
         $<$<CXX_COMPILER_ID:Clang>:-Wextra>
         $<$<CXX_COMPILER_ID:Clang>:-pedantic-errors>
 )
-target_include_directories(
-    common
-    INTERFACE
-        "../source/"
-        "../include/"
-        "C:/lingogoogol/application/vcpkg/installed/x64-windows/include/"
-)
-target_link_directories(
-    common
-    INTERFACE
-        "../lib/"
-        "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
-)
-
 add_subdirectory(external)
 add_subdirectory(lgo)
-add_subdirectory(storage)
+
+option(LINGOGOOGOL_BUILD_STORAGE "Build the legacy storage GUI while it is being ported to Vulkan" OFF)
+if(LINGOGOOGOL_BUILD_STORAGE)
+    add_subdirectory(storage)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_test(
+        NAME source-regressions
+        COMMAND
+            powershell
+            -NoProfile
+            -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/regression.ps1"
+    )
+endif()

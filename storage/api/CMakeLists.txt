@@ -13,4 +13,10 @@ target_link_libraries(
     PRIVATE
         common
         storage.multipart
+        lgo.dev.error
+        lgo.io.file
+        CURL::libcurl
+        Freetype::Freetype
+        nlohmann_json::nlohmann_json
+        OpenSSL::Crypto
 )

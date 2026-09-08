@@ -1,0 +1,35 @@
+# CMake build trees
+/build/
+/out/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Compilers and linkers
+*.exe
+*.dll
+*.obj
+*.o
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Generated output and local credentials
+/temp/*.asm
+/temp/logfile.txt
+.env
+*.pem
+service-account*.json
+logfile*.txt
+/tests/*.png
+/work/
+
+# Editors and operating systems
+.vs/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

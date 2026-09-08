@@ -13,6 +13,7 @@ export namespace lgo {
     , std::ios_base::openmode mode = std::ios_base::in | std::ios_base::binary) -> std::ifstream;
     auto create_fstream(const std::string& path
     , std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out | std::ios_base::binary) -> std::fstream;
+    auto get_file(const std::string& path) -> std::vector<unsigned char>;
     
     auto get_logfile_path() -> std::string&;
     auto get_logfile_string() -> std::string&;

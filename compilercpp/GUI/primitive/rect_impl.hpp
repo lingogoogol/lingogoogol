@@ -16,19 +16,25 @@ size_2D rect_primitive_t::m_window_size{};
 auto rect_primitive_t::upload_vertex_data() -> void {
     std::unique_lock lock{ m_mutex };
     float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };
-    float pos_y{ static_cast<float>(m_pos.y) / static_cast<float>(m_window_size.y) * 2.0f - 1.0f };
+    float pos_y{ 1.0f - static_cast<float>(m_pos.y) / static_cast<float>(m_window_size.y) * 2.0f };
     float size_x{ static_cast<float>(m_size.x) / static_cast<float>(m_window_size.x) * 2.0f };
-    float size_y{ static_cast<float>(m_size.y) / static_cast<float>(m_window_size.y) * 2.0f };
+    float size_y{ -static_cast<float>(m_size.y) / static_cast<float>(m_window_size.y) * 2.0f };
 
     void* upload_resource_cpu_address{};
     hresult(m_vertex_buffer->Map(0, nullptr, &upload_resource_cpu_address));
     if (m_texture_enable) {
         auto texture_index{ static_cast<std::uint32_t>(m_SRV->descriptor_heap_index_get()) };
+        float texture_pos_x{ static_cast<float>(m_pos.x + m_texture_pos.x) / static_cast<float>(m_window_size.x) * 2.0f - 1.0f };
+        float texture_pos_y{ 1.0f - static_cast<float>(m_pos.y + m_texture_pos.y) / static_cast<float>(m_window_size.y) * 2.0f };
+        float texture_axis_x_x{ static_cast<float>(m_texture_axis_x.x) / static_cast<float>(m_window_size.x) * 2.0f };
+        float texture_axis_x_y{ -static_cast<float>(m_texture_axis_x.y) / static_cast<float>(m_window_size.y) * 2.0f };
+        float texture_axis_y_x{ static_cast<float>(m_texture_axis_y.x) / static_cast<float>(m_window_size.x) * 2.0f };
+        float texture_axis_y_y{ -static_cast<float>(m_texture_axis_y.y) / static_cast<float>(m_window_size.y) * 2.0f };
         std::array vertex_data{
-            vertex_data_texture_t{ { pos_x, pos_y, m_depth, 1.0f }, { 0.0f, 0.0f }, texture_index },
-            vertex_data_texture_t{ { pos_x + size_x, pos_y, m_depth, 1.0f }, { 1.0f, 0.0f }, texture_index },
-            vertex_data_texture_t{ { pos_x, pos_y + size_y, m_depth, 1.0f }, { 0.0f, 1.0f }, texture_index },
-            vertex_data_texture_t{ { pos_x + size_x, pos_y + size_y, m_depth, 1.0f }, { 1.0f, 1.0f }, texture_index }
+            vertex_data_texture_t{ { texture_pos_x, texture_pos_y, m_depth, 1.0f }, { 0.0f, 0.0f }, texture_index },
+            vertex_data_texture_t{ { texture_pos_x + texture_axis_x_x, texture_pos_y + texture_axis_x_y, m_depth, 1.0f }, { 1.0f, 0.0f }, texture_index },
+            vertex_data_texture_t{ { texture_pos_x + texture_axis_y_x, texture_pos_y + texture_axis_y_y, m_depth, 1.0f }, { 0.0f, 1.0f }, texture_index },
+            vertex_data_texture_t{ { texture_pos_x + texture_axis_x_x + texture_axis_y_x, texture_pos_y + texture_axis_x_y + texture_axis_y_y, m_depth, 1.0f }, { 1.0f, 1.0f }, texture_index }
         };
         std::memcpy(upload_resource_cpu_address, vertex_data.data(), vertex_data_texture_size);
         m_vertex_buffer_view.SizeInBytes = vertex_data_texture_size;
@@ -114,7 +120,9 @@ auto rect_primitive_t::render(const std::set<rect_primitive_t*>& rect
 }
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, std::string name)
-: rect_primitive_t{ engine, pos, size, depth, pos, size, name } {}
+: rect_primitive_t{ engine, pos, size, depth, pos, size, name } {
+    m_clip_follows_size = true;
+}
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size, std::string name)
 : m_engine{ engine }, m_pos{ pos }, m_size{ size }, m_depth{ depth }, m_clip_pos{ clip_pos }, m_clip_size{ clip_size }, m_name{ name } {}
@@ -129,7 +137,9 @@ rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, f
 }
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, const SRV_t& SRV, std::string name)
-: rect_primitive_t{ engine, pos, size, depth, pos, size, SRV, pos, size_2D{ size.x, 0 }, size_2D{ 0, size.y }, name } {}
+: rect_primitive_t{ engine, pos, size, depth, pos, size, SRV, pos_2D{ 0, 0 }, size_2D{ size.x, 0 }, size_2D{ 0, size.y }, name } {
+    m_clip_follows_size = true;
+}
 
 rect_primitive_t::rect_primitive_t(engine_t* engine, pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
 , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name)
@@ -157,6 +167,9 @@ auto rect_primitive_t::set_pos(pos_2D pos) -> void {
 auto rect_primitive_t::set_size(size_2D size) -> void {
     std::unique_lock lock{ m_mutex };
     m_size = size;
+    if (m_clip_follows_size) {
+        m_clip_size = size;
+    }
     m_engine->flush();
     upload_vertex_data();
     m_engine->redraw();
@@ -204,8 +217,8 @@ auto rect_primitive_t::render(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> 
     D3D12_RECT scissor_rect{};
     scissor_rect.left = static_cast<LONG>(m_clip_pos.x);
     scissor_rect.right = static_cast<LONG>(m_clip_pos.x + m_clip_size.x);
-    scissor_rect.bottom = static_cast<LONG>(m_engine->get_window_size().y - m_clip_pos.y);
-    scissor_rect.top = static_cast<LONG>(m_engine->get_window_size().y - (m_clip_pos.y + m_clip_size.y));
+    scissor_rect.top = static_cast<LONG>(m_clip_pos.y);
+    scissor_rect.bottom = static_cast<LONG>(m_clip_pos.y + m_clip_size.y);
     if (m_texture_enable) {
         ID3D12DescriptorHeap* descriptor_heap{ m_SRV->descriptor_heap_get().interface_get().Get() };
         command_list->SetDescriptorHeaps(1, &descriptor_heap);

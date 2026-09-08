@@ -2,18 +2,22 @@ module;
 
 #define UNICODE
 
-#include "../../compilercpp/lib/.hpp"
+#include "../../compilercpp/lib/header.hpp"
 
 export module storage.api;
 
 import std;
 
 import storage.multipart;
+import lgo.dev.error;
+import lgo.io.file;
 
 export auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::string {
 	std::string response{};
-    while (true) {
-        try {
+	constexpr std::size_t max_attempts{ 5 };
+	for (std::size_t attempt{}; attempt < max_attempts; ++attempt) {
+		response.clear();
+		try {
 			api_curl(curl_easy_setopt(curl, CURLOPT_URL, url.data()));
 			api_curl(curl_easy_setopt(curl, CURLOPT_POST, 1L));
 			api_curl(curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body.size())));
@@ -24,56 +28,97 @@ export auto http_post_simple(CURL* curl, std::string url, std::string body) -> s
 			api_curl(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L));
 			api_curl(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 30L));
 			api_curl(curl_easy_perform(curl));
+			long status{};
+			api_curl(curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status));
+			if (status >= 200 && status < 300) {
+				return response;
+			}
+			const bool retryable{ status == 408 || status == 425 || status == 429 || (status >= 500 && status < 600) };
+			if (!retryable) {
+				throw lgo::error_t{ "HTTP POST failed with status " + std::to_string(status) };
+			}
+			throw error_curl_t{ "HTTP POST failed with retryable status " + std::to_string(status) };
 		}
-        catch (error_curl_t error) {
-            log_file(error.what() + "\n");
-            continue;
-        }
-        break;
-    }
-	return response;
+		catch (const error_curl_t& error) {
+			lgo::log_file(std::string{ error.what() } + "\n");
+			if (attempt + 1 == max_attempts) {
+				throw;
+			}
+			std::this_thread::sleep_for(std::chrono::seconds{ 1ULL << attempt });
+			continue;
+		}
+	}
+	throw error_curl_t{ "HTTP POST exhausted retries" };
 }
 
 export auto base64url_encode(std::string in) -> std::string {
 	DWORD out_size{};
-	CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, nullptr, &out_size);
+	if (!CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
+	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, nullptr, &out_size)) {
+		throw lgo::error_t{ "base64url size calculation failed" };
+	}
 	std::string out{};
 	out.resize(out_size);
-	CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, out.data(), &out_size);
-	out.pop_back();
+	if (!CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
+	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, out.data(), &out_size)) {
+		throw lgo::error_t{ "base64url encoding failed" };
+	}
+	if (!out.empty() && out.back() == '\0') out.pop_back();
 	return out;
 }
 
 export auto base64url_decode(std::string in) -> std::string {
 	DWORD out_size{};
-	CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64, nullptr, &out_size, 0, nullptr);
+	if (!CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
+	, CRYPT_STRING_BASE64URI, nullptr, &out_size, 0, nullptr)) {
+		throw lgo::error_t{ "base64url decoded-size calculation failed" };
+	}
 	std::string out{};
 	out.resize(out_size);
-	CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>(out.data()), &out_size, 0, nullptr);
+	if (!CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
+	, CRYPT_STRING_BASE64URI, reinterpret_cast<BYTE*>(out.data()), &out_size, 0, nullptr)) {
+		throw lgo::error_t{ "base64url decoding failed" };
+	}
+	out.resize(out_size);
 	return out;
 }
 
 export auto sha256withrsa(std::string in, std::string key) -> std::string {
-	EVP_PKEY* private_key{};
-	OSSL_DECODER_CTX* ossl_decoder{
-		OSSL_DECODER_CTX_new_for_pkey(&private_key, "PEM", nullptr, "RSA", EVP_PKEY_KEYPAIR, nullptr, nullptr)
+	EVP_PKEY* private_key_raw{};
+	std::unique_ptr<OSSL_DECODER_CTX, decltype(&OSSL_DECODER_CTX_free)> decoder{
+		OSSL_DECODER_CTX_new_for_pkey(&private_key_raw, "PEM", nullptr, "RSA", EVP_PKEY_KEYPAIR, nullptr, nullptr),
+		&OSSL_DECODER_CTX_free
 	};
+	if (!decoder) {
+		throw lgo::error_t{ "failed to create the private-key decoder" };
+	}
 	auto pem_data{ reinterpret_cast<const unsigned char*>(key.data()) };
 	auto pem_size{ key.size() };
-	OSSL_DECODER_from_data(ossl_decoder, &pem_data, &pem_size);
-	EVP_PKEY_CTX* openssl_pkey{ EVP_PKEY_CTX_new(private_key, nullptr) };
-	EVP_SIGNATURE* sign_algo{ EVP_SIGNATURE_fetch(nullptr, "RSA-SHA256", nullptr) };
-	EVP_PKEY_sign_message_init(openssl_pkey, sign_algo, nullptr);
-	EVP_PKEY_sign_message_update(openssl_pkey, reinterpret_cast<const unsigned char*>(in.data()), in.size());
+	if (OSSL_DECODER_from_data(decoder.get(), &pem_data, &pem_size) != 1 || !private_key_raw) {
+		throw lgo::error_t{ "failed to decode the service-account private key" };
+	}
+	std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> private_key{ private_key_raw, &EVP_PKEY_free };
+	std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> signing_context{
+		EVP_PKEY_CTX_new(private_key.get(), nullptr), &EVP_PKEY_CTX_free
+	};
+	std::unique_ptr<EVP_SIGNATURE, decltype(&EVP_SIGNATURE_free)> signature{
+		EVP_SIGNATURE_fetch(nullptr, "RSA-SHA256", nullptr), &EVP_SIGNATURE_free
+	};
+	if (!signing_context || !signature
+	|| EVP_PKEY_sign_message_init(signing_context.get(), signature.get(), nullptr) != 1
+	|| EVP_PKEY_sign_message_update(signing_context.get(), reinterpret_cast<const unsigned char*>(in.data()), in.size()) != 1) {
+		throw lgo::error_t{ "failed to initialize RSA-SHA256 signing" };
+	}
 	std::size_t out_size{};
-	EVP_PKEY_sign_message_final(openssl_pkey, nullptr, &out_size);
+	if (EVP_PKEY_sign_message_final(signing_context.get(), nullptr, &out_size) != 1) {
+		throw lgo::error_t{ "failed to determine the RSA signature size" };
+	}
 	std::string out{};
 	out.resize(out_size);
-	EVP_PKEY_sign_message_final(openssl_pkey, reinterpret_cast<unsigned char*>(out.data()), &out_size);
+	if (EVP_PKEY_sign_message_final(signing_context.get(), reinterpret_cast<unsigned char*>(out.data()), &out_size) != 1) {
+		throw lgo::error_t{ "failed to create the RSA signature" };
+	}
+	out.resize(out_size);
 	return out;
 }
 
@@ -97,7 +142,9 @@ public:
 
 account_t::account_t(std::string address, std::string key): m_address{ address }, m_key{ key } {
 	m_curl = curl_easy_init();
-	return;
+	if (!m_curl) {
+		throw error_curl_t{ "failed to create the account CURL handle" };
+	}
 }
 
 account_t::~account_t() {
@@ -111,7 +158,9 @@ auto account_t::init(std::string address, std::string key) -> void {
 	m_address = address;
 	m_key = key;
 	m_curl = curl_easy_init();
-	return;
+	if (!m_curl) {
+		throw error_curl_t{ "failed to create the account CURL handle" };
+	}
 }
 
 auto account_t::uninit() -> void {
@@ -125,20 +174,14 @@ auto account_t::get_token() -> std::string {
 	std::time_t time{ std::time(nullptr) };
 	if (time >= m_token_life) {
 		std::string encoded{
-			base64url_encode(
-				"{"
-					"\"alg\":\"RS256\","
-					"\"typ\":\"JWT\""
-				"}"
-			) + "." + base64url_encode(
-				"{"
-					"\"iss\":\"" + m_address + "\","
-					"\"scope\":\"https://www.googleapis.com/auth/drive\","
-					"\"aud\":\"https://oauth2.googleapis.com/token\","
-					"\"exp\":" + std::to_string(time + 3600) + ","
-					"\"iat\":" + std::to_string(time) +
-				"}"
-			)
+			base64url_encode(nlohmann::json{ { "alg", "RS256" }, { "typ", "JWT" } }.dump()) + "."
+			+ base64url_encode(nlohmann::json{
+				{ "iss", m_address },
+				{ "scope", "https://www.googleapis.com/auth/drive" },
+				{ "aud", "https://oauth2.googleapis.com/token" },
+				{ "exp", time + 3600 },
+				{ "iat", time }
+			}.dump())
 		};
 		std::string body{
 			"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion="
@@ -291,7 +334,7 @@ public:
 			std::uint64_t size{ std::filesystem::file_size(path) };
 			std::string content{};
 			content.resize(size);
-			create_ifstream(path.string()).read(content.data(), size);
+			lgo::create_ifstream(path.string()).read(content.data(), size);
 			nlohmann::json arr{ nlohmann::json::parse(content) };
 			m_id.resize(arr.size());
 			for (std::uint64_t i{ 0 }; i < arr.size(); ++i) {
@@ -310,7 +353,7 @@ public:
 			arr.push_back(m_id[i]);
 		}
 		std::string content{ arr.dump() };
-		create_ofstream_destroy(m_path.string()).write(content.data(), content.size());
+		lgo::create_ofstream_destroy(m_path.string()).write(content.data(), content.size());
 		return;
 	}
 
