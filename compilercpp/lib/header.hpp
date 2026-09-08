@@ -11,14 +11,9 @@
 #include <dwrite_3.h>
 #include <dxgi1_6.h>
 #include <shellapi.h>
-#include <wincrypt.h>
 #include <ShObjIdl.h>
 #include <objbase.h>
 
-#include <curl/curl.h>
-#include <openssl/evp.h>
-#include <openssl/decoder.h>
-#include <nlohmann/json.hpp>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 

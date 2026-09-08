@@ -2,8 +2,6 @@ export module lgo.io.stream;
 
 import std;
 
-#include "header.hpp"
-
 export namespace lgo {
     struct uint128_t {
         std::uint64_t m_significant_most{};

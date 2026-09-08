@@ -12,4 +12,7 @@ target_link_libraries(
     storage.multipart
     PRIVATE
         common
+        external.curl
+        lgo.dev.error
+        lgo.io.file
 )

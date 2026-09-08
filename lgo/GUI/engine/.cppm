@@ -1,3 +1,7 @@
+module;
+
+#include <vulkan/vk_platform.h>
+
 export module lgo.GUI.engine;
 
 import std;
@@ -53,9 +57,27 @@ export namespace lgo {
         callback_set<wchar_t> m_charw{};
         std::string m_name{};
         
-        auto track_mouse_event() -> void;
         template<typename t_callback_set, typename t_caller, typename... t_in>
         static auto call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void;
+        static VKAPI_ATTR auto VKAPI_CALL debug_callback(
+            vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+            vk::DebugUtilsMessageTypeFlagsEXT type,
+            const vk::DebugUtilsMessengerCallbackDataEXT* data,
+            void* engine_voidptr
+        )
+        -> vk::Bool32;
+
+        auto transition_image_layout
+        (
+            std::uint32_t image_index,
+            vk::ImageLayout old_layout,
+            vk::ImageLayout new_layout,
+            vk::AccessFlags2 src_access_mask,
+            vk::AccessFlags2 dest_access_mask,
+            vk::PipelineStageFlags2 src_stage_mask,
+            vk::PipelineStageFlags2 dest_stage_mask
+        )
+        -> void;
     public:
         engine_t(size_2D window_size, std::string name);
         engine_t(const engine_t&) = delete;

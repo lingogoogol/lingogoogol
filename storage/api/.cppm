@@ -1,19 +1,24 @@
-module;
-
-#define UNICODE
-
-#include "../../compilercpp/lib/.hpp"
-
 export module storage.api;
 
 import std;
 
+import external.Windows;
+import external.wincrypt;
+import external.OpenSSL;
+import external.curl;
+import external.nlohmann;
+
+import lgo.io.file;
+
 import storage.multipart;
 
-export auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::string {
+export auto http_post_simple(CURL* curl, std::string url, std::string body) -> std::string
+{
 	std::string response{};
-    while (true) {
-        try {
+    while (true)
+	{
+        try
+		{
 			api_curl(curl_easy_setopt(curl, CURLOPT_URL, url.data()));
 			api_curl(curl_easy_setopt(curl, CURLOPT_POST, 1L));
 			api_curl(curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body.size())));
@@ -25,8 +30,9 @@ export auto http_post_simple(CURL* curl, std::string url, std::string body) -> s
 			api_curl(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 30L));
 			api_curl(curl_easy_perform(curl));
 		}
-        catch (error_curl_t error) {
-            log_file(error.what() + "\n");
+        catch (error_curl_t error)
+		{
+            lgo::log_file(std::string{ error.what() } + "\n");
             continue;
         }
         break;
@@ -34,33 +40,74 @@ export auto http_post_simple(CURL* curl, std::string url, std::string body) -> s
 	return response;
 }
 
-export auto base64url_encode(std::string in) -> std::string {
+export auto base64url_encode(std::string in) -> std::string
+{
 	DWORD out_size{};
-	CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, nullptr, &out_size);
+	CryptBinaryToStringA
+	(
+		reinterpret_cast<const BYTE*>(in.data()),
+		static_cast<DWORD>(in.size()),
+		CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF,
+		nullptr,
+		&out_size
+	);
 	std::string out{};
 	out.resize(out_size);
-	CryptBinaryToStringA(reinterpret_cast<const BYTE*>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF, out.data(), &out_size);
+	CryptBinaryToStringA
+	(
+		reinterpret_cast<const BYTE*>(in.data()),
+		static_cast<DWORD>(in.size()),
+		CRYPT_STRING_BASE64URI | CRYPT_STRING_NOCRLF,
+		out.data(),
+		&out_size
+	);
 	out.pop_back();
 	return out;
 }
 
-export auto base64url_decode(std::string in) -> std::string {
+export auto base64url_decode(std::string in) -> std::string
+{
 	DWORD out_size{};
-	CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64, nullptr, &out_size, 0, nullptr);
+	CryptStringToBinaryA
+	(
+		reinterpret_cast<LPCSTR>(in.data()),
+		static_cast<DWORD>(in.size()),
+		CRYPT_STRING_BASE64,
+		nullptr,
+		&out_size,
+		0,
+		nullptr
+	);
 	std::string out{};
 	out.resize(out_size);
-	CryptStringToBinaryA(reinterpret_cast<LPCSTR>(in.data()), static_cast<DWORD>(in.size())
-	, CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>(out.data()), &out_size, 0, nullptr);
+	CryptStringToBinaryA
+	(
+		reinterpret_cast<LPCSTR>(in.data()),
+		static_cast<DWORD>(in.size()),
+		CRYPT_STRING_BASE64,
+		reinterpret_cast<BYTE*>(out.data()),
+		&out_size,
+		0,
+		nullptr
+	);
 	return out;
 }
 
-export auto sha256withrsa(std::string in, std::string key) -> std::string {
+export auto sha256withrsa(std::string in, std::string key) -> std::string
+{
 	EVP_PKEY* private_key{};
-	OSSL_DECODER_CTX* ossl_decoder{
-		OSSL_DECODER_CTX_new_for_pkey(&private_key, "PEM", nullptr, "RSA", EVP_PKEY_KEYPAIR, nullptr, nullptr)
+	OSSL_DECODER_CTX* ossl_decoder
+	{
+		OSSL_DECODER_CTX_new_for_pkey
+		(
+			&private_key,
+			"PEM",
+			nullptr,
+			"RSA",
+			EVP_PKEY_KEYPAIR,
+			nullptr,
+			nullptr
+		)
 	};
 	auto pem_data{ reinterpret_cast<const unsigned char*>(key.data()) };
 	auto pem_size{ key.size() };
@@ -77,7 +124,8 @@ export auto sha256withrsa(std::string in, std::string key) -> std::string {
 	return out;
 }
 
-export class account_t {
+export class account_t
+{
 private:
 	std::string m_address{};
 	std::string m_key{};
@@ -185,10 +233,15 @@ export auto data_upload_request(curl_multipart_t& multipart, std::string name, s
 	request.path_set("/drive/v3/files");
 	request.query_set("fields", "id");
 	request.header_set("Content-Type", "application/json; charset=UTF-8");
-	request.body_set(nlohmann::json{
-		{ "name", name },
-		{ "description", content }
-	}.dump());
+	request.body_set
+	(
+		nlohmann::json
+		{
+			{ "name", name },
+			{ "description", content }
+		}
+		.dump()
+	);
 	return;
 }
 

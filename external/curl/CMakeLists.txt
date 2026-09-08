@@ -1,18 +1,15 @@
-add_library(lgo.math.op OBJECT)
+add_library(external.curl OBJECT)
 
 target_sources(
-    lgo.math.op
+    external.curl
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
-    PRIVATE
-        .cpp
 )
 
 target_link_libraries(
-    lgo.math.op
+    external.curl
     PRIVATE
         common
-        lgo.math.vec
 )

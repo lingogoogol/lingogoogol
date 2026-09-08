@@ -26,6 +26,4 @@ export namespace lgo {
         log_console(std::to_string(in->Release()));
         return;
     }
-
-    auto log_stacktrace(std::stacktrace stack) -> void;
 }

@@ -11,7 +11,7 @@ target_sources(
 )
 
 target_link_libraries(
-    lgo.container
+    lgo.container.str
     PRIVATE
         common
         external.Windows

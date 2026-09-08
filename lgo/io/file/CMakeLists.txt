@@ -14,4 +14,7 @@ target_link_libraries(
     lgo.io.file
     PRIVATE
         common
+        external.Windows
+        lgo.dev.error
+        lgo.container.str
 )

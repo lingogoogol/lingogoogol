@@ -20,7 +20,6 @@ auto hresult(HRESULT result) -> void {
     }
     log_file("HRESULT != S_OK:\n");
     log_file("  HRESULT: " + std::to_string(result) + "\n");
-    log_stacktrace();
     log_file("\n");
     return;
 }
@@ -31,12 +30,10 @@ auto handle_device_removed(HRESULT result, Microsoft::WRL::ComPtr<ID3D12Device2>
     }
     if (!device) {
         log_file("The device is removed but no device is passed in.\n");
-        log_stacktrace();
         return true;
     }
     HRESULT reason{ device->GetDeviceRemovedReason() };
     log_file("The device is removed. reason: " + std::to_string(reason) + "\n");
-    log_stacktrace();
     Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedData> DRED_data{};
     hresult(device->QueryInterface(IID_PPV_ARGS(&DRED_data)));
     D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumb{};

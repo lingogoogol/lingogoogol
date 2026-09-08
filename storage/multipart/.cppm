@@ -2,26 +2,37 @@ export module storage.multipart;
 
 import std;
 
-export class error_curl_t: public error_t {
+import external.curl;
+
+import lgo.dev.error;
+import lgo.io.file;
+
+export class error_curl_t: public lgo::error_t
+{
 public:
 	error_curl_t(std::string message): error_t{ message } {}
 };
 
-export auto api_curl(CURLcode code) -> void {
-	if (code != CURLE_OK) {
+export auto api_curl(CURLcode code) -> void
+{
+	if (code != CURLE_OK)
+    {
 		throw error_curl_t{ curl_easy_strerror(code) };
 	}
 	return;
 }
 
-export auto api_curlh(CURLHcode code) -> void {
-	if (code != CURLHE_OK) {
+export auto api_curlh(CURLHcode code) -> void
+{
+	if (code != CURLHE_OK)
+    {
 		throw error_curl_t{ "error curlh: " + std::to_string(code) };
 	}
 	return;
 }
 
-export auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t {
+export auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t
+{
 	auto dest{ static_cast<std::string*>(dest_void) };
 	auto size_orig{ dest->size() };
 	dest->resize(size_orig + size);
@@ -31,27 +42,32 @@ export auto write_callback(char* src, std::size_t, std::size_t size, void* dest_
 	return size;
 }
 
-export struct read_src_t {
+export struct read_src_t
+{
 	std::string m_data{};
 	std::uint64_t m_progress{};
 };
 
-export auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t {
+export auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t
+{
 	auto src{ static_cast<read_src_t*>(src_void) };
 	size = std::min(size, src->m_data.size() - src->m_progress);
-	for (std::size_t i{ 0 }; i < size; ++i) {
+	for (std::size_t i{ 0 }; i < size; ++i)
+    {
 		dest[i] = src->m_data[src->m_progress + i];
 	}
 	src->m_progress += size;
 	return size;
 }
 
-export struct debug_str_t {
+export struct debug_str_t
+{
 	std::string m_text{};
 	std::string m_request_header{};
 };
 
-export auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void* str_void) -> int {
+export auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void* str_void) -> int
+{
 	auto str_list{ static_cast<debug_str_t*>(str_void) };
 	std::string* str{};
 	switch (type) {
@@ -71,7 +87,8 @@ export auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t si
 	return 0;
 }
 
-export class http_request_t {
+export class http_request_t
+{
 private:
     std::string m_method{};
     std::string m_path{};
@@ -97,68 +114,83 @@ public:
     auto to_str() const -> std::string;
 };
 
-auto http_request_t::method_get() const -> std::string {
+auto http_request_t::method_get() const -> std::string
+{
     return m_method;
 }
 
-auto http_request_t::method_set(std::string method) -> void {
+auto http_request_t::method_set(std::string method) -> void
+{
     m_method = method;
     return;
 }
 
-auto http_request_t::host_get() const -> std::string {
+auto http_request_t::host_get() const -> std::string
+{
     return m_host;
 }
 
-auto http_request_t::host_set(std::string host) -> void {
+auto http_request_t::host_set(std::string host) -> void
+{
     m_host = host;
     return;
 }
 
-auto http_request_t::path_get() const -> std::string {
+auto http_request_t::path_get() const -> std::string
+{
     return m_path;
 }
 
-auto http_request_t::path_set(std::string path) -> void {
+auto http_request_t::path_set(std::string path) -> void
+{
     m_path = path;
     return;
 }
 
-auto http_request_t::query_get(std::string key) const -> std::string {
+auto http_request_t::query_get(std::string key) const -> std::string
+{
     return m_query.at(key);
 }
 
-auto http_request_t::query_set(std::string key, std::string val) -> void {
+auto http_request_t::query_set(std::string key, std::string val) -> void
+{
     m_query[key] = val;
     return;
 }
 
-auto http_request_t::header_get(std::string name) const -> std::string {
+auto http_request_t::header_get(std::string name) const -> std::string
+{
     return m_header.at(name);
 }
 
-auto http_request_t::header_set(std::string name, std::string val) -> void {
+auto http_request_t::header_set(std::string name, std::string val) -> void
+{
     m_header[name] = val;
     return;
 }
 
-auto http_request_t::body_get() const -> std::string {
+auto http_request_t::body_get() const -> std::string
+{
     return m_body;
 }
 
-auto http_request_t::body_set(std::string body) -> void {
+auto http_request_t::body_set(std::string body) -> void
+{
     m_body = body;
     return;
 }
 
-auto http_request_t::to_str() const -> std::string {
+auto http_request_t::to_str() const -> std::string
+{
     std::string out{};
     out += m_method + " " + m_path;
-    if (!m_query.empty()) {
+    if (!m_query.empty())
+    {
 		auto i{ m_query.begin() };
 		out += "?" + i->first + "=" + i->second;
 		++i;
-		for (; i != m_query.end(); ++i) {
+		for (; i != m_query.end(); ++i)
+        {
 			out += "&" + i->first + "=" + i->second;
 		}
 	}
@@ -169,7 +201,8 @@ auto http_request_t::to_str() const -> std::string {
     return out;
 }
 
-export class http_response_t {
+export class http_response_t
+{
 private:
     std::string m_protocol{};
     std::string m_status_code{};
@@ -187,7 +220,8 @@ public:
     auto body_get() const -> std::string;
 };
 
-http_response_t::http_response_t(std::string response) {
+http_response_t::http_response_t(std::string response)
+{
     std::uint64_t pos_end{ response.find(" ") };
     m_protocol = response.substr(0, pos_end);
     std::uint64_t pos_begin{ pos_end + 1 };
@@ -197,9 +231,11 @@ http_response_t::http_response_t(std::string response) {
     pos_end = response.find("\r\n", pos_begin);
     m_status_text = response.substr(pos_begin, pos_end - pos_begin);
     pos_begin = pos_end + 2;
-    while (true) {
+    while (true)
+    {
         pos_end = response.find("\r\n", pos_begin);
-        if (pos_end == pos_begin) {
+        if (pos_end == pos_begin)
+        {
             pos_begin = pos_end + 2;
             break;
         }
@@ -215,33 +251,41 @@ http_response_t::http_response_t(std::string response) {
     return;
 }
 
-auto http_response_t::protocol_get() const -> std::string {
+auto http_response_t::protocol_get() const -> std::string
+{
     return m_protocol;
 }
 
-auto http_response_t::status_code_get() const -> std::string {
+auto http_response_t::status_code_get() const -> std::string
+{
     return m_status_code;
 }
 
-auto http_response_t::status_text_get() const -> std::string {
+auto http_response_t::status_text_get() const -> std::string
+{
     return m_status_text;
 }
 
-auto http_response_t::header_get(std::string name) const -> std::string {
+auto http_response_t::header_get(std::string name) const -> std::string
+{
     return m_header.at(name);
 }
 
-auto http_response_t::body_get() const -> std::string {
+auto http_response_t::body_get() const -> std::string
+{
     return m_body;
 }
 
-export class curl_multipart_t {
+export class curl_multipart_t
+{
 private:
-    struct http_t {
+    struct http_t
+    {
         http_request_t m_request{};
         http_response_t m_response{};
         bool m_successful{};
     };
+
     std::string m_path{};
     std::string m_host{};
     std::map<std::string, std::string> m_query{};
@@ -272,85 +316,107 @@ public:
     auto action() -> void;
 };
 
-curl_multipart_t::curl_multipart_t(CURL* curl): m_curl{ curl } {}
+curl_multipart_t::curl_multipart_t(CURL* curl)
+:
+    m_curl{ curl }
+{}
 
-auto curl_multipart_t::size() const -> std::uint64_t {
+auto curl_multipart_t::size() const -> std::uint64_t
+{
     return m_http.size();
 }
 
-auto curl_multipart_t::clear() -> void {
+auto curl_multipart_t::clear() -> void
+{
     m_http.clear();
     return;
 }
 
-auto curl_multipart_t::host_get() const -> std::string {
+auto curl_multipart_t::host_get() const -> std::string
+{
     return m_host;
 }
 
-auto curl_multipart_t::host_set(std::string host) -> void {
+auto curl_multipart_t::host_set(std::string host) -> void
+{
     m_host = host;
     return;
 }
 
-auto curl_multipart_t::path_get() const -> std::string {
+auto curl_multipart_t::path_get() const -> std::string
+{
     return m_path;
 }
 
-auto curl_multipart_t::path_set(std::string path) -> void {
+auto curl_multipart_t::path_set(std::string path) -> void
+{
     m_path = path;
     return;
 }
 
-auto curl_multipart_t::query_get(std::string key) const -> std::string {
+auto curl_multipart_t::query_get(std::string key) const -> std::string
+{
     return m_query.at(key);
 }
 
-auto curl_multipart_t::query_set(std::string key, std::string val) -> void {
+auto curl_multipart_t::query_set(std::string key, std::string val) -> void
+{
     m_query[key] = val;
     return;
 }
 
-auto curl_multipart_t::header_get(std::string name) const -> std::string {
+auto curl_multipart_t::header_get(std::string name) const -> std::string
+{
     return m_header.at(name);
 }
 
-auto curl_multipart_t::header_set(std::string name, std::string val) -> void {
+auto curl_multipart_t::header_set(std::string name, std::string val) -> void
+{
     m_header[name] = val;
     return;
 }
 
-auto curl_multipart_t::boundary_get() const -> std::string {
+auto curl_multipart_t::boundary_get() const -> std::string
+{
     return m_boundary;
 }
 
-auto curl_multipart_t::boundary_set(std::string boundary) -> void {
+auto curl_multipart_t::boundary_set(std::string boundary) -> void
+{
     m_boundary = boundary;
     return;
 }
 
-auto curl_multipart_t::request_add() -> std::uint64_t {
+auto curl_multipart_t::request_add() -> std::uint64_t
+{
     m_http[m_id_current] = http_t{};
     return m_id_current++;
 }
 
-auto curl_multipart_t::request_get(std::uint64_t id) -> http_request_t& {
+auto curl_multipart_t::request_get(std::uint64_t id) -> http_request_t&
+{
     return m_http[id].m_request;
 }
 
-auto curl_multipart_t::response_get(std::uint64_t id) -> http_response_t& {
+auto curl_multipart_t::response_get(std::uint64_t id) -> http_response_t&
+{
     return m_http[id].m_response;
 }
 
-auto curl_multipart_t::action_try() -> void {
-    if (!size()) {
+auto curl_multipart_t::action_try() -> void
+{
+    if (!size())
+    {
         return;
     }
 	curl_slist* header_curl{};
     std::string body{};
     body += "--" + m_boundary + "\r\n";
     std::uint64_t count{ 0 };
-    for (auto i : m_http) {
-        if (i.second.m_successful) {
+    for (auto i : m_http)
+    {
+        if (i.second.m_successful)
+        {
             continue;
         }
         std::string content{ i.second.m_request.to_str() };
@@ -368,11 +434,14 @@ auto curl_multipart_t::action_try() -> void {
 	debug_str_t debug_str{};
     curl_header* content_type{};
     header_curl = curl_slist_append(header_curl, ("Content-Type: multipart/mixed; boundary=" + m_boundary).c_str());
-    for (auto i : m_header) {
+    for (auto i : m_header)
+    {
         header_curl = curl_slist_append(header_curl, (i.first + ": " + i.second).c_str());
     }
-    while (true) {
-        try {
+    while (true)
+    {
+        try
+        {
             api_curl(curl_easy_setopt(m_curl, CURLOPT_URL, (m_host + m_path).c_str()));
             api_curl(curl_easy_setopt(m_curl, CURLOPT_HTTPHEADER, header_curl));
             api_curl(curl_easy_setopt(m_curl, CURLOPT_POST, 1L));
@@ -390,8 +459,9 @@ auto curl_multipart_t::action_try() -> void {
             api_curl(curl_easy_setopt(m_curl, CURLOPT_VERBOSE, 0L));
             api_curlh(curl_easy_header(m_curl, "Content-Type", 0, CURLH_HEADER, -1, &content_type));
         }
-        catch (error_curl_t error) {
-            log_file(error.what() + "\n");
+        catch (error_curl_t error)
+        {
+            lgo::log_file(std::string{ error.what() } + "\n");
             continue;
         }
         curl_slist_free_all(header_curl);
@@ -401,7 +471,8 @@ auto curl_multipart_t::action_try() -> void {
     std::string boundary_name{ "; boundary=" };
     boundary = "--" + boundary.substr(boundary.find(boundary_name) + boundary_name.size());
     std::uint64_t pos_begin{ response.find(boundary) + boundary.size() + 2 };
-    for (std::uint64_t i{ 0 }; i < count; ++i) {
+    for (std::uint64_t i{ 0 }; i < count; ++i)
+    {
         std::string content_id_name{ "Content-ID: response-" };
         std::uint64_t content_id_begin{ response.find(content_id_name, pos_begin) + content_id_name.size() };
         std::uint64_t content_id_end{ response.find("\r\n", content_id_begin) };
@@ -417,15 +488,19 @@ auto curl_multipart_t::action_try() -> void {
     return;
 }
 
-auto curl_multipart_t::action() -> void {
+auto curl_multipart_t::action() -> void
+{
     std::chrono::seconds sleep_duration{ 1 };
-    while (true) {
+    while (true)
+    {
         action_try();
         bool successful{ true };
-        for (auto i : m_http) {
+        for (auto i : m_http)
+        {
             successful = successful && i.second.m_successful;
         }
-        if (successful) {
+        if (successful)
+        {
             break;
         }
         std::this_thread::sleep_for(sleep_duration);

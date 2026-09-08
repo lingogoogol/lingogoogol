@@ -1,18 +1,15 @@
-add_library(lgo.math.op OBJECT)
+add_library(external.nlohmann OBJECT)
 
 target_sources(
-    lgo.math.op
+    external.nlohmann
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
-    PRIVATE
-        .cpp
 )
 
 target_link_libraries(
-    lgo.math.op
+    external.nlohmann
     PRIVATE
         common
-        lgo.math.vec
 )

@@ -14,7 +14,6 @@ auto FT_error(FT_Error result, std::stacktrace stack) -> void {
     }
     log_file("FT_Error != FT_Err_Ok:\n");
     log_file("  FT_Error: " + std::to_string(result) + "\n");
-    log_stacktrace(stack);
     log_file("\n");
     return;
 }

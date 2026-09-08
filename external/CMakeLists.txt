@@ -1,3 +1,7 @@
 add_subdirectory(Windows)
+add_subdirectory(wincrypt)
 add_subdirectory(Vulkan)
 add_subdirectory(GLFW)
+add_subdirectory(OpenSSL)
+add_subdirectory(curl)
+add_subdirectory(nlohmann)

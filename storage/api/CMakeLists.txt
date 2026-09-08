@@ -12,5 +12,11 @@ target_link_libraries(
     storage.api
     PRIVATE
         common
+        external.Windows
+        external.wincrypt
+        external.OpenSSL
+        external.curl
+        external.nlohmann
+        lgo.io.file
         storage.multipart
 )

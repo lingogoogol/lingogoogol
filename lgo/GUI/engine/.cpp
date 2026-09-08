@@ -1,3 +1,7 @@
+module;
+
+#include <vulkan/vk_platform.h>
+
 module lgo.GUI.engine;
 
 import std;
@@ -5,16 +9,10 @@ import std;
 import external.Vulkan;
 import external.GLFW;
 
-namespace lgo {
-    auto engine_t::track_mouse_event() -> void {
-        TRACKMOUSEEVENT stu{};
-        stu.cbSize = sizeof stu;
-        stu.dwFlags = TME_LEAVE;
-        stu.hwndTrack = m_window;
-        TrackMouseEvent(&stu);
-        return;
-    }
+import lgo.math.vec;
+import lgo.io.file;
 
+namespace lgo {
     template<typename t_callback_set, typename t_caller, typename... t_in>
     auto engine_t::call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void {
         callback.m_calling_callback = true;
@@ -36,44 +34,52 @@ namespace lgo {
 
     VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback(
         vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
-        vk::DebugUtilsMessageTypeFlagBitsEXT type,
+        vk::DebugUtilsMessageTypeFlagsEXT type,
         const vk::DebugUtilsMessengerCallbackDataEXT* data,
-        void* engine_voidptr
-    ) -> VkBool32 {
+        void* engine_voidptr [[maybe_unused]]
+    )
+    -> vk::Bool32
+    {
         std::string severity_str{};
-        switch (severity) {
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose: {
+        switch (severity)
+        {
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
+        {
             severity_str = "verbose";
             break;
         }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo: {
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
+        {
             severity_str = "info";
             break;
         }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning: {
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
+        {
             severity_str = "warning";
             break;
         }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError: {
+        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
+        {
             severity_str = "error";
             break;
         }
-        default: {
+        default:
+        {
             severity_str = "unknown";
             break;
         }
         }
         std::string type_str{};
-        switch (type) {
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral: {
+        switch (static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type)) {
+        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral): {
             severity_str = "general";
             break;
         }
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation: {
+        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation): {
             severity_str = "validation";
             break;
         }
-        case vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance: {
+        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance): {
             severity_str = "performance";
             break;
         }
@@ -82,22 +88,27 @@ namespace lgo {
             break;
         }
         }
-        log_file(
+        log_file
+        (
             "debug_message:\n"
-            "    severity: " + severity_str + " (code: " + severity + ")\n"
-            "    type: " + type_str + " (code: " + type + ")\n"
-            "    message_id: " + data->pMessageIdName + " (code: " + data->messageIdNumber + ")\n"
+            "    severity: " + severity_str + " (code: " + std::to_string(std::to_underlying(severity)) + ")\n"
+            "    type: " + type_str +
+                " (code: " + std::to_string(static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type)) + ")\n"
+            "    message_id: " + data->pMessageIdName + " (code: " + std::to_string(data->messageIdNumber) + ")\n"
             "    message: " + data->pMessage + "\n"
         );
-        for (int i{ 0 }; i < data->objectCount; ++i) {
-            log_file(
+        for (int i{ 0 }; i < static_cast<int>(data->objectCount); ++i)
+        {
+            log_file
+            (
                 "    object:\n"
-                "        type: " "(code: " + data->pOjbects[i]->objectType + ")\n"
-                "        handle: " + data->pOjbects[i]->objectHandle + "\n"
-                "        name: " + data->pOjbects[i]->pobjectName + "\n"
+                "        type: " "(code: " + std::to_string(std::to_underlying(data->pObjects[i].objectType)) + ")\n"
+                "        handle: " + std::to_string(data->pObjects[i].objectHandle) + "\n"
+                "        name: " + data->pObjects[i].pObjectName + "\n"
             );
         }
-        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning) {
+        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
+        {
             throw;
         }
         return vk::False;
@@ -119,12 +130,12 @@ namespace lgo {
         {
             .srcStageMask{ src_stage_mask },
             .srcAccessMask{ src_access_mask },
-            .dstStageMask{ dst_stage_mask },
-            .dstAccessMask{ dst_access_mask },
+            .dstStageMask{ dest_stage_mask },
+            .dstAccessMask{ dest_access_mask },
             .oldLayout{ old_layout },
             .newLayout{ new_layout },
-            .srcQueueFamilyIndex{ VK_QUEUE_FAMILY_IGNORED },
-            .dstQueueFamilyIndex{ VK_QUEUE_FAMILY_IGNORED },
+            .srcQueueFamilyIndex{ vk::QueueFamilyIgnored },
+            .dstQueueFamilyIndex{ vk::QueueFamilyIgnored },
             .image{ m_swap_chain_image[image_index] },
             .subresourceRange
             {
@@ -168,7 +179,7 @@ namespace lgo {
         //Create an instance.
         vk::ApplicationInfo app_info
         {
-            .pApplicationName{ name },
+            .pApplicationName{ name.c_str() },
             .applicationVersion{ Vulkan_version_encode(0, 0, 5, 0) },
             .pEngineName{ "lgo" },
             .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
@@ -179,16 +190,16 @@ namespace lgo {
             "VK_LAYER_KHRONOS_validation"
         };
         std::uint32_t glfw_extension_count{};
-        const char** glfw_extension{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
-        std::vector<const char*> extension( glfw_extension, glfw_extension + glfw_extension_count );
-        extension.push_back("VK_EXT_debug_utils");
+        const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
+        std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
+        extension_instance.push_back("VK_EXT_debug_utils");
         vk::InstanceCreateInfo instance_info
         {
             .pApplicationInfo{ &app_info },
             .enabledLayerCount{ static_cast<std::uint32_t>(layer.size()) },
-            .ppEnabledLayerNames{ layer.data() }
-            .enabledExtensionCount{ static_cast<std::uint32_t>(extension.size()) },
-            .ppEnabledExtensionNames{ extension.data() }
+            .ppEnabledLayerNames{ layer.data() },
+            .enabledExtensionCount{ static_cast<std::uint32_t>(extension_instance.size()) },
+            .ppEnabledExtensionNames{ extension_instance.data() }
         };
         m_instance = vk::raii::Instance{ m_context, instance_info };
 
@@ -197,17 +208,17 @@ namespace lgo {
         {
             .messageSeverity
             {
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose ||
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo ||
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning ||
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
                 vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
-            }
+            },
             .messageType
             {
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral ||
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation ||
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
-            }
+            },
             .pfnUserCallback{ &debug_callback },
             .pUserData{ this }
         };
@@ -223,13 +234,13 @@ namespace lgo {
         //Create a physical device.
         std::vector<vk::raii::PhysicalDevice> device_available{ m_instance.enumeratePhysicalDevices() };
         std::multimap<int, vk::raii::PhysicalDevice> device_score{};
-        std::vector<std::string> extension{ "VK_KHR_swapchain" };
+        std::vector<std::string> extension_device{ "VK_KHR_swapchain" };
         for (vk::raii::PhysicalDevice device : device_available)
         {
-            device_property{ device.getProperties() };
-            device_queue_family{ device.getQueueFamilyProperties() };
-            device_extension{ device.enumerateDeviceExtensionProperties() };
-            device_feature
+            vk::PhysicalDeviceProperties device_property{ device.getProperties() };
+            std::vector<vk::QueueFamilyProperties> device_queue_family{ device.getQueueFamilyProperties() };
+            std::vector<vk::ExtensionProperties> device_extension{ device.enumerateDeviceExtensionProperties() };
+            auto device_feature
             {
                 device.getFeatures2
                 <
@@ -245,7 +256,7 @@ namespace lgo {
                 std::ranges::all_of
                 (
                     device_queue_family | std::ranges::views::enumerate,
-                    [device&] (const std::tuple<>& pair) -> bool
+                    [&device] (const std::tuple<std::size_t, vk::QueueFamilyProperties>& pair) -> bool
                     {
                         auto [index, queue_family]{ pair };
                         return
@@ -255,7 +266,7 @@ namespace lgo {
                 ) ||
                 std::ranges::any_of
                 (
-                    extension,
+                    extension_device,
                     [device_extension] (const & extension)
                     {
                         return std::ranges::all_of

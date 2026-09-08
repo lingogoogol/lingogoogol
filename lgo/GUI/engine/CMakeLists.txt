@@ -17,6 +17,7 @@ target_link_libraries(
         external.Vulkan
         external.GLFW
         lgo.math.vec
+        lgo.io.file
 )
 
 add_dependencies(

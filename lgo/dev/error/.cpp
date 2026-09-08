@@ -3,20 +3,27 @@ module lgo.dev.error;
 import std;
 
 namespace lgo {
-    error_t::error_t(std::string message): m_message{ message } {}
+    error_t::error_t(std::string message, std::string what)
+    :
+        m_message{ message },
+        m_what{ what }
+    {}
+
+    error_t::error_t(std::string message)
+    :
+        error_t{ message, "error: " + message }
+    {}
 
     auto error_t::message() -> std::string {
         return m_message;
     }
 
-    auto error_t::what() -> std::string {
-        return "error: " + m_message;
+    auto error_t::what() const noexcept -> const char* {
+        return m_what.c_str();
     }
 
-    internal_error_t::internal_error_t(const std::string& description, std::stacktrace stack = std::stacktrace::current())
-    : error_t{ description }, m_stack{ stack } {}
-
-    auto internal_error_t::what() -> std::string override {
-        return "internal error: " + error_t::what() + "\n, stack trace: " + std::to_string(m_stack);
-    }
+    internal_error_t::internal_error_t(const std::string& message)
+    :
+        error_t{ message, "internal error: " + message }
+    {}
 }
