@@ -1,19 +1,16 @@
-add_library(lgo.container.str STATIC)
+add_library(external.shellapi STATIC)
 
 target_sources(
-    lgo.container.str
+    external.shellapi
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
-    PRIVATE
-        .cpp
 )
 
 target_link_libraries(
-    lgo.container.str
+    external.shellapi
     PRIVATE
         common
-    PUBLIC
-        external.Windows
+        Shell32.lib
 )

@@ -1,4 +1,4 @@
-add_library(lgo.io OBJECT)
+add_library(lgo.io STATIC)
 
 target_sources(
     lgo.io
@@ -15,6 +15,7 @@ target_link_libraries(
     lgo.io
     PRIVATE
         common
+    PUBLIC
         lgo.io.stream
         lgo.io.file
 )

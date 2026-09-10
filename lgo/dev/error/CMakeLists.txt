@@ -1,4 +1,4 @@
-add_library(lgo.dev.error OBJECT)
+add_library(lgo.dev.error STATIC)
 
 target_sources(
     lgo.dev.error

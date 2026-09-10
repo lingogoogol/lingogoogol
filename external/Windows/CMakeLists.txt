@@ -1,4 +1,4 @@
-add_library(external.Windows OBJECT)
+add_library(external.Windows STATIC)
 
 target_sources(
     external.Windows

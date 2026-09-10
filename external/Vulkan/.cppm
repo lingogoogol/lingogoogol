@@ -4,7 +4,8 @@ import std;
 
 export import vulkan;
 
-export {
+export
+{
     constexpr auto Vulkan_version_encode(
         int ver_0,
         int ver_1,

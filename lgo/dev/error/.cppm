@@ -21,7 +21,5 @@ export namespace lgo {
     public:
         internal_error_t(const std::string& message);
         virtual ~internal_error_t() = default;
-
-        virtual auto what() const noexcept -> const char* override;
     };
 }

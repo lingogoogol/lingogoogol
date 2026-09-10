@@ -1,4 +1,4 @@
-add_library(lgo.GUI.misc OBJECT)
+add_library(lgo.GUI.misc STATIC)
 
 target_sources(
     lgo.GUI.misc

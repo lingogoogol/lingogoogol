@@ -1,4 +1,4 @@
-add_library(external.wincrypt OBJECT)
+add_library(external.wincrypt STATIC)
 
 target_sources(
     external.wincrypt
@@ -12,4 +12,5 @@ target_link_libraries(
     external.wincrypt
     PRIVATE
         common
+        Crypt32.lib
 )

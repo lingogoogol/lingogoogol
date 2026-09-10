@@ -1,4 +1,4 @@
-add_library(external.curl OBJECT)
+add_library(external.curl STATIC)
 
 target_sources(
     external.curl
@@ -12,4 +12,5 @@ target_link_libraries(
     external.curl
     PRIVATE
         common
+        libcurl.lib
 )

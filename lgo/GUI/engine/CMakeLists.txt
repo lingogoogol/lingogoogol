@@ -1,4 +1,4 @@
-add_library(lgo.GUI.engine OBJECT)
+add_library(lgo.GUI.engine STATIC)
 
 target_sources(
     lgo.GUI.engine
@@ -14,6 +14,7 @@ target_link_libraries(
     lgo.GUI.engine
     PRIVATE
         common
+    PUBLIC
         external.Vulkan
         external.GLFW
         lgo.math.vec
@@ -39,8 +40,9 @@ function(add_slang_target TARGET)
             -emit-spirv-directly
             -fvk-use-entrypoint-name
             ${ENTRY_POINTS}
-            -o ${CMAKE_CURRENT_BINARY_DIR}/slang.spv
+            -o ${CMAKE_CURRENT_BINARY_DIR}/shader.spv
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        DEPENDS ${SLANG_SOURCES}
         VERBATIM
     )
 

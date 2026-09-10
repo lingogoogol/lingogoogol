@@ -1,19 +1,16 @@
-add_library(lgo.container.str STATIC)
+add_library(external.objbase STATIC)
 
 target_sources(
-    lgo.container.str
+    external.objbase
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
-    PRIVATE
-        .cpp
 )
 
 target_link_libraries(
-    lgo.container.str
+    external.objbase
     PRIVATE
         common
-    PUBLIC
-        external.Windows
+        Ole32.lib
 )

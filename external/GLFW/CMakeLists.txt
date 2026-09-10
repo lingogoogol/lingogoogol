@@ -1,4 +1,4 @@
-add_library(external.GLFW OBJECT)
+add_library(external.GLFW STATIC)
 
 target_include_directories(
     external.GLFW
@@ -18,4 +18,5 @@ target_link_libraries(
     external.GLFW
     PRIVATE
         common
+        glfw3.lib
 )

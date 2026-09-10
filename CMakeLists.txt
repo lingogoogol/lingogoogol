@@ -29,31 +29,58 @@ list(
 )
 
 add_library(common INTERFACE)
+set(
+    COMMON_COMPILE_OPT_MSVC
+    /permissive-
+    /volatile:iso
+    /utf-8
+    /Zc:enumTypes
+    /W4
+    /options:strict
+    /diagnostics:caret
+    /EHsc
+)
+set(
+    COMMON_COMPILE_OPT_GNU
+    -Wall
+    -Wextra
+    --pedantic-errors
+)
+set(
+    COMMON_COMPILE_OPT_CLANG
+    -Wall
+    -Wextra
+    -pedantic-errors
+)
 target_compile_options(
     common
     INTERFACE
-        $<$<CXX_COMPILER_ID:MSVC>:/permissive->
-        $<$<CXX_COMPILER_ID:MSVC>:/volatile:iso>
-        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
-        $<$<CXX_COMPILER_ID:MSVC>:/Zc:enumTypes>
-        $<$<CXX_COMPILER_ID:MSVC>:/W4>
-        $<$<CXX_COMPILER_ID:MSVC>:/options:strict>
-        $<$<CXX_COMPILER_ID:MSVC>:/diagnostics:caret>
-        $<$<CXX_COMPILER_ID:Clang>:-Wall>
-        $<$<CXX_COMPILER_ID:Clang>:-Wextra>
-        $<$<CXX_COMPILER_ID:Clang>:-pedantic-errors>
+        $<$<CXX_COMPILER_ID:MSVC>:${COMMON_COMPILE_OPT_MSVC}>
+        $<$<CXX_COMPILER_ID:GNU>:${COMMON_COMPILE_OPT_GNU}>
+        $<$<CXX_COMPILER_ID:Clang>:${COMMON_COMPILE_OPT_CLANG}>
 )
+target_link_options(
+    common
+    INTERFACE
+        /NODEFAULTLIB:LIBCMT
+)
+
+set(VCPKG_STATIC_INCLUDE_DIR "C:/lingogoogol/application/vcpkg/installed/x64-windows-static/include")
+set(VCPKG_DYNAMIC_INCLUDE_DIR "C:/lingogoogol/application/vcpkg/installed/x64-windows/include/")
 target_include_directories(
     common
     INTERFACE
         "../source/"
         "../include/"
-        "C:/lingogoogol/application/vcpkg/installed/x64-windows/include/"
+        ${VCPKG_STATIC_INCLUDE_DIR}
+        ${VCPKG_DYNAMIC_INCLUDE_DIR}
 )
+
 target_link_directories(
     common
     INTERFACE
         "../lib/"
+        "C:/lingogoogol/application/vcpkg/installed/x64-windows-static/lib/"
         "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
 )
 

@@ -1,4 +1,4 @@
-add_library(lgo.dev OBJECT)
+add_library(lgo.dev STATIC)
 
 target_sources(
     lgo.dev
@@ -14,5 +14,6 @@ target_link_libraries(
     lgo.dev
     PRIVATE
         common
+    PUBLIC
         lgo.dev.error
 )

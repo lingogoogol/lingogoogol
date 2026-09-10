@@ -25,6 +25,7 @@ export namespace lgo {
         vk::raii::PhysicalDevice m_device_physical{ nullptr };
         vk::raii::Device m_device{ nullptr };
         vk::raii::Queue m_command_queue{ nullptr };
+        vk::Extent2D m_swap_chain_extent{};
         vk::raii::SwapchainKHR m_swap_chain{ nullptr };
         std::vector<vk::Image> m_swap_chain_image{};
         std::vector<vk::raii::ImageView> m_swap_chain_image_view{};
@@ -32,9 +33,10 @@ export namespace lgo {
         vk::raii::Pipeline m_pipeline{ nullptr };
         vk::raii::CommandPool m_command_pool{ nullptr };
         vk::raii::CommandBuffer m_command_buffer{ nullptr };
-        vk::raii::Semaphore m_semaphore_image{ nullptr };
-        vk::raii::Semaphore m_semaphore_draw{ nullptr };
+        std::vector<vk::raii::Semaphore> m_semaphore_image{};
+        std::vector<vk::raii::Semaphore> m_semaphore_draw{};
         vk::raii::Fence m_fence{ nullptr };
+        std::uint64_t m_frame_number{ 0 };
 
         bool m_exit{ false };
         bool m_initialized{ false };
@@ -78,28 +80,44 @@ export namespace lgo {
             vk::PipelineStageFlags2 dest_stage_mask
         )
         -> void;
+
+        auto find_eligible_queue_family
+        (
+            std::vector<vk::QueueFamilyProperties2>& queue_family_arr,
+            const vk::raii::PhysicalDevice& device_physical
+        )
+        -> std::ranges::iterator_t<std::vector<vk::QueueFamilyProperties2>>;
     public:
         engine_t(size_2D window_size, std::string name);
         engine_t(const engine_t&) = delete;
         ~engine_t();
         auto operator=(const engine_t&) = delete;
 
-        auto flush() -> void;
-        auto redraw() -> void;
         auto message_loop() -> bool;
-        auto log_info_queue() -> void;
 
         auto set_exit() -> void;
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;
         auto get_window_size() -> size_2D;
         auto get_cursor_pos() -> pos_2D;
-        auto device_get() const -> vk::raii::Device;
-        auto command_queue_get() -> vk::raii::Queue;
+        auto device_get() -> vk::raii::Device&;
+        auto command_queue_get() -> vk::raii::Queue&;
 
         /*auto add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t*;
-        auto add_rect(pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
-        , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name) -> rect_primitive_t*;
+        auto add_rect
+        (
+            pos_2D pos,
+            size_2D size,
+            float depth,
+            pos_2D clip_pos,
+            size_2D clip_size,
+            const SRV_t& SRV,
+            pos_2D texture_pos,
+            size_2D texture_axis_x,
+            size_2D texture_axis_y,
+            std::string name
+        )
+        -> rect_primitive_t*;
         auto remove_rect(rect_primitive_t* in) -> void;*///...
 
         auto add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;

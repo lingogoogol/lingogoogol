@@ -1,4 +1,4 @@
-add_library(lgo.math.vec OBJECT)
+add_library(lgo.math.vec STATIC)
 
 target_sources(
     lgo.math.vec

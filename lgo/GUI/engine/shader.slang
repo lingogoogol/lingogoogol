@@ -1,8 +1,8 @@
 static float2 pos_arr[3] = float2[]
 (
     float2(0.0, -0.5),
-    float2(0.5, 0.5),
-    float2(-0.5, 0.5)
+    float2(-0.5, 0.5),
+    float2(0.5, 0.5)
 );
 
 static float3 color_arr[3] = float3[]

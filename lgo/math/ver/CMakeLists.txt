@@ -1,4 +1,4 @@
-add_library(lgo.math.ver OBJECT)
+add_library(lgo.math.ver STATIC)
 
 target_sources(
     lgo.math.ver
@@ -14,5 +14,6 @@ target_link_libraries(
     lgo.math.ver
     PRIVATE
         common
+    PUBLIC
         lgo.io.stream
 )

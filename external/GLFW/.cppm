@@ -14,7 +14,8 @@ constexpr auto GLFW_RESIZABLE_export{ GLFW_RESIZABLE };
 constexpr auto GLFW_FALSE_export{ GLFW_FALSE };
 #undef GLFW_FALSE
 
-export {
+export
+{
     using ::VkSurfaceKHR;
     
     using ::GLFWwindow;
@@ -28,6 +29,9 @@ export {
     using ::glfwDestroyWindow;
     using ::glfwWindowHint;
     using ::glfwCreateWindowSurface;
+    using ::glfwGetFramebufferSize;
+    
+    using ::glfwGetCursorPos;
 
     using ::glfwPollEvents;
     using ::glfwWindowShouldClose;

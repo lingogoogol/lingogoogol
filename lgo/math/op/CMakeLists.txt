@@ -1,4 +1,4 @@
-add_library(lgo.math.op OBJECT)
+add_library(lgo.math.op STATIC)
 
 target_sources(
     lgo.math.op
@@ -14,5 +14,6 @@ target_link_libraries(
     lgo.math.op
     PRIVATE
         common
+    PUBLIC
         lgo.math.vec
 )

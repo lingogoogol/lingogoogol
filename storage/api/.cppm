@@ -344,7 +344,7 @@ public:
 			std::uint64_t size{ std::filesystem::file_size(path) };
 			std::string content{};
 			content.resize(size);
-			create_ifstream(path.string()).read(content.data(), size);
+			lgo::create_ifstream(path.string()).read(content.data(), size);
 			nlohmann::json arr{ nlohmann::json::parse(content) };
 			m_id.resize(arr.size());
 			for (std::uint64_t i{ 0 }; i < arr.size(); ++i) {
@@ -363,7 +363,7 @@ public:
 			arr.push_back(m_id[i]);
 		}
 		std::string content{ arr.dump() };
-		create_ofstream_destroy(m_path.string()).write(content.data(), content.size());
+		lgo::create_ofstream_destroy(m_path.string()).write(content.data(), content.size());
 		return;
 	}
 

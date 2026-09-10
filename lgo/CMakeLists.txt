@@ -1,4 +1,4 @@
-add_library(lgo OBJECT)
+add_library(lgo STATIC)
 
 target_sources(
     lgo
@@ -18,6 +18,7 @@ target_link_libraries(
     lgo
     PRIVATE
         common
+    PUBLIC
         lgo.container
         lgo.math
         lgo.io

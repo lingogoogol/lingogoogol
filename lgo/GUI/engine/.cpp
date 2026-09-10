@@ -14,17 +14,24 @@ import lgo.io.file;
 
 namespace lgo {
     template<typename t_callback_set, typename t_caller, typename... t_in>
-    auto engine_t::call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void {
+    auto engine_t::call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void
+    {
         callback.m_calling_callback = true;
         static std::uint64_t depth{ 0 };
         ++depth;
         typename decltype(callback.m_effective)::key_type current{};
-        for (auto i{ callback.m_effective.begin() }; i != callback.m_effective.end(); i = callback.m_effective.upper_bound(current)) {
+        for
+        (
+            auto i{ callback.m_effective.begin() };
+            i != callback.m_effective.end();
+            i = callback.m_effective.upper_bound(current)
+        ) {
             current = *i;
             caller(current, in...);
         }
         --depth;
-        if (!depth) {
+        if (!depth)
+        {
             callback.m_effective.insert(callback.m_pending.begin(), callback.m_pending.end());
             callback.m_pending.clear();
         }
@@ -32,7 +39,8 @@ namespace lgo {
         return;
     }
 
-    VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback(
+    VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback
+    (
         vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
         vk::DebugUtilsMessageTypeFlagsEXT type,
         const vk::DebugUtilsMessengerCallbackDataEXT* data,
@@ -43,50 +51,55 @@ namespace lgo {
         std::string severity_str{};
         switch (severity)
         {
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
-        {
-            severity_str = "verbose";
-            break;
-        }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
-        {
-            severity_str = "info";
-            break;
-        }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
-        {
-            severity_str = "warning";
-            break;
-        }
-        case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
-        {
-            severity_str = "error";
-            break;
-        }
-        default:
-        {
-            severity_str = "unknown";
-            break;
-        }
+            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
+            {
+                severity_str = "verbose";
+                break;
+            }
+            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
+            {
+                severity_str = "info";
+                break;
+            }
+            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
+            {
+                severity_str = "warning";
+                break;
+            }
+            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
+            {
+                severity_str = "error";
+                break;
+            }
+            default:
+            {
+                severity_str = "unknown";
+                break;
+            }
         }
         std::string type_str{};
-        switch (static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type)) {
-        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral): {
-            severity_str = "general";
-            break;
-        }
-        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation): {
-            severity_str = "validation";
-            break;
-        }
-        case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance): {
-            severity_str = "performance";
-            break;
-        }
-        default: {
-            severity_str = "unknown";
-            break;
-        }
+        switch (static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type))
+        {
+            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral):
+            {
+                type_str = "general";
+                break;
+            }
+            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation):
+            {
+                type_str = "validation";
+                break;
+            }
+            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance):
+            {
+                type_str = "performance";
+                break;
+            }
+            default:
+            {
+                type_str = "unknown";
+                break;
+            }
         }
         log_file
         (
@@ -99,12 +112,22 @@ namespace lgo {
         );
         for (int i{ 0 }; i < static_cast<int>(data->objectCount); ++i)
         {
+            std::string object_name{};
+            const char* object_name_ptr{ data->pObjects[i].pObjectName };
+            if (object_name_ptr)
+            {
+                object_name = object_name_ptr;
+            }
+            else
+            {
+                object_name = "[no name]";
+            }
             log_file
             (
                 "    object:\n"
                 "        type: " "(code: " + std::to_string(std::to_underlying(data->pObjects[i].objectType)) + ")\n"
                 "        handle: " + std::to_string(data->pObjects[i].objectHandle) + "\n"
-                "        name: " + data->pObjects[i].pObjectName + "\n"
+                "        name: " + object_name + "\n"
             );
         }
         if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
@@ -155,6 +178,32 @@ namespace lgo {
         m_command_buffer.pipelineBarrier2(dependency_info);
         return;
     }
+    
+    auto engine_t::find_eligible_queue_family
+    (
+        std::vector<vk::QueueFamilyProperties2>& queue_family_arr,
+        const vk::raii::PhysicalDevice& device_physical
+    )
+    -> std::ranges::iterator_t<std::vector<vk::QueueFamilyProperties2>>
+    {
+        for (std::size_t i{ 0 }; i < queue_family_arr.size(); ++i)
+        {
+            //This variable tracks whether "device_physical" supports "queue_family_arr[i]"
+            //and whether it has graphics capability or not.
+            bool queue_family_support{ true };
+            queue_family_support =
+                queue_family_support &&
+                (queue_family_arr[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics);
+            queue_family_support =
+                queue_family_support &&
+                device_physical.getSurfaceSupportKHR(static_cast<std::uint32_t>(i), *m_surface);
+            if (queue_family_support)
+            {
+                return queue_family_arr.begin() + i;
+            }
+        }
+        return queue_family_arr.end();
+    }
 
     engine_t::engine_t
     (
@@ -193,6 +242,7 @@ namespace lgo {
         const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
         std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
         extension_instance.push_back("VK_EXT_debug_utils");
+        extension_instance.push_back("VK_KHR_get_surface_capabilities2");
         vk::InstanceCreateInfo instance_info
         {
             .pApplicationInfo{ &app_info },
@@ -211,13 +261,13 @@ namespace lgo {
                 vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
                 vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
                 vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
+                vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
             },
             .messageType
             {
                 vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
                 vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
             },
             .pfnUserCallback{ &debug_callback },
             .pUserData{ this }
@@ -238,7 +288,7 @@ namespace lgo {
         for (vk::raii::PhysicalDevice device : device_available)
         {
             vk::PhysicalDeviceProperties device_property{ device.getProperties() };
-            std::vector<vk::QueueFamilyProperties> device_queue_family{ device.getQueueFamilyProperties() };
+            std::vector<vk::QueueFamilyProperties2> device_queue_family{ device.getQueueFamilyProperties2() };
             std::vector<vk::ExtensionProperties> device_extension{ device.enumerateDeviceExtensionProperties() };
             auto device_feature
             {
@@ -250,29 +300,24 @@ namespace lgo {
                     vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 >()
             };
+            //This variable tracks whether "device" supports a queue family with graphics capability.
             if
             (
-                device_property.apiVersion < Vulkan_version_encode(0, 1, 4, 0) ||
-                std::ranges::all_of
+                device_property.apiVersion < Vulkan_version_encode(0, 1, 3, 0) ||
+                find_eligible_queue_family
                 (
-                    device_queue_family | std::ranges::views::enumerate,
-                    [&device] (const std::tuple<std::size_t, vk::QueueFamilyProperties>& pair) -> bool
-                    {
-                        auto [index, queue_family]{ pair };
-                        return
-                            (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) &&
-                            device.getSurfaceSupportKHR(index, *m_surface);
-                    }
-                ) ||
+                    device_queue_family,
+                    device
+                ) == device_queue_family.end() ||
                 std::ranges::any_of
                 (
                     extension_device,
-                    [device_extension] (const & extension)
+                    [device_extension] (const std::string& extension) -> bool
                     {
                         return std::ranges::all_of
                         (
                             device_extension,
-                            [extension] (const & device_extension)
+                            [extension] (const vk::ExtensionProperties& device_extension) -> bool
                             {
                                 return device_extension.extensionName != extension;
                             }
@@ -281,6 +326,7 @@ namespace lgo {
                 ) ||
                 !device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters ||
                 !device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
+                !device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
                 !device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState
             ) {
                 continue;
@@ -298,26 +344,30 @@ namespace lgo {
         }
         else
         {
-            m_device_physical = *device_score.rbegin();
+            m_device_physical = device_score.rbegin()->second;
         }
 
         //Create a logical device.
         std::vector<vk::QueueFamilyProperties2> queue_family_arr{ m_device_physical.getQueueFamilyProperties2() };
         auto queue_family_iter
         {
-            std::ranges::find_if
+            find_eligible_queue_family
             (
                 queue_family_arr,
-                [m_device_physical&] (const vk::QueueFamilyProperties2& queue_family) -> bool
-                {
-                    return
-                        (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) &&
-                        m_device_physical.getSurfaceSupportKHR(index, *m_surface);
-                }
+                m_device_physical
             )
         };
         float queue_priority{ 1.0 };
-        std::uint32_t queue_family_index{ std::ranges::distance(queue_family_arr.begin(), queue_family_iter) };
+        std::uint32_t queue_family_index
+        {
+            static_cast<std::uint32_t>(
+                std::ranges::distance
+                (
+                    queue_family_arr.begin(),
+                    queue_family_iter
+                )
+            )
+        };
         vk::DeviceQueueCreateInfo device_queue
         {
             .queueFamilyIndex{ queue_family_index },
@@ -333,6 +383,7 @@ namespace lgo {
             },
             vk::PhysicalDeviceVulkan13Features
             {
+                .synchronization2{ true },
                 .dynamicRendering{ true }
             },
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
@@ -340,83 +391,104 @@ namespace lgo {
                 .extendedDynamicState{ true }
             }
         };
-        std::vector<const char*> extension_cstr_arr
+        std::vector<const char*> extension_device_cstr_arr
         {
             std::from_range_t{},
-            extension | std::ranges::views::transform([] (const std::string& str) -> const char*
-            {
-                return str.c_str();
-            })
+            extension_device |
+            std::ranges::views::transform
+            (
+                [] (const std::string& str) -> const char*
+                {
+                    return str.c_str();
+                }
+            )
         };
         vk::DeviceCreateInfo device_info
         {
             .pNext{ &feature.get<vk::PhysicalDeviceFeatures2>() },
             .queueCreateInfoCount{ 1 },
-            .ppQueueCreateInfos{ &device_queue },
-            .enabledExtensionCount{ extension_cstr_arr.size() },
-            .ppEnabledExtensionNames{ extension_cstr_arr.data() }
+            .pQueueCreateInfos{ &device_queue },
+            .enabledExtensionCount{ static_cast<std::uint32_t>(extension_device_cstr_arr.size()) },
+            .ppEnabledExtensionNames{ extension_device_cstr_arr.data() }
         };
         m_device = vk::raii::Device{ m_device_physical, device_info };
 
         //Create a queue.
-        m_queue = vk::raii::Queue{ device, queue_family_index, 0 };
+        m_command_queue = vk::raii::Queue{ m_device, queue_family_index, 0 };
 
         //Create a swapchain.
-        std::vector<vk::SurfaceFormatKHR> surface_format_arr{ m_device_physical.getSurfaceFormats2KHR(*m_surface) };
+        vk::PhysicalDeviceSurfaceInfo2KHR surface_info
+        {
+            .surface{ *m_surface }
+        };
+        std::vector<vk::SurfaceFormat2KHR> surface_format_arr
+        {
+            m_device_physical.getSurfaceFormats2KHR(surface_info)
+        };
         auto surface_format_it
         {
             std::ranges::find_if
             (
                 surface_format_arr,
-                [] (vk::SurfaceFormatKHR format) -> bool
+                [] (vk::SurfaceFormat2KHR format) -> bool
                 {
-                    return format.format == vk::Format::eB8G8R8A8Srgb && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear;
+                    return format.surfaceFormat.format == vk::Format::eB8G8R8A8Srgb &&
+                        format.surfaceFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear;
                 }
             )
         };
-        vk::SurfaceFormatKHR surface_format{ *surface_format_it };
-        std::vector<vk::PresentModeKHR> surface_present_mode_arr{ m_device_physical.getSurfacePresentModesKHR(*m_surface) };
+        vk::SurfaceFormat2KHR surface_format{ *surface_format_it };
+        std::vector<vk::PresentModeKHR> surface_present_mode_arr
+        {
+            m_device_physical.getSurfacePresentModesKHR(*m_surface)
+        };
         //The vk::PresentModeKHR::eFifo mode is guaranteed to be available.
         vk::PresentModeKHR surface_present_mode{ vk::PresentModeKHR::eFifo };
-        vk::SurfaceCapabilitiesKHR surface_capability{ m_device_physical.getSurfaceCapabilities2KHR(*m_surface) };
-        vk::Extent2D extent{};
-        if (surface_capability.currentExtent.width == std::numeric_limits<std::uint32_t>::max())
+        vk::SurfaceCapabilities2KHR surface_capability
+        {
+            m_device_physical.getSurfaceCapabilities2KHR(surface_info)
+        };
+        if (surface_capability.surfaceCapabilities.currentExtent.width == std::numeric_limits<std::uint32_t>::max())
         {
             int width{}, height{};
             glfwGetFramebufferSize(m_window, &width, &height);
-            extent.width = std::clamp
+            m_swap_chain_extent.width = std::clamp
             (
-                width,
-                surface_capability.minImageExtent.width,
-                surface_capability.maxImageExtent.width
+                static_cast<std::uint32_t>(width),
+                surface_capability.surfaceCapabilities.minImageExtent.width,
+                surface_capability.surfaceCapabilities.maxImageExtent.width
             );
-            extent.height = std::clamp
+            m_swap_chain_extent.height = std::clamp
             (
-                height,
-                surface_capability.minImageExtent.height,
-                surface_capability.maxImageExtent.height
+                static_cast<std::uint32_t>(height),
+                surface_capability.surfaceCapabilities.minImageExtent.height,
+                surface_capability.surfaceCapabilities.maxImageExtent.height
             );
         }
         else
         {
-            extent = surface_capability.currentExtent;
+            m_swap_chain_extent = surface_capability.surfaceCapabilities.currentExtent;
         }
-        std::uint32_t image_count_min{ surface_capability.minImageCount + 1 };
-        if (surface_capability.maxImageCount && (image_count_min > surface_capability.maxImageCount))
+        std::uint32_t image_count_min{ surface_capability.surfaceCapabilities.minImageCount + 1 };
+        if
+        (
+            surface_capability.surfaceCapabilities.maxImageCount &&
+            (image_count_min > surface_capability.surfaceCapabilities.maxImageCount)
+        )
         {
-            image_count_min = surface_capability.maxImageCount;
+            image_count_min = surface_capability.surfaceCapabilities.maxImageCount;
         }
         vk::SwapchainCreateInfoKHR swapchain_info
         {
             .surface{ *m_surface },
             .minImageCount{ image_count_min },
-            .imageFormat{ surface_format.format },
-            .imageColorSpace{ surface_format.colorSpace },
-            .imageExtent{ extent },
+            .imageFormat{ surface_format.surfaceFormat.format },
+            .imageColorSpace{ surface_format.surfaceFormat.colorSpace },
+            .imageExtent{ m_swap_chain_extent },
             .imageArrayLayers{ 1 },
             .imageUsage{ vk::ImageUsageFlagBits::eColorAttachment },
             .imageSharingMode{ vk::SharingMode::eExclusive },
-            .preTransform{ surface_capability.currentTransform },
+            .preTransform{ surface_capability.surfaceCapabilities.currentTransform },
             .compositeAlpha{ vk::CompositeAlphaFlagBitsKHR::eOpaque },
             .presentMode{ surface_present_mode },
             .clipped{ true },
@@ -429,7 +501,7 @@ namespace lgo {
         vk::ImageViewCreateInfo image_view_info
         {
             .viewType{ vk::ImageViewType::e2D },
-            .format{ surface_format.format },
+            .format{ surface_format.surfaceFormat.format },
             .subresourceRange
             {
                 .aspectMask{ vk::ImageAspectFlagBits::eColor },
@@ -446,7 +518,7 @@ namespace lgo {
         }
 
         //Create shader module.
-        std::vector<unsigned char> shader_code{ get_file("slang.spv") };
+        std::vector<unsigned char> shader_code{ get_file("shader.spv") };
         //The default allocator of std::vector already ensures that the data satisfies the alignment requirements of uint32_t.
         vk::ShaderModuleCreateInfo shader_module_info
         {
@@ -458,17 +530,21 @@ namespace lgo {
         //Create graphics pipeline.
         auto shader_stage
         {
-            std::make_array<vk::PipelineShaderStageCreateInfo>(
-            {
-                .stage{ vk::ShaderStageFlagBits::eVertex },
-                .module{ shader_module },
-                .pName{ "vertex_main" }
-            },
-            {
-                .stage{ vk::ShaderStageFlagBits::eFragment },
-                .module{ shader_module },
-                .pName{ "fragment_main" }
-            })
+            std::to_array<vk::PipelineShaderStageCreateInfo>
+            (
+                {
+                    {
+                        .stage{ vk::ShaderStageFlagBits::eVertex },
+                        .module{ shader_module },
+                        .pName{ "vertex_main" }
+                    },
+                    {
+                        .stage{ vk::ShaderStageFlagBits::eFragment },
+                        .module{ shader_module },
+                        .pName{ "fragment_main" }
+                    }
+                }
+            )
         };
         std::vector<vk::DynamicState> dynamic_state_arr
         {
@@ -478,7 +554,7 @@ namespace lgo {
         vk::PipelineDynamicStateCreateInfo dynamic_state_info
         {
             .dynamicStateCount{ static_cast<std::uint32_t>(dynamic_state_arr.size()) },
-            .pDynamicStates{ dynamic_state_arr.data()  }
+            .pDynamicStates{ dynamic_state_arr.data() }
         };
         vk::PipelineVertexInputStateCreateInfo vertex_input_info{};
         vk::PipelineInputAssemblyStateCreateInfo input_assembly
@@ -489,15 +565,15 @@ namespace lgo {
         {
             .x{ 0.0f },
             .y{ 0.0f },
-            .width{ static_cast<float>(swapChainExtent.width) },
-            .height{ static_cast<float>(swapChainExtent.height) },
+            .width{ static_cast<float>(m_swap_chain_extent.width) },
+            .height{ static_cast<float>(m_swap_chain_extent.height) },
             .minDepth{ 0.0f },
             .maxDepth{ 1.0f }
         };
         vk::Rect2D scissor
         {
             .offset{ 0, 0 },
-            .extent{ extent }
+            .extent{ m_swap_chain_extent }
         };
         vk::PipelineViewportStateCreateInfo viewport_state
         {
@@ -510,7 +586,7 @@ namespace lgo {
             .rasterizerDiscardEnable{ vk::False },
             .polygonMode{ vk::PolygonMode::eFill },
             .cullMode{ vk::CullModeFlagBits::eBack },
-            .frontFace{ vk::FrontFace::eCounterclockwise },
+            .frontFace{ vk::FrontFace::eCounterClockwise },
             .depthBiasEnable{ vk::False },
             .lineWidth{ 1.0f }
         };
@@ -550,24 +626,29 @@ namespace lgo {
         pipeline_info
         {
             {
-                .stageCount{ shader_stage.size() },
+                .stageCount{ static_cast<std::uint32_t>(shader_stage.size()) },
                 .pStages{ shader_stage.data() },
-                .pVertexInputState{ &vertexInputInfo },
-                .pInputAssemblyState{ &inputAssembly },
-                .pViewportState{ &viewportState },
-                .pRasterizationState{ &rasterizer },
-                .pMultisampleState{ &multisampling },
-                .pColorBlendState{ &colorBlending },
-                .pDynamicState{ &dynamicState },
+                .pVertexInputState{ &vertex_input_info },
+                .pInputAssemblyState{ &input_assembly },
+                .pViewportState{ &viewport_state },
+                .pRasterizationState{ &rasterization },
+                .pMultisampleState{ &multisample },
+                .pColorBlendState{ &color_blend },
+                .pDynamicState{ &dynamic_state_info },
                 .layout{ m_pipeline_layout },
                 .renderPass{ nullptr }
             },
             {
                 .colorAttachmentCount{ 1 },
-                .pColorAttachmentFormats{ &swapChainSurfaceFormat.format }
+                .pColorAttachmentFormats{ &surface_format.surfaceFormat.format }
             }
         };
-        m_pipeline = vk::raii::Pipeline{ m_device, nullptr, pipeline_info.get<vk::GraphicsPipelineCreateInfo>() };
+        m_pipeline = vk::raii::Pipeline
+        {
+            m_device,
+            nullptr,
+            pipeline_info.get<vk::GraphicsPipelineCreateInfo>()
+        };
 
         //Create a command pool.
         vk::CommandPoolCreateInfo command_pool_info
@@ -584,40 +665,30 @@ namespace lgo {
             .level{ vk::CommandBufferLevel::ePrimary },
             .commandBufferCount{ 1 }
         };
-        m_command_buffer = std::move(vk::raii::CommandBuffers{ device, allocInfo }.front());
+        m_command_buffer = std::move(vk::raii::CommandBuffers{ m_device, command_buffer_info }.front());
 
-        //Create semaphores.
-        m_semaphore_image = vk::raii::Semaphore{ m_device, vk::SemaphoreCreateInfo{} };
-        m_semaphore_draw = vk::raii::Semaphore{ m_device, vk::SemaphoreCreateInfo{} };
-
-        //Create a fence.
-        m_fence = vk::raii::Fence
+        //Create semaphores and a fence.
+        for (int i{ 0 }; i < m_swap_chain_image.size(); ++i)
         {
-            m_device,
+            m_semaphore_image.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+            m_semaphore_draw.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+        }
+        m_fence =
+            vk::raii::Fence
             {
-                .flags{ vk::FenceCreateFlagBits::eSignaled }
-            }
-        };
-
+                m_device,
+                {
+                    .flags{ vk::FenceCreateFlagBits::eSignaled }
+                }
+            };
         return;
     }
 
     engine_t::~engine_t() {
         m_device.waitIdle();
-        rect_primitive_t::uninit();
+        //rect_primitive_t::uninit();
         glfwDestroyWindow(m_window);
         glfwTerminate();
-        log_info_queue();
-        return;
-    }
-
-    auto engine_t::flush() -> void {
-        m_command_queue.flush();
-        return;
-    }
-
-    auto engine_t::redraw() -> void {
-        InvalidateRect(m_window, nullptr, false);
         return;
     }
 
@@ -625,18 +696,28 @@ namespace lgo {
         glfwPollEvents();
 
         //Acquire next image.
-		if (m_device.waitForFences(*drawFence, vk::True, std::numeric_limits<std::uint64_t>::max()) != vk::Result::eSuccess)
+		if
+        (
+            m_device.waitForFences
+            (
+                *m_fence,
+                vk::True,
+                std::numeric_limits<std::uint64_t>::max()
+            ) !=
+            vk::Result::eSuccess
+        )
 		{
 			throw;
 		}
-		device.resetFences(*drawFence);
+		m_device.resetFences(*m_fence);
+        std::size_t semaphore_index{ m_frame_number % m_swap_chain_image.size() };
         auto [result, image_index]
         {
             m_swap_chain.acquireNextImage
             (
                 std::numeric_limits<std::uint64_t>::max(),
-                *m_semaphore_image,
-                VK_NULL_HANDLE
+                *m_semaphore_image[semaphore_index],
+                nullptr
             )
         };
 
@@ -718,32 +799,28 @@ namespace lgo {
         const vk::SubmitInfo submit_info
         {
             .waitSemaphoreCount{ 1 },
-            .pWaitSemaphores{ &*m_semaphore_image },
+            .pWaitSemaphores{ &*m_semaphore_image[semaphore_index] },
             .pWaitDstStageMask{ &stage_wait },
             .commandBufferCount{ 1 },
             .pCommandBuffers{ &*m_command_buffer },
             .signalSemaphoreCount{ 1 },
-            .pSignalSemaphores{ &*m_semaphore_draw }
+            .pSignalSemaphores{ &*m_semaphore_draw[semaphore_index] }
         };
-        m_queue.submit(submit_info, *m_fence);
+        m_command_queue.submit(submit_info, *m_fence);
 
         //Present the image.
         const vk::PresentInfoKHR present_info
         {
             .waitSemaphoreCount{ 1 },
-            .pWaitSemaphores{ &*m_semaphore_draw },
+            .pWaitSemaphores{ &*m_semaphore_draw[semaphore_index] },
             .swapchainCount{ 1 },
             .pSwapchains{ &*m_swap_chain },
             .pImageIndices{ &image_index }
         };
-        result = m_queue.presentKHR(present_info);
-
+        result = m_command_queue.presentKHR(present_info);
+        
+        ++m_frame_number;
         return glfwWindowShouldClose(m_window);
-    }
-
-    auto engine_t::log_info_queue() -> void {
-        ::log_info_queue(m_info_queue);
-        return;
     }
 
     auto engine_t::set_exit() -> void {
@@ -764,21 +841,20 @@ namespace lgo {
     }
 
     auto engine_t::get_cursor_pos() -> pos_2D {
-        POINT cursor_pos{};
-        GetCursorPos(&cursor_pos);
-        ScreenToClient(m_window, &cursor_pos);
-        return pos_2D{ cursor_pos.x, cursor_pos.y };
+        double cursor_pos_x_double{}, cursor_pos_y_double{};
+        glfwGetCursorPos(m_window, &cursor_pos_x_double, &cursor_pos_y_double);
+        return pos_2D{ static_cast<int64_t>(cursor_pos_x_double), static_cast<int64_t>(cursor_pos_y_double) };
     }
 
-    auto engine_t::device_get() const -> Microsoft::WRL::ComPtr<ID3D12Device2> {
+    auto engine_t::device_get() -> vk::raii::Device& {
         return m_device;
     }
 
-    auto engine_t::command_queue_get() -> command_queue_t& {
+    auto engine_t::command_queue_get() -> vk::raii::Queue& {
         return m_command_queue;
     }
 
-    auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t* {
+    /*auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t* {
         rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color, name } };
         std::unique_lock lock{ m_rect_mutex };
         m_rect_primitive.emplace(out);
@@ -803,7 +879,7 @@ namespace lgo {
         delete in;
         redraw();
         return;
-    }
+    }*/
 
     auto engine_t::add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>* {
         std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };

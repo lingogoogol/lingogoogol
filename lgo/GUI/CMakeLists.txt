@@ -1,4 +1,4 @@
-add_library(lgo.GUI OBJECT)
+add_library(lgo.GUI STATIC)
 
 target_sources(
     lgo.GUI
@@ -15,6 +15,7 @@ target_link_libraries(
     lgo.GUI
     PRIVATE
         common
+    PUBLIC
         lgo.GUI.misc
         lgo.GUI.engine
 )

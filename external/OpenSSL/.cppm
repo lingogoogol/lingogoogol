@@ -8,7 +8,8 @@ export module external.OpenSSL;
 constexpr auto EVP_PKEY_KEYPAIR_export{ EVP_PKEY_KEYPAIR };
 #undef EVP_PKEY_KEYPAIR
 
-export {
+export
+{
     using ::OSSL_DECODER_CTX;
     using ::EVP_PKEY;
     using ::EVP_PKEY_CTX;

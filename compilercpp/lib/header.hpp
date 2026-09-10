@@ -10,31 +10,15 @@
 #include <DirectXMath.h>
 #include <dwrite_3.h>
 #include <dxgi1_6.h>
-#include <shellapi.h>
-#include <ShObjIdl.h>
-#include <objbase.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#undef min
-#undef max
-#undef WIN32_LEAN_AND_MEAN
-#undef near
-#undef far
-#undef interface
-
-#pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "freetyped.lib")
-#pragma comment(lib, "libssl.lib")
-#pragma comment(lib, "libcrypto.lib")
-#pragma comment(lib, "libcurl.lib")
 #pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "Crypt32.lib")
-#pragma comment(lib, "Ole32.lib")
 
 #endif

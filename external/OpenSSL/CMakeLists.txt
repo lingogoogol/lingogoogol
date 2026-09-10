@@ -1,4 +1,4 @@
-add_library(external.OpenSSL OBJECT)
+add_library(external.OpenSSL STATIC)
 
 target_sources(
     external.OpenSSL
@@ -12,4 +12,6 @@ target_link_libraries(
     external.OpenSSL
     PRIVATE
         common
+        libssl.lib
+        libcrypto.lib
 )

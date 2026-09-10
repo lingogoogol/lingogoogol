@@ -13,7 +13,8 @@ constexpr auto CRYPT_STRING_NOCRLF_export{ CRYPT_STRING_NOCRLF };
 constexpr auto CRYPT_STRING_BASE64_export{ CRYPT_STRING_BASE64 };
 #undef CRYPT_STRING_BASE64
 
-export {
+export
+{
     using ::CryptBinaryToStringA;
     using ::CryptStringToBinaryA;
 

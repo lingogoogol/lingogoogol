@@ -1,4 +1,4 @@
-add_library(storage.multipart OBJECT)
+add_library(storage.multipart STATIC)
 
 target_sources(
     storage.multipart
@@ -12,6 +12,7 @@ target_link_libraries(
     storage.multipart
     PRIVATE
         common
+    PUBLIC
         external.curl
         lgo.dev.error
         lgo.io.file

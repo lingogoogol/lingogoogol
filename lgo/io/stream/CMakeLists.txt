@@ -1,4 +1,4 @@
-add_library(lgo.io.stream OBJECT)
+add_library(lgo.io.stream STATIC)
 
 target_sources(
     lgo.io.stream

@@ -1,4 +1,4 @@
-add_library(lgo.container OBJECT)
+add_library(lgo.container STATIC)
 
 target_sources(
     lgo.container
@@ -14,5 +14,6 @@ target_link_libraries(
     lgo.container
     PRIVATE
         common
+    PUBLIC
         lgo.container.str
 )

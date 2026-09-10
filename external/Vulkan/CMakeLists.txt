@@ -1,4 +1,4 @@
-add_library(external.Vulkan OBJECT)
+add_library(external.Vulkan STATIC)
 
 find_package(Vulkan REQUIRED)
 
