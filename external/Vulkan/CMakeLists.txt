@@ -30,5 +30,6 @@ target_sources(
 target_link_libraries(
     external.Vulkan
     PUBLIC
+        common
         Vulkan::Vulkan
 )

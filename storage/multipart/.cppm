@@ -51,7 +51,7 @@ export struct read_src_t
 export auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t
 {
 	auto src{ static_cast<read_src_t*>(src_void) };
-	size = std::min(size, src->m_data.size() - src->m_progress);
+	size = std::min(size, static_cast<std::size_t>(src->m_data.size() - src->m_progress));
 	for (std::size_t i{ 0 }; i < size; ++i)
     {
 		dest[i] = src->m_data[src->m_progress + i];

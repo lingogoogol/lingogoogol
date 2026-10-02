@@ -18,6 +18,7 @@ target_link_libraries(
         external.processenv
         external.shellapi
         lgo.container
+        lgo.math
         lgo.io
         lgo.GUI
         storage.multipart

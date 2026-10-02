@@ -1,19 +1,23 @@
 {
-	"folders": [
+	"folders":
+	[
 		{
 			"path": "."
 		}
 	],
-	"settings": {
+	"settings":
+	{
 		"C_Cpp.intelliSenseEngine": "disabled",
 		"C_Cpp.default.compilerPath": "C:/msys64/ucrt64/bin/g++.exe",
-		"C_Cpp.default.defines": [
+		"C_Cpp.default.defines":
+		[
 			"_DEBUG",
 			"UNICODE",
 			"_UNICODE"
 		],
 		"C_Cpp.default.intelliSenseMode": "windows-gcc-x64",
-		"C_Cpp.default.includePath": [
+		"C_Cpp.default.includePath":
+		[
 			"C:/lingogoogol/programming/include/",
 			"C:/lingogoogol/programming/source/",
 			"C:/lingogoogol/Application/vcpkg/installed/x64-windows/include/"
@@ -25,14 +29,16 @@
 		"terminal.integrated.mouseWheelScrollSensitivity": 0.2,
 		"terminal.integrated.cwd": "../",
 		"explorer.autoReveal": false,
-		"cmake.buildDirectory": "${workspaceFolder}/../build_${buildType}",
+		"cmake.buildDirectory": "${workspaceFolder}/../build/${buildKitTriple}_${buildType}",
 		"cmake.generator": "Ninja",
-		"cmake.debugConfig": {
+		"cmake.debugConfig":
+		{
 			"cwd": "${workspaceFolder}/../cwd/"
 		},
 		"window.zoomLevel": 1,
-		"clangd.arguments": [
-			"--compile-commands-dir=../build_Debug",
+		"clangd.arguments":
+		[
+			"--compile-commands-dir=../build/x64-win32-pe-mingw_Debug",
 			"--query-driver=C:/msys64/clang64/bin/clang.exe",
 			"--background-index",
 			"--clang-tidy",

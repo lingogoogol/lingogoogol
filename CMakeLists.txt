@@ -62,7 +62,7 @@ target_compile_options(
 target_link_options(
     common
     INTERFACE
-        /NODEFAULTLIB:LIBCMT
+        $<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB:LIBCMT>
 )
 
 set(VCPKG_STATIC_INCLUDE_DIR "C:/lingogoogol/application/vcpkg/installed/x64-windows-static/include")

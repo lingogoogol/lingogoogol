@@ -9,7 +9,10 @@ target_sources(
 )
 
 add_subdirectory(misc)
-add_subdirectory(engine)
+add_subdirectory(Vulkan)
+add_subdirectory(primitive)
+add_subdirectory(texture)
+add_subdirectory(font)
 
 target_link_libraries(
     lgo.GUI
@@ -17,5 +20,8 @@ target_link_libraries(
         common
     PUBLIC
         lgo.GUI.misc
-        lgo.GUI.engine
+        lgo.GUI.Vulkan
+        lgo.GUI.primitive
+        lgo.GUI.texture
+        lgo.GUI.font
 )

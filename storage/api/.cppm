@@ -1,3 +1,7 @@
+module;
+
+#include <nlohmann/json.hpp>
+
 export module storage.api;
 
 import std;
@@ -6,7 +10,6 @@ import external.Windows;
 import external.wincrypt;
 import external.OpenSSL;
 import external.curl;
-import external.nlohmann;
 
 import lgo.io.file;
 

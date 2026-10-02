@@ -17,7 +17,6 @@ target_link_libraries(
         external.wincrypt
         external.OpenSSL
         external.curl
-        external.nlohmann
         lgo.io.file
         storage.multipart
 )

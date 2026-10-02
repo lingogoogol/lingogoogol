@@ -8,6 +8,7 @@ import external.processenv;
 import external.shellapi;
 
 import lgo.container;
+import lgo.math;
 import lgo.io;
 import lgo.GUI;
 
@@ -140,7 +141,7 @@ public:
 		return m_result;
 	}
 
-	auto OnFileOk(IFileDialog* in) -> HRESULT override
+	auto __stdcall OnFileOk(IFileDialog* in) -> HRESULT override
 	{
 		IFileOpenDialog* dialog{};
 		in->QueryInterface(IID_PPV_ARGS0(&dialog), IID_PPV_ARGS1(&dialog));
@@ -161,15 +162,15 @@ public:
 		return S_OK;
 	}
 	
-	auto OnFolderChange(IFileDialog*) -> HRESULT override { return S_OK; }
-	auto OnFolderChanging(IFileDialog*, IShellItem*) -> HRESULT override { return S_OK; }
-	auto OnOverwrite(IFileDialog*, IShellItem*, FDE_OVERWRITE_RESPONSE*) -> HRESULT override { return S_OK; }
-	auto OnSelectionChange(IFileDialog*) -> HRESULT override { return S_OK; }
-	auto OnShareViolation(IFileDialog*, IShellItem*, FDE_SHAREVIOLATION_RESPONSE*) -> HRESULT override { return S_OK; }
-	auto OnTypeChange(IFileDialog*) -> HRESULT override { return S_OK; }
-	auto AddRef() -> ULONG override { return 0; }
-	auto Release() -> ULONG override { return 0; }
-	auto QueryInterface(REFIID, void**) -> HRESULT override { throw; }
+	auto __stdcall OnFolderChange(IFileDialog*) -> HRESULT override { return S_OK; }
+	auto __stdcall OnFolderChanging(IFileDialog*, IShellItem*) -> HRESULT override { return S_OK; }
+	auto __stdcall OnOverwrite(IFileDialog*, IShellItem*, FDE_OVERWRITE_RESPONSE*) -> HRESULT override { return S_OK; }
+	auto __stdcall OnSelectionChange(IFileDialog*) -> HRESULT override { return S_OK; }
+	auto __stdcall OnShareViolation(IFileDialog*, IShellItem*, FDE_SHAREVIOLATION_RESPONSE*) -> HRESULT override { return S_OK; }
+	auto __stdcall OnTypeChange(IFileDialog*) -> HRESULT override { return S_OK; }
+	auto __stdcall AddRef() -> ULONG override { return 0; }
+	auto __stdcall Release() -> ULONG override { return 0; }
+	auto __stdcall QueryInterface(REFIID, void**) -> HRESULT override { throw; }
 };
 
 struct loading_t
@@ -1953,13 +1954,13 @@ auto download(loading_list_t* list) -> void
 	return;
 }*/
 
-auto wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
+auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 {
 	lgo::init_logfile("logfile" + std::to_string(std::time(nullptr)) + ".txt");
     lgo::log_file("CWD:\n");
 	lgo::log_file("  " + std::filesystem::current_path().string() + "\n\n");
     /*init_directx();
-	freetype_t freetype{};
+	FreeType_t freetype{};
 	font_face_t::freetype_set(&freetype);
 	font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 12 };
 	font_preference_t::default_get().push_back(&font_face);*/
