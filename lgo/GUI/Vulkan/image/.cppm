@@ -37,7 +37,7 @@ export namespace lgo
         auto barrier
         (
             vk::raii::CommandBuffer& command_buffer,
-            vk::raii::Image& image,
+            vk::ImageAspectFlags aspect,
             vk::ImageLayout layout_old,
             vk::ImageLayout layout_new,
             vk::AccessFlags access_src,

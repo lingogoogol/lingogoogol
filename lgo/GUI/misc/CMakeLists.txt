@@ -6,6 +6,8 @@ target_sources(
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
 target_link_libraries(

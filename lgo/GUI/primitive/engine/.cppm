@@ -36,6 +36,8 @@ export namespace lgo
         vk::raii::SwapchainKHR m_swap_chain{ nullptr };
         std::vector<vk::Image> m_swap_chain_image{};
         std::vector<vk::raii::ImageView> m_swap_chain_image_view{};
+        image_t m_depth_image{};
+        image_view_t m_depth_image_view{};
         pipeline_state_t m_pipeline_state{};
         vk::raii::CommandPool m_command_pool{ nullptr };
         vk::raii::CommandBuffer m_command_buffer{ nullptr };
@@ -47,7 +49,7 @@ export namespace lgo
         bool m_initialized{ false };
         bool m_tearing_supported{};
         std::recursive_mutex m_rect_mutex{};
-        //std::set<rect_primitive_t*> m_rect_primitive{};//...
+        std::set<rect_primitive_t*> m_rect_primitive{};
 
         template<typename... t_arg>
         struct callback_set
@@ -103,6 +105,7 @@ export namespace lgo
         auto message_loop() -> bool;
         auto draw() -> void;
         auto flush() -> void;
+        auto log(std::uint32_t tab_count) const -> void;
 
         auto format_get() const -> vk::Format;
         auto set_exit() -> void;
@@ -113,23 +116,12 @@ export namespace lgo
         auto device_get() -> vk::raii::Device&;
         auto device_physical_get() -> vk::raii::PhysicalDevice&;
         auto command_queue_get() -> vk::raii::Queue&;
+        auto command_buffer_create() -> vk::raii::CommandBuffer;
+        auto window_get() -> GLFWwindow*;
 
-        /*auto add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t*;
-        auto add_rect
-        (
-            pos_2D pos,
-            size_2D size,
-            float depth,
-            pos_2D clip_pos,
-            size_2D clip_size,
-            const SRV_t& SRV,
-            pos_2D texture_pos,
-            size_2D texture_axis_x,
-            size_2D texture_axis_y,
-            std::string name
-        )
-        -> rect_primitive_t*;
-        auto remove_rect(rect_primitive_t* in) -> void;*///...
+        using rect_t = rect_primitive_t::ctor_t;
+        auto add_rect(const rect_t& rect) -> rect_primitive_t*;
+        auto remove_rect(rect_primitive_t* in) -> void;
 
         auto add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*;
         auto remove_mouse_move(std::function<void(pos_2D)>* in) -> void;

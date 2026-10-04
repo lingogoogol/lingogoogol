@@ -13,7 +13,7 @@ struct vertex_out_t
 };
 
 [[vk::binding(0, 0)]]
-uniform Sampler2D texture[];
+uniform Sampler2D texture;
 
 [shader("vertex")]
 vertex_out_t vertex_main(vertex_in_t input)
@@ -28,5 +28,5 @@ vertex_out_t vertex_main(vertex_in_t input)
 [shader("fragment")]
 float4 fragment_main(vertex_out_t input) : SV_Target
 {
-    return texture[input.texture_index].Sample(input.texcoord);
+    return float4(1.0, 1.0, 1.0, texture.Sample(input.texcoord).r);
 }

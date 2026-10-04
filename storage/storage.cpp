@@ -1,4 +1,6 @@
-﻿import std;
+﻿#include <nlohmann/json.hpp>
+
+import std;
 
 import external.curl;
 import external.Windows;
@@ -7,6 +9,7 @@ import external.objbase;
 import external.processenv;
 import external.shellapi;
 
+import lgo.dev;
 import lgo.container;
 import lgo.math;
 import lgo.io;
@@ -183,7 +186,7 @@ struct loading_t
 	std::atomic_uint64_t m_progress{ 0 };
 	std::uint64_t m_progress_bar_id{};
 };
-/*
+
 struct loading_folder_t
 {
 	std::string m_name{};
@@ -225,16 +228,16 @@ struct loading_list_t
 	std::shared_ptr<lgo::divy_soft_t> m_progress_bar_div{};
 	std::mutex m_mutex{};
 };
-*/
+
 auto message_loop
 (
-	lgo::engine_t* engine/*,
+	lgo::engine_t* engine,
 	loading_list_t* uploading_list,
-	loading_list_t* downloading_list*/
+	loading_list_t* downloading_list
 )
 -> bool
 {
-	/*std::unique_lock<std::mutex> upload_lock{ uploading_list->m_mutex };
+	std::unique_lock<std::mutex> upload_lock{ uploading_list->m_mutex };
 	if (!uploading_list->m_list.empty())
 	{
 		auto& uploading{ uploading_list->m_list.front() };
@@ -254,10 +257,10 @@ auto message_loop
 			downloading_list->m_list.pop_front();
 		}
 	}
-	download_lock.unlock();*/
+	download_lock.unlock();
 	return engine->message_loop();
 }
-/*
+
 auto dialog_file
 (
 	lgo::engine_t* engine,
@@ -853,8 +856,8 @@ auto file_upload_callback
 			progress_bar_div->add_object<lgo::divy_flex_soft_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
-				progress_bar_div->space_x(std_margin),
-				std_margin,
+				progress_bar_div->space_x(lgo::std_margin),
+				lgo::std_margin,
 				lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::bottom },
 				true
 			);
@@ -894,8 +897,8 @@ auto delete_all_confirm_callback
 			progress_bar_div->add_object<lgo::divy_flex_soft_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
-				progress_bar_div->space_x(std_margin),
-				std_margin,
+				progress_bar_div->space_x(lgo::std_margin),
+				lgo::std_margin,
 				lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::bottom },
 				true
 			);
@@ -1096,7 +1099,7 @@ auto list
 	{
 		if (i["type"] == "folder")
 		{
-			viewer_div->add_object<button_text_t<lgo::text_line_scroll_std_t>>
+			viewer_div->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
 				std::bind
@@ -1111,8 +1114,8 @@ auto list
 					downloading_list
 				),
 				"資料夾，名稱：" + i["name"].get<std::string>(),
-				std_white,
-				size_1D{ viewer_div->space_2D(std_margin).x }
+				lgo::std_white,
+				lgo::size_1D{ viewer_div->space_2D(lgo::std_margin).x }
 			);
 			viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>
 			(
@@ -1129,12 +1132,12 @@ auto list
 				),
 				"下載",
 				lgo::std_white,
-				viewer_div->space_x(std_margin)
+				viewer_div->space_x(lgo::std_margin)
 			);
 			viewer_div->add_object<lgo::std_linex_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
-				viewer_div->space_x(std_margin),
+				viewer_div->space_x(lgo::std_margin),
 				lgo::std_white
 			);
 		}
@@ -1146,7 +1149,7 @@ auto list
 				[] () {},
 				"檔案，名稱：" + i["name"].get<std::string>() + "，大小：" + std::to_string(i["size"].get<std::uint64_t>()),
 				lgo::std_white,
-				lgo::size_1D{ viewer_div->space_2D(std_margin).x }
+				lgo::size_1D{ viewer_div->space_2D(lgo::std_margin).x }
 			);
 			viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>
 			(
@@ -1163,12 +1166,12 @@ auto list
 				),
 				"下載",
 				lgo::std_white,
-				viewer_div->space_x(std_margin)
+				viewer_div->space_x(lgo::std_margin)
 			);
 			viewer_div->add_object<lgo::std_linex_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
-				viewer_div->space_x(std_margin),
+				viewer_div->space_x(lgo::std_margin),
 				lgo::std_white
 			);
 		}
@@ -1198,7 +1201,7 @@ auto home
 		state->add_object_shared<lgo::divy_hard_t>
 		(
 			lgo::depth_range_t{ 0.0f, 1.0f },
-			pos_2D{ 0, 0 },
+			lgo::pos_2D{ 0, 0 },
 			engine->get_window_size(),
 			lgo::size_1D{ 0 },
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
@@ -1258,7 +1261,7 @@ auto home
 	{
 		work_div->add_object_ghost_shared<lgo::divy_soft_t>
 		(
-			depth_range_t{ 0.0f, 0.5f },
+			lgo::depth_range_t{ 0.0f, 0.5f },
 			lgo::size_2D{ 0x100, work_div->space_y(lgo::std_margin).x },
 			lgo::std_margin,
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
@@ -1268,7 +1271,7 @@ auto home
 		work_div->add_object_ghost_shared<lgo::divy_soft_t>
 		(
 			lgo::depth_range_t{ 0.0f, 0.5f },
-			lgo::size_2D{ 0x100, work_div->space_y(std_margin).x },
+			lgo::size_2D{ 0x100, work_div->space_y(lgo::std_margin).x },
 			lgo::std_margin,
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::bottom },
 			true
@@ -1295,7 +1298,7 @@ auto home
 		work_div->add_object_shared<lgo::divy_soft_t>
 		(
 			lgo::depth_range_t{ 0.0f, 0.5f },
-			work_div->space_2D(std_margin),
+			work_div->space_2D(lgo::std_margin),
 			lgo::std_margin,
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
 		)
@@ -1306,9 +1309,9 @@ auto home
 		state->add_object_shared<lgo::divy_hard_t>
 		(
 			lgo::depth_range_t{ 0.0f, 1.0f },
-			pos_2D{ 0, 0 },
+			lgo::pos_2D{ 0, 0 },
 			engine->get_window_size(),
-			size_1D{ 0 },
+			lgo::size_1D{ 0 },
 			lgo::alignment_2D{ lgo::alignment_x::center, lgo::alignment_y::center }
 		)
 	};
@@ -1362,7 +1365,10 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 		if (!list->m_list_process.empty())
 		{
 			auto obj_ptr{ list->m_list_process.begin()->get() };
-			auto progress_bar_div{ list->m_progress_bar_div->get_object_shared<divy_flex_soft_t>(obj_ptr->m_progress_bar_id) };
+			auto progress_bar_div
+			{
+				list->m_progress_bar_div->get_object_shared<lgo::divy_flex_soft_t>(obj_ptr->m_progress_bar_id)
+			};
 			progress_bar_div->add_object<lgo::std_linex_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
@@ -1740,8 +1746,8 @@ auto file_download
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
 				"檔案：0B/?B " + file.string(),
-				std_green_light,
-				size_1D{ 0x100 }
+				lgo::std_green_light,
+				lgo::size_1D{ 0x100 }
 			);
 		lock.unlock();
 	}
@@ -1826,12 +1832,15 @@ auto download(loading_list_t* list) -> void
 		if (!list->m_list_process.empty())
 		{
 			auto obj_ptr{ list->m_list_process.begin()->get() };
-			auto progress_bar_div{ list->m_progress_bar_div->get_object_shared<lgo::divy_flex_soft_t>(obj_ptr->m_progress_bar_id) };
+			auto progress_bar_div
+			{
+				list->m_progress_bar_div->get_object_shared<lgo::divy_flex_soft_t>(obj_ptr->m_progress_bar_id)
+			};
 			progress_bar_div->add_object<lgo::std_linex_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.5f },
-				progress_bar_div->space_x(std_margin),
-				std_white
+				progress_bar_div->space_x(lgo::std_margin),
+				lgo::std_white
 			);
 			if (obj_ptr->m_type == "file")
 			{
@@ -1952,23 +1961,21 @@ auto download(loading_list_t* list) -> void
 	}
 	curl_easy_cleanup(curl_download());
 	return;
-}*/
+}
 
 auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 {
-	lgo::init_logfile("logfile" + std::to_string(std::time(nullptr)) + ".txt");
+	lgo::init_logfile("./logfile/" + std::to_string(std::time(nullptr)) + ".txt");
     lgo::log_file("CWD:\n");
 	lgo::log_file("  " + std::filesystem::current_path().string() + "\n\n");
-    /*init_directx();
-	FreeType_t freetype{};
-	font_face_t::freetype_set(&freetype);
-	font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 12 };
-	font_preference_t::default_get().push_back(&font_face);*/
+	lgo::FreeType_t freetype{};
+	lgo::font_face_t::freetype_set(&freetype);
+	lgo::font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 12 };
+	lgo::font_preference_t::default_get().push_back(&font_face);
     lgo::engine_t engine{ lgo::size_2D{ 0x600, 0x400 }, "wWinMain.engine" };
-    /*text_line_t::init_global(engine.device_get());
-    depth_tracker_t depth_tracker{};
-    state_t state{ &engine, &depth_tracker };
-	loading_list_t uploading_list{}, downloading_list{};*/
+    lgo::depth_tracker_t depth_tracker{};
+    lgo::state_t state{ &engine, &depth_tracker };
+	loading_list_t uploading_list{}, downloading_list{};
     int argc{};
     CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argc > 1)
@@ -2009,20 +2016,29 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 		"-----END PRIVATE KEY-----\n"
 	);
 	{
-		//blob_empty_queue_t empty_blob{ "empty_blob", &account_main, &close_app };
-		//std::string pos{ folder_root_id };
-		//std::shared_ptr<divy_soft_t> upload_progress_bar_div{}, download_progress_bar_div{};
-		//home(&engine, &state, &upload_progress_bar_div, &download_progress_bar_div, &pos, &uploading_list, &downloading_list);
-		//std::thread thread_upload{ &upload, &uploading_list, &empty_blob }, thread_download{ &download, &downloading_list };
-		while (!message_loop(&engine/*, &uploading_list, &downloading_list*/)) {}
+		blob_empty_queue_t empty_blob{ "empty_blob", &account_main, &close_app };
+		std::string pos{ folder_root_id };
+		std::shared_ptr<lgo::divy_soft_t> upload_progress_bar_div{}, download_progress_bar_div{};
+		home
+		(
+			&engine,
+			&state,
+			&upload_progress_bar_div,
+			&download_progress_bar_div,
+			&pos,
+			&uploading_list,
+			&downloading_list
+		);
+		std::thread thread_upload{ &upload, &uploading_list, &empty_blob }, thread_download{ &download, &downloading_list };
+		while (!message_loop(&engine, &uploading_list, &downloading_list)) {}
 
-		//close_app = true;
-		//thread_upload.join();
-		//thread_download.join();
+		close_app = true;
+		thread_upload.join();
+		thread_download.join();
 	}
 	account_main.uninit();
 	free();
-    //state.clear_state();
+    state.clear_state();
     lgo::log_file("finished!\n");
     return 0;
 }

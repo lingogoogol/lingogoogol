@@ -19,7 +19,7 @@ namespace lgo
         return *m_module;
     }
 
-    auto shader_t::name_get() const -> std::string
+    auto shader_t::name_get() const -> const std::string&
     {
         return m_name;
     }

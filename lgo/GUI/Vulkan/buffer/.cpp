@@ -19,7 +19,7 @@ namespace lgo
         ctor_t ctor_copy{ ctor };
         if (ctor_copy.pixmap)
         {
-            ctor_copy.size = 4 * ctor_copy.pixmap->dim_get().x * ctor_copy.pixmap->dim_get().y;
+            ctor_copy.size = ctor_copy.pixmap->dim_get().x * ctor_copy.pixmap->dim_get().y;
             ctor_copy.usage = vk::BufferUsageFlagBits::eTransferSrc;
             ctor_copy.property = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
         }

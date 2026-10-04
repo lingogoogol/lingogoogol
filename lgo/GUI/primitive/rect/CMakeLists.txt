@@ -33,7 +33,9 @@ target_link_libraries(
         common
         lgo.GUI.primitive.def
         external.Vulkan
+        lgo.io.file
         lgo.math.vec
+        lgo.math.op
         lgo.GUI.misc
         lgo.GUI.Vulkan
 )

@@ -113,7 +113,13 @@ namespace lgo
     {
         get_logfile_path() = path;
         log_file(get_logfile_string());
+        std::filesystem::create_directories(std::filesystem::path{ path }.parent_path());
         return true;
+    }
+
+    auto tab(std::uint32_t count) -> std::string
+    {
+        return std::string( 4 * count, ' ' );
     }
 
     auto log_console(const std::string& in) -> void

@@ -98,6 +98,7 @@ export namespace lgo
         auto color_enable() -> void;
         auto texture_enable() -> void;
         auto inside(pos_2D pos) -> bool;
+        auto log(std::uint32_t tab_count) const -> void;
     private:
         auto render(vk::raii::CommandBuffer& command_buffer) -> void;
     };

@@ -2,10 +2,12 @@ export module lgo.math.vec;
 
 import std;
 
-export namespace lgo {
+export namespace lgo
+{
     class size_2D;
 
-    class pos_2D {
+    class pos_2D
+    {
     public:
         std::int64_t x{}, y{};
 
@@ -15,11 +17,13 @@ export namespace lgo {
         auto operator-(pos_2D pos) -> size_2D;
     };
 
-    struct size_1D {
+    struct size_1D
+    {
         std::int64_t x{};
     };
 
-    class size_2D {
+    class size_2D
+    {
     public:
         std::int64_t x{}, y{};
 
@@ -27,4 +31,8 @@ export namespace lgo {
         auto operator+(size_2D in) -> size_2D;
         auto operator-(size_2D in) -> size_2D;
     };
+
+    auto to_string(pos_2D pos) -> std::string;
+    auto to_string(size_1D size) -> std::string;
+    auto to_string(size_2D size) -> std::string;
 }

@@ -47,7 +47,7 @@ namespace lgo
 
     auto font_face_t::leading_get() const -> std::int16_t
     {
-        return m_handle->height;
+        return m_handle->height >> 6;
     }
 
     auto font_face_t::ascender_get() const -> std::int16_t

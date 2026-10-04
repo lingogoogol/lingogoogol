@@ -17,7 +17,12 @@ namespace lgo
     auto image_t::init(const ctor_t& ctor) -> void
     {
         ctor_t ctor_copy{ ctor };
-        if (m_pixmap)
+        vk::raii::Buffer* buffer{};
+        if (ctor_copy.buffer)
+        {
+            buffer = &ctor_copy.buffer->interface_get();
+        }
+        if (ctor_copy.pixmap)
         {
             m_pixmap = ctor_copy.pixmap;
             m_buffer.init
@@ -28,9 +33,10 @@ namespace lgo
             });
             ctor_copy.width = static_cast<std::uint32_t>(ctor_copy.pixmap->dim_get().x);
             ctor_copy.height = static_cast<std::uint32_t>(ctor_copy.pixmap->dim_get().y);
-            ctor_copy.format = vk::Format::eR8Srgb;
+            ctor_copy.format = vk::Format::eR8Unorm;
             ctor_copy.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
             ctor_copy.property = vk::MemoryPropertyFlagBits::eDeviceLocal;
+            buffer = &m_buffer.interface_get();
         }
 
         m_name = ctor_copy.name;
@@ -56,50 +62,53 @@ namespace lgo
         });
         m_interface.bindMemory(*m_memory.interface_get(), 0);
 
-        barrier
-        (
-            *ctor_copy.command_buffer,
-            m_interface,
-            vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eTransferDstOptimal,
-            {},
-            vk::AccessFlagBits::eTransferWrite,
-            vk::PipelineStageFlagBits::eTopOfPipe,
-            vk::PipelineStageFlagBits::eTransfer
-        );
-        vk::BufferImageCopy region
+        if (buffer)
         {
-            .bufferOffset{ 0 },
-            .bufferRowLength{ 0 },
-            .bufferImageHeight{ 0 },
-            .imageSubresource
+            barrier
+            (
+                *ctor_copy.command_buffer,
+                vk::ImageAspectFlagBits::eColor,
+                vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal,
+                {},
+                vk::AccessFlagBits::eTransferWrite,
+                vk::PipelineStageFlagBits::eTopOfPipe,
+                vk::PipelineStageFlagBits::eTransfer
+            );
+            vk::BufferImageCopy region
             {
-                .aspectMask{ vk::ImageAspectFlagBits::eColor },
-                .mipLevel{ 0 },
-                .baseArrayLayer{ 0 },
-                .layerCount{ 1 }
-            },
-            .imageOffset{ 0, 0, 0 },
-            .imageExtent{ ctor_copy.width, ctor_copy.height, 1 }
-        };
-        ctor_copy.command_buffer->copyBufferToImage
-        (
-            m_buffer.interface_get(),
-            m_interface,
-            vk::ImageLayout::eTransferDstOptimal,
-            region
-        );
-        barrier
-        (
-            *ctor_copy.command_buffer,
-            m_interface,
-            vk::ImageLayout::eTransferDstOptimal,
-            vk::ImageLayout::eShaderReadOnlyOptimal,
-            vk::AccessFlagBits::eTransferWrite,
-            vk::AccessFlagBits::eShaderRead,
-            vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eFragmentShader
-        );
+                .bufferOffset{ 0 },
+                .bufferRowLength{ 0 },
+                .bufferImageHeight{ 0 },
+                .imageSubresource
+                {
+                    .aspectMask{ vk::ImageAspectFlagBits::eColor },
+                    .mipLevel{ 0 },
+                    .baseArrayLayer{ 0 },
+                    .layerCount{ 1 }
+                },
+                .imageOffset{ 0, 0, 0 },
+                .imageExtent{ ctor_copy.width, ctor_copy.height, 1 }
+            };
+            ctor_copy.command_buffer->copyBufferToImage
+            (
+                *buffer,
+                m_interface,
+                vk::ImageLayout::eTransferDstOptimal,
+                region
+            );
+            barrier
+            (
+                *ctor_copy.command_buffer,
+                vk::ImageAspectFlagBits::eColor,
+                vk::ImageLayout::eTransferDstOptimal,
+                vk::ImageLayout::eShaderReadOnlyOptimal,
+                vk::AccessFlagBits::eTransferWrite,
+                vk::AccessFlagBits::eShaderRead,
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eFragmentShader
+            );
+        }
 
         return;
     }
@@ -112,7 +121,7 @@ namespace lgo
     auto image_t::barrier
     (
         vk::raii::CommandBuffer& command_buffer,
-        vk::raii::Image& image,
+        vk::ImageAspectFlags aspect,
         vk::ImageLayout layout_old,
         vk::ImageLayout layout_new,
         vk::AccessFlags access_src,
@@ -130,15 +139,23 @@ namespace lgo
             .newLayout{ layout_new },
             .srcQueueFamilyIndex{ vk::QueueFamilyIgnored },
             .dstQueueFamilyIndex{ vk::QueueFamilyIgnored },
-            .image{ image },
+            .image{ m_interface },
             .subresourceRange
             {
-                .aspectMask{ vk::ImageAspectFlagBits::eColor },
+                .aspectMask{ aspect },
                 .levelCount{ 1 },
                 .layerCount{ 1 }
             }
         };
-        command_buffer.pipelineBarrier(stage_src, stage_dest, {}, {}, {}, barrier_v);
+        command_buffer.pipelineBarrier
+        (
+            stage_src,
+            stage_dest,
+            {},
+            {},
+            {},
+            barrier_v
+        );
         return;
     }
 }

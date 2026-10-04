@@ -5,3 +5,4 @@ export import lgo.GUI.Vulkan;
 export import lgo.GUI.primitive;
 export import lgo.GUI.texture;
 export import lgo.GUI.font;
+export import lgo.GUI.object;

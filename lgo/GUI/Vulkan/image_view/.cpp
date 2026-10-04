@@ -8,6 +8,12 @@ namespace lgo
 {
     image_view_t::image_view_t(const ctor_t& ctor)
     {
+        init(ctor);
+        return;
+    }
+    
+    auto image_view_t::init(const ctor_t& ctor) -> void
+    {
         vk::ImageViewCreateInfo info
         {
             .image{ *ctor.image },
@@ -15,7 +21,7 @@ namespace lgo
             .format{ ctor.format },
             .subresourceRange
             {
-                .aspectMask{ vk::ImageAspectFlagBits::eColor },
+                .aspectMask{ ctor.aspect },
                 .baseMipLevel{ 0 },
                 .levelCount{ 1 },
                 .baseArrayLayer{ 0 },
@@ -26,7 +32,7 @@ namespace lgo
         return;
     }
 
-    auto image_view_t::interface_get() -> vk::ImageView&
+    auto image_view_t::interface_get() -> vk::raii::ImageView&
     {
         return m_interface;
     }

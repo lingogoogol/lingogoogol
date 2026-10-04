@@ -13,6 +13,7 @@ add_subdirectory(Vulkan)
 add_subdirectory(primitive)
 add_subdirectory(texture)
 add_subdirectory(font)
+add_subdirectory(object)
 
 target_link_libraries(
     lgo.GUI
@@ -24,4 +25,5 @@ target_link_libraries(
         lgo.GUI.primitive
         lgo.GUI.texture
         lgo.GUI.font
+        lgo.GUI.object
 )

@@ -23,15 +23,7 @@ namespace lgo
 
     auto pipeline_state_t::shader_add(shader_t& shader) -> void
     {
-        m_shader.push_back
-        (
-            vk::PipelineShaderStageCreateInfo
-            {
-                .stage{ shader.stage_get() },
-                .module{ shader.module_get().interface_get() },
-                .pName{ shader.name_get().c_str() }
-            }
-        );
+        m_shader.push_back(shader);
         return;
     }
 
@@ -111,7 +103,7 @@ namespace lgo
             .depthClampEnable{ vk::False },
             .rasterizerDiscardEnable{ vk::False },
             .polygonMode{ vk::PolygonMode::eFill },
-            .cullMode{ vk::CullModeFlagBits::eBack },
+            .cullMode{ vk::CullModeFlagBits::eNone },
             .frontFace{ vk::FrontFace::eCounterClockwise },
             .depthBiasEnable{ vk::False },
             .lineWidth{ 1.0f }
@@ -123,7 +115,13 @@ namespace lgo
         };
         vk::PipelineColorBlendAttachmentState color_blend_arr
         {
-            .blendEnable{ vk::False },
+            .blendEnable{ vk::True },
+            .srcColorBlendFactor{ vk::BlendFactor::eSrcAlpha },
+            .dstColorBlendFactor{ vk::BlendFactor::eOneMinusSrcAlpha },
+            .colorBlendOp{ vk::BlendOp::eAdd },
+            .srcAlphaBlendFactor{ vk::BlendFactor::eZero },
+            .dstAlphaBlendFactor{ vk::BlendFactor::eOne },
+            .alphaBlendOp{ vk::BlendOp::eAdd },
             .colorWriteMask
             {
                 vk::ColorComponentFlagBits::eR |
@@ -132,6 +130,7 @@ namespace lgo
                 vk::ColorComponentFlagBits::eA
             }
         };
+        //the second method of blending (a bitwise combination)
         vk::PipelineColorBlendStateCreateInfo color_blend
         {
             .logicOpEnable{ vk::False },
@@ -145,6 +144,28 @@ namespace lgo
             .pushConstantRangeCount{ 0 }
         };
         m_pipeline_layout = vk::raii::PipelineLayout{ device, pipeline_layout_info };
+        std::vector<vk::PipelineShaderStageCreateInfo> shader_info{};
+        for (std::size_t i{ 0 }; i < m_shader.size(); ++i)
+        {
+            shader_info.push_back
+            (
+                vk::PipelineShaderStageCreateInfo
+                {
+                    .stage{ m_shader[i].stage_get() },
+                    .module{ m_shader[i].module_get().interface_get() },
+                    .pName{ m_shader[i].name_get().c_str() }
+                }
+            );
+        }
+        vk::PipelineDepthStencilStateCreateInfo depth_stencil
+        {
+            .depthTestEnable{ vk::True },
+            .depthWriteEnable{ vk::True },
+            .depthCompareOp{ vk::CompareOp::eLess },
+            .depthBoundsTestEnable{ vk::False },
+            .stencilTestEnable{ vk::False }
+        };
+
         vk::StructureChain
         <
             vk::GraphicsPipelineCreateInfo,
@@ -153,13 +174,14 @@ namespace lgo
         pipeline_info
         {
             {
-                .stageCount{ static_cast<std::uint32_t>(m_shader.size()) },
-                .pStages{ m_shader.data() },
+                .stageCount{ static_cast<std::uint32_t>(shader_info.size()) },
+                .pStages{ shader_info.data() },
                 .pVertexInputState{ &vertex_input_info },
                 .pInputAssemblyState{ &m_input_assembly },
                 .pViewportState{ &viewport_state },
                 .pRasterizationState{ &rasterization },
                 .pMultisampleState{ &multisample },
+                .pDepthStencilState{ &depth_stencil },
                 .pColorBlendState{ &color_blend },
                 .pDynamicState{ &dynamic_state_info },
                 .layout{ m_pipeline_layout },
@@ -167,7 +189,8 @@ namespace lgo
             },
             {
                 .colorAttachmentCount{ 1 },
-                .pColorAttachmentFormats{ &m_surface_format }
+                .pColorAttachmentFormats{ &m_surface_format },
+                .depthAttachmentFormat{ vk::Format::eD32Sfloat }
             }
         };
         m_interface = vk::raii::Pipeline

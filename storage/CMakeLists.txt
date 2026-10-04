@@ -17,6 +17,7 @@ target_link_libraries(
         external.objbase
         external.processenv
         external.shellapi
+        lgo.dev
         lgo.container
         lgo.math
         lgo.io

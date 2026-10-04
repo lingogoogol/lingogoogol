@@ -46,7 +46,7 @@ export namespace lgo
         std::string m_name{};
         vk::PipelineInputAssemblyStateCreateInfo m_input_assembly{};
         descriptor_set_layout_t* m_descriptor_set_layout{};
-        std::vector<vk::PipelineShaderStageCreateInfo> m_shader{};
+        std::vector<shader_t> m_shader{};
         std::vector<vk::VertexInputBindingDescription> m_vertex_binding{};
         std::vector<vk::VertexInputAttributeDescription> m_vertex_attribute{};
         vk::Format m_surface_format{};

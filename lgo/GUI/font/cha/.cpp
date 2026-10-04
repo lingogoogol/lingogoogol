@@ -76,7 +76,7 @@ namespace lgo
     {
         FT_Face face_handle{ m_face->handle_get() };
         FT_Load_Glyph(face_handle, index, FT_LOAD_RENDER);
-        m_advance.x = face_handle->glyph->advance.x;
+        m_advance.x = face_handle->glyph->advance.x >> 6;
         m_advance.y = 0;
         m_bbox_pos.x = face_handle->glyph->bitmap_left;
         m_bbox_pos.y = face_handle->glyph->bitmap_top - face_handle->glyph->bitmap.rows;

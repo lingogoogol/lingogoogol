@@ -4,6 +4,7 @@ import std;
 
 import external.Vulkan;
 
+import lgo.io.file;
 import lgo.math.vec;
 import lgo.math.op;
 import lgo.GUI.misc;
@@ -113,7 +114,7 @@ namespace lgo
         ({
             .name{ "rect_primitive_t::solid_pipeline_state" },
             .descriptor_set_layout{ &m_solid_descriptor_set_layout },
-            .topology{ vk::PrimitiveTopology::eTriangleList },
+            .topology{ vk::PrimitiveTopology::eTriangleStrip },
             .surface_format{ m_engine->format_get() }
         });
         m_solid_pipeline_state.vertex_binding_add
@@ -136,19 +137,19 @@ namespace lgo
             vk::Format::eR32G32B32Sfloat,
             16
         );
-        shader_module_t solid_shader_module{ engine->device_get(), "solid.slang" };
+        shader_module_t solid_shader_module{ engine->device_get(), "solid.spv" };
         shader_t solid_shader_vertex
         {
             vk::ShaderStageFlagBits::eVertex,
             &solid_shader_module,
-            "vertex"
+            "vertex_main"
         };
         m_solid_pipeline_state.shader_add(solid_shader_vertex);
         shader_t solid_shader_pixel
         {
             vk::ShaderStageFlagBits::eFragment,
             &solid_shader_module,
-            "fragment"
+            "fragment_main"
         };
         m_solid_pipeline_state.shader_add(solid_shader_pixel);
         m_solid_pipeline_state.serialize(m_engine->device_get());
@@ -165,7 +166,7 @@ namespace lgo
         ({
             .name{ "rect_primitive_t::texture_pipeline_state" },
             .descriptor_set_layout{ &m_texture_descriptor_set_layout },
-            .topology{ vk::PrimitiveTopology::eTriangleList },
+            .topology{ vk::PrimitiveTopology::eTriangleStrip },
             .surface_format{ m_engine->format_get() }
         });
         m_texture_pipeline_state.vertex_binding_add
@@ -186,28 +187,28 @@ namespace lgo
             1,
             0,
             vk::Format::eR32Uint,
-            16
+            12
         );
         m_texture_pipeline_state.vertex_attribute_add
         (
             2,
             0,
             vk::Format::eR32G32Sfloat,
-            24
+            16
         );
-        shader_module_t texture_shader_module{ engine->device_get(), "texture.slang" };
+        shader_module_t texture_shader_module{ engine->device_get(), "texture.spv" };
         shader_t texture_shader_vertex
         {
             vk::ShaderStageFlagBits::eVertex,
             &texture_shader_module,
-            "vertex"
+            "vertex_main"
         };
         m_texture_pipeline_state.shader_add(texture_shader_vertex);
         shader_t texture_shader_pixel
         {
             vk::ShaderStageFlagBits::eFragment,
             &texture_shader_module,
-            "fragment"
+            "fragment_main"
         };
         m_texture_pipeline_state.shader_add(texture_shader_pixel);
         m_texture_pipeline_state.serialize(engine->device_get());
@@ -222,10 +223,11 @@ namespace lgo
             .addressModeV{ vk::SamplerAddressMode::eRepeat },
             .addressModeW{ vk::SamplerAddressMode::eRepeat },
             .mipLodBias{ 0.0f },
-            .anisotropyEnable{ vk::True },
+            .anisotropyEnable{ vk::False },
             .maxAnisotropy{ device_physical_property.limits.maxSamplerAnisotropy },
             .compareEnable{ vk::False },
-            .compareOp{ vk::CompareOp::eAlways }
+            .compareOp{ vk::CompareOp::eAlways },
+            .unnormalizedCoordinates{ vk::False }
         };
         m_sampler = vk::raii::Sampler{ engine->device_get(), sampler_info };
 
@@ -292,7 +294,7 @@ namespace lgo
         {
             vk::DescriptorPoolSize descriptor_pool_size
             {
-                .type{ vk::DescriptorType::eUniformBuffer },
+                .type{ vk::DescriptorType::eCombinedImageSampler },
                 .descriptorCount{ 1 }
             };
             vk::DescriptorPoolCreateInfo descriptor_pool_info
@@ -390,6 +392,20 @@ namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         return ::lgo::inside(m_pos, m_size, pos);
+    }
+
+    auto rect_primitive_t::log(std::uint32_t tab_count) const -> void
+    {
+        log_file(tab(tab_count) + "{\n");
+        log_file(tab(tab_count + 1) + "type: rect_primitive_t\n");
+        log_file(tab(tab_count + 1) + "m_name: " + m_name + "\n");
+        log_file(tab(tab_count + 1) + "m_pos: " + to_string(m_pos) + "\n");
+        log_file(tab(tab_count + 1) + "m_size: " + to_string(m_size) + "\n");
+        log_file(tab(tab_count + 1) + "m_depth: " + std::to_string(m_depth) + "\n");
+        log_file(tab(tab_count + 1) + "m_texture_enable: " + std::to_string(m_texture_enable) + "\n");
+        log_file(tab(tab_count + 1) + "m_color: " + to_string(m_color) + "\n");
+        log_file(tab(tab_count) + "}\n");
+        return;
     }
 
     auto rect_primitive_t::render(vk::raii::CommandBuffer& command_buffer) -> void

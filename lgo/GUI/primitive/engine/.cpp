@@ -132,7 +132,7 @@ namespace lgo {
                 "        name: " + object_name + "\n"
             );
         }
-        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
+        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
         {
             throw;
         }
@@ -298,6 +298,7 @@ namespace lgo {
                 <
                     vk::PhysicalDeviceFeatures2,
                     vk::PhysicalDeviceVulkan11Features,
+                    vk::PhysicalDeviceVulkan12Features,
                     vk::PhysicalDeviceVulkan13Features,
                     vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 >()
@@ -327,6 +328,7 @@ namespace lgo {
                     }
                 ) ||
                 !device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters ||
+                !device_feature.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray ||
                 !device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
                 !device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
                 !device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState
@@ -382,6 +384,10 @@ namespace lgo {
             vk::PhysicalDeviceVulkan11Features
             {
                 .shaderDrawParameters{ true }
+            },
+            vk::PhysicalDeviceVulkan12Features
+            {
+                .runtimeDescriptorArray{ true }
             },
             vk::PhysicalDeviceVulkan13Features
             {
@@ -519,6 +525,25 @@ namespace lgo {
             m_swap_chain_image_view.emplace_back(m_device, image_view_info);
         }
 
+        //Create a depth buffer.
+        m_depth_image.init
+        ({
+            .device_physical{ &m_device_physical },
+            .device{ &m_device },
+            .width{ m_swap_chain_extent.width },
+            .height{ m_swap_chain_extent.height },
+            .format{ vk::Format::eD32Sfloat },
+            .usage{ vk::ImageUsageFlagBits::eDepthStencilAttachment },
+            .property{ vk::MemoryPropertyFlagBits::eDeviceLocal }
+        });
+        m_depth_image_view.init
+        ({
+            .device{ &m_device },
+            .image{ &m_depth_image.interface_get() },
+            .format{ vk::Format::eD32Sfloat },
+            .aspect{ vk::ImageAspectFlagBits::eDepth }
+        });
+
         //Create a command pool.
         vk::CommandPoolCreateInfo command_pool_info
         {
@@ -528,13 +553,8 @@ namespace lgo {
         m_command_pool = vk::raii::CommandPool{ m_device, command_pool_info };
 
         //Create a command buffer.
-        vk::CommandBufferAllocateInfo command_buffer_info
-        {
-            .commandPool{ m_command_pool },
-            .level{ vk::CommandBufferLevel::ePrimary },
-            .commandBufferCount{ 1 }
-        };
-        m_command_buffer = std::move(vk::raii::CommandBuffers{ m_device, command_buffer_info }.front());
+        m_command_buffer = command_buffer_create();
+        m_command_buffer.end();
 
         //Create semaphores and a fence.
         for (int i{ 0 }; i < m_swap_chain_image.size(); ++i)
@@ -550,12 +570,16 @@ namespace lgo {
                     .flags{ vk::FenceCreateFlagBits::eSignaled }
                 }
             };
+        
+        rect_primitive_t::init(this);
+        m_device.waitIdle();
         return;
     }
 
-    engine_t::~engine_t() {
+    engine_t::~engine_t()
+    {
         m_device.waitIdle();
-        //rect_primitive_t::uninit();
+        rect_primitive_t::uninit();
         glfwDestroyWindow(m_window);
         glfwTerminate();
         return;
@@ -608,14 +632,32 @@ namespace lgo {
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             vk::PipelineStageFlagBits2::eColorAttachmentOutput
         );
-        vk::ClearValue clear_color{ vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f) };
-        vk::RenderingAttachmentInfo attachment_info
+        m_depth_image.barrier
+        (
+            m_command_buffer,
+            vk::ImageAspectFlagBits::eDepth,
+            vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eDepthAttachmentOptimal,
+            vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+            vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+            vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+            vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests
+        );
+        vk::RenderingAttachmentInfo color_attachment_info
         {
             .imageView{ m_swap_chain_image_view[image_index] },
             .imageLayout{ vk::ImageLayout::eColorAttachmentOptimal },
             .loadOp{ vk::AttachmentLoadOp::eClear },
             .storeOp{ vk::AttachmentStoreOp::eStore },
-            .clearValue{ clear_color }
+            .clearValue{ vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f) }
+        };
+        vk::RenderingAttachmentInfo depth_attachment_info
+        {
+            .imageView{ m_depth_image_view.interface_get() },
+            .imageLayout{ vk::ImageLayout::eDepthAttachmentOptimal },
+            .loadOp{ vk::AttachmentLoadOp::eClear },
+            .storeOp{ vk::AttachmentStoreOp::eDontCare },
+            .clearValue{ vk::ClearDepthStencilValue(1.0f, 0) }
         };
         vk::RenderingInfo render_info
         {
@@ -626,7 +668,8 @@ namespace lgo {
             },
             .layerCount{ 1 },
             .colorAttachmentCount{ 1 },
-            .pColorAttachments{ &attachment_info }
+            .pColorAttachments{ &color_attachment_info },
+            .pDepthAttachment{ &depth_attachment_info }
         };
         m_command_buffer.beginRendering(render_info);
         m_command_buffer.setViewport
@@ -642,6 +685,9 @@ namespace lgo {
                 1.0f
             }
         );
+        std::unique_lock rect_lock{ m_rect_mutex };
+        rect_primitive_t::render(m_rect_primitive, m_command_buffer);
+        rect_lock.unlock();
         m_command_buffer.endRendering();
         transition_image_layout
         (
@@ -654,9 +700,6 @@ namespace lgo {
             vk::PipelineStageFlagBits2::eBottomOfPipe
         );
         m_command_buffer.end();
-        /*std::unique_lock rect_lock{ ptr->m_rect_mutex };
-        rect_primitive_t::render(ptr->m_rect_primitive, command_list);
-        rect_lock.unlock();*/
 
         //Submit the command buffer.
         vk::PipelineStageFlags stage_wait{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
@@ -690,6 +733,22 @@ namespace lgo {
     auto engine_t::flush() -> void
     {
         m_command_queue.waitIdle();
+        return;
+    }
+
+    auto engine_t::log(std::uint32_t tab_count) const -> void
+    {
+        log_file(tab(tab_count) + "{\n");
+        log_file(tab(tab_count + 1) + "type: engine_t\n");
+        log_file(tab(tab_count + 1) + "name: " + m_name + "\n");
+        log_file(tab(tab_count + 1) + "rect_primitive:\n");
+        log_file(tab(tab_count + 1) + "[\n");
+        for (auto i{ m_rect_primitive.begin() }; i != m_rect_primitive.end(); ++i)
+        {
+            (*i)->log(tab_count + 2);
+        }
+        log_file(tab(tab_count + 1) + "]\n");
+        log_file(tab(tab_count) + "}\n");
         return;
     }
 
@@ -730,6 +789,11 @@ namespace lgo {
     {
         return m_device;
     }
+    
+    auto engine_t::window_get() -> GLFWwindow*
+    {
+        return m_window;
+    }
 
     auto engine_t::device_physical_get() -> vk::raii::PhysicalDevice&
     {
@@ -741,32 +805,42 @@ namespace lgo {
         return m_command_queue;
     }
 
-    /*auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, color_t color, std::string name) -> rect_primitive_t* {
-        rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth, color, name } };
+    auto engine_t::command_buffer_create() -> vk::raii::CommandBuffer
+    {
+        vk::CommandBufferAllocateInfo command_buffer_info
+        {
+            .commandPool{ m_command_pool },
+            .level{ vk::CommandBufferLevel::ePrimary },
+            .commandBufferCount{ 1 }
+        };
+        vk::raii::CommandBuffer buffer
+        {
+            std::move(vk::raii::CommandBuffers{ m_device, command_buffer_info }.front())
+        };
+        vk::CommandBufferBeginInfo begin_info
+        {
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+        };
+		buffer.begin(begin_info);
+        return std::move(buffer);
+    }
+
+    auto engine_t::add_rect(const rect_t& rect) -> rect_primitive_t*
+    {
+        rect_primitive_t* out{ new rect_primitive_t{ rect } };
         std::unique_lock lock{ m_rect_mutex };
         m_rect_primitive.emplace(out);
-        redraw();
         return out;
     }
 
-    auto engine_t::add_rect(pos_2D pos, size_2D size, float depth, pos_2D clip_pos, size_2D clip_size
-    , const SRV_t& SRV, pos_2D texture_pos, size_2D texture_axis_x, size_2D texture_axis_y, std::string name) -> rect_primitive_t* {
-        rect_primitive_t* out{ new rect_primitive_t{ this, pos, size, depth
-        , clip_pos, clip_size, SRV, texture_pos, texture_axis_x, texture_axis_y, name } };
-        std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.emplace(out);
-        redraw();
-        return out;
-    }
-
-    auto engine_t::remove_rect(rect_primitive_t* in) -> void {
+    auto engine_t::remove_rect(rect_primitive_t* in) -> void
+    {
         std::unique_lock lock{ m_rect_mutex };
         m_rect_primitive.erase(in);
         flush();
         delete in;
-        redraw();
         return;
-    }*/
+    }
 
     auto engine_t::add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*
     {
