@@ -29,6 +29,12 @@ namespace lgo
         return m_name;
     }
 
+    auto GUI_object_t::name_set(std::string name) -> void
+    {
+        m_name = name;
+        return;
+    }
+
     auto GUI_object_t::set_size(size_2D size) -> void
     {
         std::unique_lock lock{ m_mutex };

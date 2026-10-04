@@ -27,7 +27,8 @@ namespace lgo
         pos_2D pos,
         std::string text,
         color_t color,
-        size_1D size_x
+        size_1D size_x,
+        bool load
     )
     :
         text_line_scroll_t
@@ -42,7 +43,8 @@ namespace lgo
             margin,
             font_preference_t::default_get(),
             color,
-            alignment_2D{ alignment_x::left, alignment_y::top }
+            alignment_2D{ alignment_x::left, alignment_y::top },
+            load
         }
     {}
 

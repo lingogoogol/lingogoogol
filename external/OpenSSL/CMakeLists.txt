@@ -12,6 +12,6 @@ target_link_libraries(
     external.OpenSSL
     PRIVATE
         common
-        libssl.lib
-        libcrypto.lib
+        libssl
+        libcrypto
 )

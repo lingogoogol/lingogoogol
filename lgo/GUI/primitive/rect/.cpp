@@ -276,8 +276,8 @@ namespace lgo
         m_pos{ ctor.pos },
         m_size{ ctor.size },
         m_depth{ ctor.depth },
-        m_clip_pos{ ctor.clip_pos ? ctor.clip_pos.value() : ctor.pos },
-        m_clip_size{ ctor.clip_size ? ctor.clip_size.value() : ctor.size },
+        m_clip_pos{ ctor.clip_pos },
+        m_clip_size{ ctor.clip_size },
         m_color{ ctor.color },
         m_image_view{ ctor.image_view },
         m_texture_pos{ ctor.texture_pos },
@@ -339,11 +339,9 @@ namespace lgo
     auto rect_primitive_t::set_pos(pos_2D pos) -> void
     {
         std::unique_lock lock{ m_mutex };
-        m_clip_pos = m_clip_pos + (pos - m_pos);
         m_pos = pos;
         m_engine->flush();
         upload_vertex_data();
-        m_engine->draw();
         return;
     }
 
@@ -429,13 +427,13 @@ namespace lgo
         {
             .offset
             {
-                .x{ static_cast<std::int32_t>(m_clip_pos.x) },
-                .y{ static_cast<std::int32_t>(m_clip_pos.y) }
+                .x{ static_cast<std::int32_t>(m_clip_pos ? m_clip_pos->x : 0) },
+                .y{ static_cast<std::int32_t>(m_clip_pos ? m_clip_pos->y : 0) }
             },
             .extent
             {
-                .width{ static_cast<std::uint32_t>(m_clip_size.x) },
-                .height{ static_cast<std::uint32_t>(m_clip_size.y) }
+                .width{ static_cast<std::uint32_t>(m_clip_size ? m_clip_size->x : m_engine->get_window_size().x) },
+                .height{ static_cast<std::uint32_t>(m_clip_size ? m_clip_size->y : m_engine->get_window_size().y) }
             }
         };
         command_buffer.setScissor(0, scissor_rect);

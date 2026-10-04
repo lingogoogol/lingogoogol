@@ -12,5 +12,5 @@ target_link_libraries(
     external.shellapi
     PRIVATE
         common
-        Shell32.lib
+        Shell32
 )

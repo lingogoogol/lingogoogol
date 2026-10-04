@@ -41,6 +41,109 @@ namespace lgo {
         return;
     }
 
+    auto engine_t::call_callback_none(std::function<void(void)>* callback) -> void
+    {
+        (*callback)();
+        return;
+    }
+
+    auto engine_t::call_callback_pos(std::function<void(pos_2D)>* callback, double x, double y) -> void
+    {
+        (*callback)(pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) });
+        return;
+    }
+
+    auto engine_t::call_callback_wheel
+    (
+        std::function<void(pos_2D, size_1D)>* callback,
+        double x,
+        double y,
+        double window_x,
+        double window_y
+    )
+    -> void
+    {
+        (*callback)
+        (
+            pos_2D{ static_cast<std::int64_t>(window_x), static_cast<std::int64_t>(window_y) },
+            size_1D{ static_cast<std::int64_t>(y / 120) }//...
+        );
+        return;
+    }
+
+    auto engine_t::call_callback_key(std::function<void(std::uint16_t)>* callback, int key) -> void
+    {
+        (*callback)(static_cast<std::uint16_t>(key));
+        return;
+    }
+
+    auto engine_t::call_callback_char(std::function<void(wchar_t)>* callback, char32_t cha) -> void {
+        (*callback)(static_cast<wchar_t>(cha));
+        return;
+    }
+    
+    auto engine_t::GLFW_callback_cursor_pos(GLFWwindow* window, double x, double y) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        call_callback(call_callback_pos, ptr->m_mouse_move, x, y);
+        return;
+    }
+
+    auto engine_t::GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        if (entered == GLFW_FALSE)
+        {
+            call_callback(call_callback_none, ptr->m_mouse_leave);
+        }
+        return;
+    }
+
+    auto engine_t::GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        double x{}, y{};
+        glfwGetCursorPos(window, &x, &y);
+        if (button == GLFW_MOUSE_BUTTON_LEFT)
+        {
+            if (action == GLFW_PRESS)
+            {
+                call_callback(call_callback_pos, ptr->m_mouse_left_click, x, y);
+            }
+            else if (action == GLFW_RELEASE)
+            {
+                call_callback(call_callback_pos, ptr->m_mouse_left_release, x, y);
+            }
+        }
+        return;
+    }
+
+    auto engine_t::GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        double window_x{}, window_y{};
+        glfwGetCursorPos(window, &window_x, &window_y);
+        call_callback(call_callback_wheel, ptr->m_mouse_scroll, x, y, window_x, window_y);
+        return;
+    }
+
+    auto engine_t::GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mod) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        if (action == GLFW_PRESS)
+        {
+            call_callback(call_callback_key, ptr->m_key_down, key);
+        }
+        return;
+    }
+
+    auto engine_t::GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        call_callback(call_callback_char, ptr->m_charw, static_cast<char32_t>(codepoint));
+        return;
+    }
+
     VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback
     (
         vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -571,6 +674,14 @@ namespace lgo {
                 }
             };
         
+        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
+        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_pos);
+        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
+        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
+        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
+        glfwSetKeyCallback(m_window, GLFW_callback_key);
+        glfwSetCharCallback(m_window, GLFW_callback_char);
+        
         rect_primitive_t::init(this);
         m_device.waitIdle();
         return;
@@ -773,7 +884,7 @@ namespace lgo {
         return m_window_pos;
     }
 
-    auto engine_t::get_window_size() -> size_2D
+    auto engine_t::get_window_size() -> const size_2D&
     {
         return m_window_size;
     }

@@ -36,9 +36,17 @@ export
     using ::glfwWindowHint;
     using ::glfwCreateWindowSurface;
     using ::glfwGetFramebufferSize;
+    using ::glfwSetWindowUserPointer;
+    using ::glfwGetWindowUserPointer;
     
     using ::glfwGetCursorPos;
     using ::glfwGetMouseButton;
+    using ::glfwSetCursorPosCallback;
+    using ::glfwSetCursorEnterCallback;
+    using ::glfwSetMouseButtonCallback;
+    using ::glfwSetScrollCallback;
+    using ::glfwSetKeyCallback;
+    using ::glfwSetCharCallback;
 
     using ::glfwPollEvents;
     using ::glfwWindowShouldClose;

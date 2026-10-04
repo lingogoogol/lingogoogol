@@ -262,8 +262,8 @@ namespace lgo
                 .pos{ pos },
                 .size{ size },
                 .depth{ depth_range.near },
-                .clip_pos{ m_clip_pos },
-                .clip_size{ m_clip_size },
+                .clip_pos{},//...
+                .clip_size{},//...
                 .image_view{ m_image_view },
                 .texture_pos{ m_texture_pos },
                 .texture_axis_x{ m_texture_axis_x },

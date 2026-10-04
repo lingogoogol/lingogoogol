@@ -18,6 +18,20 @@ export namespace lgo
     class text_line_t: public GUI_object_t
     {
     public:
+        struct ctor_t
+        {
+            engine_t* engine{};
+            depth_tracker_t* depth_tracker{};
+            depth_range_t depth_range{};
+            pos_2D pos{};
+            std::string text{};
+            size_2D size{};
+            size_1D margin{};
+            font_preference_t* font_preference{};
+            color_t color{};
+            alignment_2D alignment{};
+        };
+
         text_line_t() = default;
 
         text_line_t
@@ -31,7 +45,8 @@ export namespace lgo
             size_1D margin,
             const font_preference_t& font_preference,
             color_t color,
-            alignment_2D alignment
+            alignment_2D alignment,
+            bool load = true
         );
 
         auto init
@@ -45,29 +60,39 @@ export namespace lgo
             size_1D margin,
             const font_preference_t& font_preference,
             color_t color,
-            alignment_2D alignment
+            alignment_2D alignment,
+            bool load = true
         )
         -> void;
+
+        virtual ~text_line_t();
 
         auto get_pos() const -> pos_2D override;
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;
+        auto set_size(size_2D size) -> void;
         auto get_margin() const -> size_1D override;
         auto depth_range_get() const -> depth_range_t;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
         auto get_text() const -> const std::string&;
-        auto set_text(std::string text) -> void;
+        auto set_text(std::string text, bool load = true) -> void;
         auto get_clip_pos() const -> pos_2D;
-        auto set_clip_pos(pos_2D clip_pos) -> void;
+        auto set_clip_pos(pos_2D clip_pos, bool load = true) -> void;
         auto get_clip_size() const -> size_2D;
-        auto set_clip_size(size_2D clip_size) -> void;
+        auto set_clip_size(size_2D clip_size, bool load = true) -> void;
         auto set_color(color_t color) -> void;
         auto set_frame_color(color_t) -> void;
         auto get_text_size() const -> size_2D;
 
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
+
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
+        static std::mutex m_pending_mutex;
+        static std::set<text_line_t*> m_pending;
+
+        static auto pending_load() -> void;
     protected:
         engine_t* m_engine{};
     private:
@@ -94,6 +119,7 @@ export namespace lgo
         size_2D m_clip_size{};
         size_1D m_margin{};
         color_t m_color{};
+        bool m_pending_load{};
     };
 
     class text_line_std_t: public text_line_t
@@ -137,7 +163,7 @@ export namespace lgo
             alignment_2D alignment
         );
 
-        auto set_text(std::string text) -> void;
+        auto set_text(std::string text, bool load = true) -> void;
     };
 
     class text_line_flex_std_t: public text_line_flex_t

@@ -18,5 +18,5 @@ target_link_libraries(
     external.GLFW
     PRIVATE
         common
-        glfw3.lib
+        glfw3
 )

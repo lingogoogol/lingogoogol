@@ -31,6 +31,7 @@ export namespace lgo
         auto operator=(const GUI_object_t& in) -> GUI_object_t&;
 
         auto name_get() -> std::string;
+        auto name_set(std::string name) -> void;
         virtual auto get_pos() const -> pos_2D = 0;
         virtual auto set_pos(pos_2D pos) -> void = 0;
         virtual auto get_size() const -> size_2D = 0;

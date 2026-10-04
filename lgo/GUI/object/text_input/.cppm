@@ -2,6 +2,7 @@ export module lgo.GUI.object.text_input;
 
 import std;
 
+import lgo.io.file;
 import lgo.math.vec;
 import lgo.GUI.misc;
 import lgo.GUI.primitive;
@@ -53,6 +54,7 @@ export namespace lgo
         );
         
         auto set_pos(pos_2D pos) -> void override;
+        virtual auto log(std::uint32_t tab_count) const -> void override;
 
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
@@ -214,6 +216,18 @@ export namespace lgo
         std::unique_lock lock{ this->m_mutex };
         t_text::set_pos(pos);
         m_click_area.set_pos(pos);
+        return;
+    }
+    
+    template<typename t_text>
+    auto text_input_constraint_impl_t<t_text>::log(std::uint32_t tab_count) const -> void
+    {
+        log_file(tab(tab_count) + "{\n");
+        log_file(tab(tab_count + 1) + "type: text_input_constraint_impl_t<>\n");
+        t_text::log(tab_count + 1);
+        log_file(tab(tab_count + 1) + "click_area:\n");
+        m_click_area.log(tab_count + 1);
+        log_file(tab(tab_count) + "}\n");
         return;
     }
 

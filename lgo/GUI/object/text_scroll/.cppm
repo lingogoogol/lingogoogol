@@ -2,6 +2,7 @@ export module lgo.GUI.object.text_scroll;
 
 import std;
 
+import lgo.io.file;
 import lgo.math.vec;
 import lgo.GUI.misc;
 import lgo.GUI.primitive;
@@ -54,7 +55,9 @@ export namespace lgo
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;
         auto get_margin() const -> size_1D override;
-        auto set_text(std::string text) -> void;
+        virtual auto log(std::uint32_t tab_count) const -> void override;
+
+        auto set_text(std::string text, bool load = true) -> void;
         auto set_frame_color(color_t color) -> void;
         auto set_scrollbar_color(color_t color) -> void;
 
@@ -245,15 +248,33 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_text(std::string text) -> void
+    auto text_scroll_impl_t<t_text>::log(std::uint32_t tab_count) const -> void
+    {
+        log_file(tab(tab_count) + "{\n");
+        log_file(tab(tab_count + 1) + "type: text_scroll_impl_t<>\n");
+        t_text::log(tab_count + 1);
+        log_file(tab(tab_count + 1) + "size: " + to_string(m_size) + "\n");
+        log_file(tab(tab_count + 1) + "scrollbar_x:\n");
+        m_scrollbar_x.log(tab_count + 1);
+        log_file(tab(tab_count + 1) + "scrollbar_y:\n");
+        m_scrollbar_y.log(tab_count + 1);
+        log_file(tab(tab_count + 1) + "scroll_horizontal: " + std::to_string(m_scroll_horizontal) + "\n");
+        log_file(tab(tab_count + 1) + "click_area:\n");
+        m_click_area.log(tab_count + 1);
+        log_file(tab(tab_count) + "}\n");
+        return;
+    }
+
+    template<typename t_text>
+    auto text_scroll_impl_t<t_text>::set_text(std::string text, bool load) -> void
     {
         std::unique_lock lock{ this->m_mutex };
-        t_text::set_text(text);
+        t_text::set_text(text, load);
         /*pos_2D text_pos{ this->get_text_pos() };
         constrain_text_pos(text_pos);
         this->set_text_pos(text_pos);
         update_scrollbar_pos();
-        update_scrollbar_size();*/
+        update_scrollbar_size();*///...
         return;
     }
 
@@ -330,7 +351,8 @@ export namespace lgo
             pos_2D pos,
             std::string text,
             color_t color,
-            size_1D size_x
+            size_1D size_x,
+            bool load = true
         );
 
         auto get_margin() const -> size_1D override;

@@ -54,8 +54,8 @@ export namespace lgo
         size_2D m_texture_axis_y{};
         std::recursive_mutex m_mutex{};
         bool m_texture_enable{};
-        pos_2D m_clip_pos{};
-        size_2D m_clip_size{};
+        const pos_2D* m_clip_pos{};
+        const size_2D* m_clip_size{};
         std::string m_name{};
 
         constexpr static std::size_t vertex_data_len{ 4 };
@@ -79,8 +79,8 @@ export namespace lgo
             pos_2D pos{};
             size_2D size{};
             float depth{};
-            std::optional<pos_2D> clip_pos{};
-            std::optional<size_2D> clip_size{};
+            pos_2D* clip_pos{};
+            size_2D* clip_size{};
             color_t color{};
             image_view_t* image_view{};
             pos_2D texture_pos{};

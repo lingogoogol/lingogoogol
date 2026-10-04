@@ -520,10 +520,10 @@ export namespace lgo
         m_pos{ pos },
         m_size{ size },
         m_margin{ margin },
-        m_depth_range{ depth_range },
         m_alignment_forward{ t_y ? static_cast<std::uint8_t>(alignment.y) : static_cast<std::uint8_t>(alignment.x) },
         m_alignment_sideways{ t_y ? static_cast<std::uint8_t>(alignment.x) : static_cast<std::uint8_t>(alignment.y) },
-        m_from_large{ from_large }
+        m_from_large{ from_large },
+        m_depth_range{ depth_range }
     {}
 
     template<bool t_y, bool t_hard>

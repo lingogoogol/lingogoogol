@@ -12,5 +12,5 @@ target_link_libraries(
     external.curl
     PRIVATE
         common
-        libcurl.lib
+        libcurl
 )

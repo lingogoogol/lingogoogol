@@ -12,4 +12,5 @@ target_link_libraries(
     external.ShObjIdl
     PRIVATE
         common
+        Shell32
 )

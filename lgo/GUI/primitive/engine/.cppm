@@ -69,6 +69,27 @@ export namespace lgo
         
         template<typename t_callback_set, typename t_caller, typename... t_in>
         static auto call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void;
+        static auto call_callback_none(std::function<void(void)>* callback) -> void;
+        static auto call_callback_pos(std::function<void(pos_2D)>* callback, double x, double y) -> void;
+        static auto call_callback_wheel
+        (
+            std::function<void(pos_2D, size_1D)>* callback,
+            double x,
+            double y,
+            double window_x,
+            double window_y
+        )
+        -> void;
+        static auto call_callback_key(std::function<void(std::uint16_t)>* callback, int key) -> void;
+        static auto call_callback_char(std::function<void(wchar_t)>* callback, char32_t cha) -> void;
+
+        static auto GLFW_callback_cursor_pos(GLFWwindow* window, double xpos, double ypos) -> void;
+        //for both cursor enter and leave
+        static auto GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void;
+        static auto GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void;
+        static auto GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void;
+        static auto GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mods) -> void;
+        static auto GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void;
         static VKAPI_ATTR auto VKAPI_CALL debug_callback
         (
             vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -111,7 +132,7 @@ export namespace lgo
         auto set_exit() -> void;
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;
-        auto get_window_size() -> size_2D;
+        auto get_window_size() -> const size_2D&;
         auto get_cursor_pos() -> pos_2D;
         auto device_get() -> vk::raii::Device&;
         auto device_physical_get() -> vk::raii::PhysicalDevice&;

@@ -12,5 +12,5 @@ target_link_libraries(
     external.FreeType
     PRIVATE
         common
-        freetyped.lib
+        freetyped
 )

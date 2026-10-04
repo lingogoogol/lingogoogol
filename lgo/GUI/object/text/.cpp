@@ -20,6 +20,8 @@ import lgo.GUI.object.rect;
 
 namespace lgo
 {
+    std::mutex text_line_t::m_pending_mutex{};
+    std::set<text_line_t*> text_line_t::m_pending{};
     std::map<const font_face_t*, std::map<char32_t, text_line_t::glyph_t>> text_line_t::m_font{};
     std::uint64_t text_line_t::m_font_heap_index{ 0 };
 
@@ -34,7 +36,8 @@ namespace lgo
         size_1D margin,
         const font_preference_t& font_preference,
         color_t color,
-        alignment_2D alignment
+        alignment_2D alignment,
+        bool load
     ):
         m_engine{ engine },
         m_div{ engine, depth_tracker, depth_range, pos, size, size_1D{ 0 }, alignment, false },
@@ -46,7 +49,16 @@ namespace lgo
         m_margin{ margin },
         m_color{ color }
     {
-        init1();
+        m_pending_load = !load;
+        if (load)
+        {
+            init1();
+        }
+        else
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.emplace(this);
+        }
         return;
     }
 
@@ -61,10 +73,13 @@ namespace lgo
         size_1D margin,
         const font_preference_t& font_preference,
         color_t color,
-        alignment_2D alignment
+        alignment_2D alignment,
+        bool load
     )
     -> void
     {
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
+        std::unique_lock lock{ m_mutex };
         m_engine = engine;
         m_div.init(engine, depth_tracker, depth_range, pos, size, size_1D{ 0 }, alignment, false);
         m_depth_range = depth_range;
@@ -74,7 +89,28 @@ namespace lgo
         m_margin = margin;
         m_clip_pos = pos;
         m_clip_size = size;
-        init1();
+        m_pending_load = !load;
+        if (load)
+        {
+            init1();
+        }
+        else
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.emplace(this);
+        }
+        return;
+    }
+    
+    text_line_t::~text_line_t()
+    {
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
+        std::unique_lock lock{ m_mutex };
+        if (m_pending_load)
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.erase(this);
+        }
         return;
     }
 
@@ -96,6 +132,14 @@ namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         return m_div.get_size();
+    }
+
+    auto text_line_t::set_size(size_2D size) -> void
+    {
+        std::unique_lock lock{ m_mutex };
+        m_div.set_size(size);
+        GUI_object_t::set_size(size);
+        return;
     }
 
     auto text_line_t::get_margin() const -> size_1D
@@ -128,11 +172,21 @@ namespace lgo
         return m_text;
     }
 
-    auto text_line_t::set_text(std::string text) -> void
+    auto text_line_t::set_text(std::string text, bool load) -> void
     {
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
         std::unique_lock lock{ m_mutex };
         m_text = text;
-        init1();
+        m_pending_load = !load;
+        if (load)
+        {
+            init1();
+        }
+        else
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.emplace(this);
+        }
         return;
     }
 
@@ -142,11 +196,21 @@ namespace lgo
         return m_clip_pos;
     }
 
-    auto text_line_t::set_clip_pos(pos_2D clip_pos) -> void
+    auto text_line_t::set_clip_pos(pos_2D clip_pos, bool load) -> void
     {
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
         std::unique_lock lock{ m_mutex };
         m_clip_pos = clip_pos;
-        init1();
+        m_pending_load = !load;
+        if (load)
+        {
+            init1();
+        }
+        else
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.emplace(this);
+        }
         return;
     }
 
@@ -156,11 +220,21 @@ namespace lgo
         return m_clip_size;
     }
 
-    auto text_line_t::set_clip_size(size_2D clip_size) -> void
+    auto text_line_t::set_clip_size(size_2D clip_size, bool load) -> void
     {
+        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
         std::unique_lock lock{ m_mutex };
         m_clip_size = clip_size;
-        init1();
+        m_pending_load = !load;
+        if (load)
+        {
+            init1();
+        }
+        else
+        {
+            std::unique_lock pending_lock{ m_pending_mutex };
+            m_pending.emplace(this);
+        }
         return;
     }
 
@@ -203,8 +277,32 @@ namespace lgo
         return;
     }
 
+    auto text_line_t::pending_load() -> void
+    {
+        do
+        {
+            //Always lock m_mutex before m_pending_mutex to prevent deadlock.
+            std::unique_lock pending_lock{ m_pending_mutex };
+            std::set<text_line_t*>::iterator begin{}, end{};
+            begin = m_pending.begin();
+            end = m_pending.end();
+            if (begin == end)
+            {
+                break;
+            }
+            text_line_t* ptr{ *begin };
+            m_pending.erase(begin);
+            pending_lock.unlock();
+            ptr->init1();
+        }
+        while (true);
+        return;
+    }
+
     auto text_line_t::init1() -> void
     {
+        std::unique_lock lock{ m_mutex };
+        m_pending_load = false;
         m_div.clear_state();
         std::wstring text_w{ to_wstring(m_text) };
         vk::raii::CommandBuffer command_buffer{ m_engine->command_buffer_create() };
@@ -223,6 +321,18 @@ namespace lgo
             {
                 glyph_t glyph{};
                 glyph.m_font.init(text_w[i], face, index);
+                pixmap_t pixmap_empty{};//...move to init
+                pixmap_empty.dim_set({ 1, 1 });
+                pixmap_empty[0, 0] = std::byte{ 0 };
+                const pixmap_t* pixmap_ptr{};
+                if (glyph.m_font.pixmap_get().dim_get() == size_2D{ 0, 0 })
+                {
+                    pixmap_ptr = &pixmap_empty;
+                }
+                else
+                {
+                    pixmap_ptr = &glyph.m_font.pixmap_get();
+                }
                 glyph.m_image.init
                 ({
                     .name
@@ -236,7 +346,7 @@ namespace lgo
                     .device_physical{ &m_engine->device_physical_get() },
                     .device{ &m_engine->device_get() },
                     .command_buffer{ &command_buffer },
-                    .pixmap{ &glyph.m_font.pixmap_get() }
+                    .pixmap{ pixmap_ptr }
                 });
                 glyph.m_index = m_font_heap_index;
                 glyph.m_image_view = image_view_t
@@ -337,13 +447,13 @@ namespace lgo
         return;
     }
 
-    auto text_line_flex_t::set_text(std::string text) -> void
+    auto text_line_flex_t::set_text(std::string text, bool load) -> void
     {
         std::unique_lock lock{ m_mutex };
-        text_line_t::set_text(text);
+        text_line_t::set_text(text, false);
         size_1D size_x{ std::max(get_text_size().x, m_size_x_min.x) };
         text_line_t::set_size(size_2D{ size_x.x, get_size().y });
-        text_line_t::set_clip_size(size_2D{ size_x.x, get_clip_size().y });
+        text_line_t::set_clip_size(size_2D{ size_x.x, get_clip_size().y }, load);
         return;
     }
 

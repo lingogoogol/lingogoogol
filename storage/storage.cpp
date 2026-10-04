@@ -673,7 +673,8 @@ auto file_upload
 				lgo::depth_range_t{ 0.0f, 0.0f },
 				"檔案：0B/?B " + file.string(),
 				lgo::std_blue_light,
-				lgo::size_1D{ 0x100 }
+				lgo::size_1D{ 0x100 },
+				false
 			);
 		lock.unlock();
 	}
@@ -703,7 +704,7 @@ auto file_upload
 	http_api_request_action(multipart);
 	if (progress_bar_div)
 	{
-		uploading.m_progress_bar->set_text("檔案：0B/" + std::to_string(uploading.m_size) + "B " + file.string());
+		uploading.m_progress_bar->set_text("檔案：0B/" + std::to_string(uploading.m_size) + "B " + file.string(), false);
 	}
 	list->emplace_back(uploading);
 	lgo::log_file(file.string() + "\n");
@@ -1417,7 +1418,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						lgo::depth_range_t{ 0.0f, 0.5f },
 						"資料夾：0B/?B " + obj_ptr->m_name,
 						lgo::std_blue_light,
-						lgo::size_1D{ 0x100 }
+						lgo::size_1D{ 0x100 },
+						false
 					)
 				};
 				lock1.unlock();
@@ -1452,7 +1454,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						{ "id", id }
 					}
 				);
-				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name);
+				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name, false);
 			}
 			else if (obj_ptr->m_type == "delete_all")
 			{
@@ -1463,7 +1465,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						lgo::depth_range_t{ 0.0f, 0.5f },
 						"刪除：0/? " + obj_ptr->m_name,
 						lgo::std_blue_light,
-						lgo::size_1D{ 0x100 }
+						lgo::size_1D{ 0x100 },
+						false
 					)
 				};
 				lock1.unlock();
@@ -1532,7 +1535,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						);
 				}
 				empty_blob->clear_end();
-				progress_bar->set_text("刪除：0/" + std::to_string(obj_ptr->m_size) + " " + obj_ptr->m_name);
+				progress_bar->set_text("刪除：0/" + std::to_string(obj_ptr->m_size) + " " + obj_ptr->m_name, false);
 			}
 			else
 			{
@@ -1678,7 +1681,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 					(
 						"檔案：" + std::to_string(uploading.m_progress) + "B/" +
 						std::to_string(uploading.m_size) + "B " +
-						uploading.m_name
+						uploading.m_name,
+						false
 					);
 				}
 				if (uploading.m_folder)
@@ -1688,7 +1692,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 					(
 						"資料夾：" + std::to_string(uploading.m_folder->m_progress) + "B/" +
 						std::to_string(uploading.m_folder->m_size) + "B " +
-						uploading.m_folder->m_name
+						uploading.m_folder->m_name,
+						false
 					);
 				}
 				uploading.m_loading->m_progress += batch_size;
@@ -1713,7 +1718,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 					"刪除：" +
 					std::to_string(delete_id[i].m_loading->m_progress) + "/" +
 					std::to_string(delete_id[i].m_loading->m_size) + " " +
-					delete_id[i].m_loading->m_name
+					delete_id[i].m_loading->m_name,
+					false
 				);
 			}
 			delete_id.erase(delete_id.begin(), delete_id.begin() + delete_count);
@@ -1747,7 +1753,8 @@ auto file_download
 				lgo::depth_range_t{ 0.0f, 0.5f },
 				"檔案：0B/?B " + file.string(),
 				lgo::std_green_light,
-				lgo::size_1D{ 0x100 }
+				lgo::size_1D{ 0x100 },
+				false
 			);
 		lock.unlock();
 	}
@@ -1762,7 +1769,7 @@ auto file_download
 	downloading.m_main_id = pos;
 	if (progress_bar_div)
 	{
-		downloading.m_progress_bar->set_text("檔案：0B/" + std::to_string(downloading.m_size) + "B " + file.string());
+		downloading.m_progress_bar->set_text("檔案：0B/" + std::to_string(downloading.m_size) + "B " + file.string(), false);
 	}
 	list->emplace_back(downloading);
 	return;
@@ -1866,7 +1873,8 @@ auto download(loading_list_t* list) -> void
 						lgo::depth_range_t{ 0.0f, 0.5f },
 						"資料夾：0B/?B " + obj_ptr->m_name,
 						lgo::std_green_light,
-						lgo::size_1D{ 0x100 }
+						lgo::size_1D{ 0x100 },
+						false
 					)
 				};
 				lock1.unlock();
@@ -1884,7 +1892,7 @@ auto download(loading_list_t* list) -> void
 					&file_list,
 					list->m_mutex
 				);
-				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name);
+				progress_bar->set_text("資料夾：0B/" + std::to_string(obj_ptr->m_size) + "B " + obj_ptr->m_name, false);
 			}
 			else
 			{
@@ -1941,7 +1949,8 @@ auto download(loading_list_t* list) -> void
 						"檔案：" +
 						std::to_string(downloading.m_progress) + "B/" +
 						std::to_string(downloading.m_size) + "B " +
-						downloading.m_name
+						downloading.m_name,
+						false
 					);
 				}
 				if (downloading.m_folder)
@@ -1952,7 +1961,8 @@ auto download(loading_list_t* list) -> void
 						"資料夾：" +
 						std::to_string(downloading.m_folder->m_progress) + "B/" +
 						std::to_string(downloading.m_folder->m_size) + "B " +
-						downloading.m_folder->m_name
+						downloading.m_folder->m_name,
+						false
 					);
 				}
 				downloading.m_loading->m_progress += batch_size;
@@ -2030,7 +2040,10 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 			&downloading_list
 		);
 		std::thread thread_upload{ &upload, &uploading_list, &empty_blob }, thread_download{ &download, &downloading_list };
-		while (!message_loop(&engine, &uploading_list, &downloading_list)) {}
+		while (!message_loop(&engine, &uploading_list, &downloading_list))
+		{
+			lgo::text_line_t::pending_load();
+		}
 
 		close_app = true;
 		thread_upload.join();
