@@ -23,14 +23,14 @@ export namespace lgo
         rect_t m_scrollbar_y{};
         bool m_scroll_horizontal{};
         click_area_t m_click_area{};
-        std::function<void(pos_2D, size_1D)>* m_mouse_scroll{};
+        std::function<void(size_2D)>* m_callback_mouse_scroll_key{};
 
         constexpr static size_1D scrollbar_width{ 0x2 };
         constexpr static std::int64_t scroll_speed{ 0x10 };
 
         static auto scrollbar_height(std::int64_t render_size, std::int64_t clip_size) -> std::int64_t;
 
-        auto text_scroll_callback_scroll(pos_2D cursor_pos, size_1D scroll_size) -> void;
+        auto text_scroll_callback_scroll(size_2D scroll_size) -> void;
         auto text_scroll_callback_click_area() -> void;
         auto constrain_text_pos(pos_2D& pos) -> void;
         auto update_scrollbar_pos() -> void;
@@ -57,7 +57,7 @@ export namespace lgo
         auto get_margin() const -> size_1D override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
-        auto set_text(std::string text, bool load = true) -> void;
+        auto set_text(std::string text, bool load_now = true) -> void;
         auto set_frame_color(color_t color) -> void;
         auto set_scrollbar_color(color_t color) -> void;
 
@@ -72,7 +72,7 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_scroll_impl_t<t_text>::text_scroll_callback_scroll(pos_2D /*cursor_pos*/, size_1D /*scroll_size*/) -> void
+    auto text_scroll_impl_t<t_text>::text_scroll_callback_scroll(size_2D /*scroll_size*/) -> void
     {
         std::unique_lock lock{ this->m_mutex };
         /*if (inside(this->get_clip_pos(), this->get_clip_size(), cursor_pos))
@@ -89,7 +89,7 @@ export namespace lgo
             constrain_text_pos(text_pos);
             this->set_text_pos(text_pos);
             update_scrollbar_pos();
-        }*/
+        }*///...
         return;
     }
 
@@ -185,8 +185,8 @@ export namespace lgo
             depth_range,
             pos,
             size,
-            [] (pos_2D) {},
             [] () {},
+            [] (pos_2D) {},
             [] (pos_2D) {},
             [] (pos_2D) {},
             std::bind(&text_scroll_impl_t::text_scroll_callback_click_area, this)
@@ -266,10 +266,10 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_text(std::string text, bool load) -> void
+    auto text_scroll_impl_t<t_text>::set_text(std::string text, bool load_now) -> void
     {
         std::unique_lock lock{ this->m_mutex };
-        t_text::set_text(text, load);
+        t_text::set_text(text, load_now);
         /*pos_2D text_pos{ this->get_text_pos() };
         constrain_text_pos(text_pos);
         this->set_text_pos(text_pos);
@@ -306,9 +306,9 @@ export namespace lgo
         m_click_area.show();
         m_scrollbar_x.show();
         m_scrollbar_y.show();
-        m_mouse_scroll = t_text::m_engine->add_mouse_scroll
+        m_callback_mouse_scroll_key = t_text::m_engine->callback_mouse_scroll_add
         (
-            std::bind(&text_scroll_impl_t<t_text>::text_scroll_callback_scroll, this, std::placeholders::_1, std::placeholders::_2)
+            std::bind(&text_scroll_impl_t<t_text>::text_scroll_callback_scroll, this, std::placeholders::_1)
         );
         this->show_end(base);
         return;
@@ -325,7 +325,7 @@ export namespace lgo
         m_click_area.hide();
         m_scrollbar_x.hide();
         m_scrollbar_y.hide();
-        t_text::m_engine->remove_mouse_scroll(m_mouse_scroll);
+        t_text::m_engine->callback_mouse_scroll_remove(m_callback_mouse_scroll_key);
         t_text::hide_impl(false);
         this->hide_end(base);
         return;
@@ -352,7 +352,7 @@ export namespace lgo
             std::string text,
             color_t color,
             size_1D size_x,
-            bool load = true
+            bool load_now = true
         );
 
         auto get_margin() const -> size_1D override;

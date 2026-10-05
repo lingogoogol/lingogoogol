@@ -15,8 +15,8 @@ import lgo.io.file;
 import lgo.GUI.Vulkan;
 
 namespace lgo {
-    template<typename t_callback_set, typename t_caller, typename... t_in>
-    auto engine_t::call_callback(const t_caller& caller, t_callback_set& callback, t_in... in) -> void
+    template<typename t_callback_set, typename... t_in>
+    auto engine_t::call_callback(t_callback_set& callback, t_in... in) -> void
     {
         callback.m_calling_callback = true;
         static std::uint64_t depth{ 0 };
@@ -29,7 +29,7 @@ namespace lgo {
             i = callback.m_effective.upper_bound(current)
         ) {
             current = *i;
-            caller(current, in...);
+            (*current)(in...);
         }
         --depth;
         if (!depth)
@@ -41,106 +41,59 @@ namespace lgo {
         return;
     }
 
-    auto engine_t::call_callback_none(std::function<void(void)>* callback) -> void
-    {
-        (*callback)();
-        return;
-    }
-
-    auto engine_t::call_callback_pos(std::function<void(pos_2D)>* callback, double x, double y) -> void
-    {
-        (*callback)(pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) });
-        return;
-    }
-
-    auto engine_t::call_callback_wheel
-    (
-        std::function<void(pos_2D, size_1D)>* callback,
-        double x,
-        double y,
-        double window_x,
-        double window_y
-    )
-    -> void
-    {
-        (*callback)
-        (
-            pos_2D{ static_cast<std::int64_t>(window_x), static_cast<std::int64_t>(window_y) },
-            size_1D{ static_cast<std::int64_t>(y / 120) }//...
-        );
-        return;
-    }
-
-    auto engine_t::call_callback_key(std::function<void(std::uint16_t)>* callback, int key) -> void
-    {
-        (*callback)(static_cast<std::uint16_t>(key));
-        return;
-    }
-
-    auto engine_t::call_callback_char(std::function<void(wchar_t)>* callback, char32_t cha) -> void {
-        (*callback)(static_cast<wchar_t>(cha));
-        return;
-    }
-    
-    auto engine_t::GLFW_callback_cursor_pos(GLFWwindow* window, double x, double y) -> void
-    {
-        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback(call_callback_pos, ptr->m_mouse_move, x, y);
-        return;
-    }
-
     auto engine_t::GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (entered == GLFW_FALSE)
-        {
-            call_callback(call_callback_none, ptr->m_mouse_leave);
-        }
+        call_callback(ptr->m_callback_mouse_enter, entered);
+        return;
+    }
+    
+    auto engine_t::GLFW_callback_cursor_move(GLFWwindow* window, double x, double y) -> void
+    {
+        auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        call_callback
+        (
+            ptr->m_callback_mouse_move,
+            pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
+        );
         return;
     }
 
     auto engine_t::GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        double x{}, y{};
-        glfwGetCursorPos(window, &x, &y);
-        if (button == GLFW_MOUSE_BUTTON_LEFT)
-        {
-            if (action == GLFW_PRESS)
-            {
-                call_callback(call_callback_pos, ptr->m_mouse_left_click, x, y);
-            }
-            else if (action == GLFW_RELEASE)
-            {
-                call_callback(call_callback_pos, ptr->m_mouse_left_release, x, y);
-            }
-        }
+        call_callback
+        (
+            ptr->m_callback_mouse_button,
+            button,
+            action,
+            mods
+        );
         return;
     }
 
     auto engine_t::GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        double window_x{}, window_y{};
-        glfwGetCursorPos(window, &window_x, &window_y);
-        call_callback(call_callback_wheel, ptr->m_mouse_scroll, x, y, window_x, window_y);
+        call_callback
+        (
+            ptr->m_callback_mouse_scroll,
+            size_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
+        );
         return;
     }
 
     auto engine_t::GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mod) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (action == GLFW_PRESS)
-        {
-            call_callback(call_callback_key, ptr->m_key_down, key);
-        }
+        call_callback(ptr->m_callback_key, key, action, mod);
         return;
     }
 
     auto engine_t::GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback(call_callback_char, ptr->m_charw, static_cast<char32_t>(codepoint));
+        call_callback(ptr->m_callback_cha, static_cast<char32_t>(codepoint));
         return;
     }
 
@@ -675,8 +628,8 @@ namespace lgo {
             };
         
         glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
-        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_pos);
         glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
+        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
         glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
         glfwSetScrollCallback(m_window, GLFW_callback_wheel);
         glfwSetKeyCallback(m_window, GLFW_callback_key);
@@ -952,170 +905,153 @@ namespace lgo {
         delete in;
         return;
     }
-
-    auto engine_t::add_mouse_move(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*
+    
+    auto engine_t::cursor_pos_get() const -> pos_2D
     {
-        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
-        if (m_mouse_move.m_calling_callback)
+        double x{}, y{};
+        glfwGetCursorPos(m_window, &x, &y);
+        return pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) };
+    }
+
+    auto engine_t::callback_mouse_enter_add(callback_mouse_enter_t callback) -> callback_mouse_enter_t*
+    {
+        auto out{ new callback_mouse_enter_t{ callback } };
+        if (m_callback_mouse_enter.m_calling_callback)
         {
-            m_mouse_move.m_pending.emplace(out);
+            m_callback_mouse_enter.m_pending.emplace(out);
         }
         else
         {
-            m_mouse_move.m_effective.emplace(out);
+            m_callback_mouse_enter.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_mouse_move(std::function<void(pos_2D)>* in) -> void
+    auto engine_t::callback_mouse_enter_remove(callback_mouse_enter_t* in) -> void
     {
-        if (!m_mouse_move.m_effective.erase(in))
+        if (!m_callback_mouse_enter.m_effective.erase(in))
         {
-            m_mouse_move.m_pending.erase(in);
+            m_callback_mouse_enter.m_pending.erase(in);
         }
         delete in;
         return;
     }
 
-    auto engine_t::add_mouse_leave(std::function<void(void)> callback) -> std::function<void(void)>*
+    auto engine_t::callback_mouse_move_add(callback_mouse_move_t callback) -> callback_mouse_move_t*
     {
-        std::function<void(void)>* out{ new std::function<void(void)>{ callback } };
-        if (m_mouse_leave.m_calling_callback)
+        auto out{ new callback_mouse_move_t{ callback } };
+        if (m_callback_mouse_move.m_calling_callback)
         {
-            m_mouse_leave.m_pending.emplace(out);
+            m_callback_mouse_move.m_pending.emplace(out);
         }
         else
         {
-            m_mouse_leave.m_effective.emplace(out);
+            m_callback_mouse_move.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_mouse_leave(std::function<void(void)>* in) -> void
+    auto engine_t::callback_mouse_move_remove(callback_mouse_move_t* in) -> void
     {
-        if (!m_mouse_leave.m_effective.erase(in))
+        if (!m_callback_mouse_move.m_effective.erase(in))
         {
-            m_mouse_leave.m_pending.erase(in);
+            m_callback_mouse_move.m_pending.erase(in);
         }
         delete in;
         return;
     }
 
-    auto engine_t::add_mouse_left_click(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*
+    auto engine_t::callback_mouse_button_add(callback_mouse_button_t callback) -> callback_mouse_button_t*
     {
-        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
-        if (m_mouse_left_click.m_calling_callback)
+        auto out{ new callback_mouse_button_t{ callback } };
+        if (m_callback_mouse_button.m_calling_callback)
         {
-            m_mouse_left_click.m_pending.emplace(out);
+            m_callback_mouse_button.m_pending.emplace(out);
         }
         else
         {
-            m_mouse_left_click.m_effective.emplace(out);
+            m_callback_mouse_button.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_mouse_left_click(std::function<void(pos_2D)>* in) -> void
+    auto engine_t::callback_mouse_button_remove(callback_mouse_button_t* in) -> void
     {
-        if (!m_mouse_left_click.m_effective.erase(in))
+        if (!m_callback_mouse_button.m_effective.erase(in))
         {
-            m_mouse_left_click.m_pending.erase(in);
+            m_callback_mouse_button.m_pending.erase(in);
         }
         delete in;
         return;
     }
 
-    auto engine_t::add_mouse_left_release(std::function<void(pos_2D)> callback) -> std::function<void(pos_2D)>*
+    auto engine_t::callback_mouse_scroll_add(callback_mouse_scroll_t callback) -> callback_mouse_scroll_t*
     {
-        std::function<void(pos_2D)>* out{ new std::function<void(pos_2D)>{ callback } };
-        if (m_mouse_left_release.m_calling_callback)
+        auto out{ new callback_mouse_scroll_t{ callback } };
+        if (m_callback_mouse_scroll.m_calling_callback)
         {
-            m_mouse_left_release.m_pending.emplace(out);
+            m_callback_mouse_scroll.m_pending.emplace(out);
         }
         else
         {
-            m_mouse_left_release.m_effective.emplace(out);
+            m_callback_mouse_scroll.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_mouse_left_release(std::function<void(pos_2D)>* in) -> void
+    auto engine_t::callback_mouse_scroll_remove(callback_mouse_scroll_t* in) -> void
     {
-        if (!m_mouse_left_release.m_effective.erase(in))
+        if (!m_callback_mouse_scroll.m_effective.erase(in))
         {
-            m_mouse_left_release.m_pending.erase(in);
+            m_callback_mouse_scroll.m_pending.erase(in);
         }
         delete in;
         return;
     }
 
-    auto engine_t::add_mouse_scroll(std::function<void(pos_2D, size_1D)> callback) -> std::function<void(pos_2D, size_1D)>*
+    auto engine_t::callback_key_add(callback_key_t callback) -> callback_key_t*
     {
-        std::function<void(pos_2D, size_1D)>* out{ new std::function<void(pos_2D, size_1D)>{ callback } };
-        if (m_mouse_scroll.m_calling_callback)
+        auto out{ new callback_key_t{ callback } };
+        if (m_callback_key.m_calling_callback)
         {
-            m_mouse_scroll.m_pending.emplace(out);
+            m_callback_key.m_pending.emplace(out);
         }
         else
         {
-            m_mouse_scroll.m_effective.emplace(out);
+            m_callback_key.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_mouse_scroll(std::function<void(pos_2D, size_1D)>* in) -> void
+    auto engine_t::callback_key_remove(callback_key_t* in) -> void
     {
-        if (!m_mouse_scroll.m_effective.erase(in))
+        if (!m_callback_key.m_effective.erase(in))
         {
-            m_mouse_scroll.m_pending.erase(in);
+            m_callback_key.m_pending.erase(in);
         }
         delete in;
         return;
     }
 
-    auto engine_t::add_key_down(std::function<void(std::uint16_t)> callback) -> std::function<void(std::uint16_t)>*
+    auto engine_t::callback_cha_add(callback_cha_t callback) -> callback_cha_t*
     {
-        std::function<void(std::uint16_t)>* out{ new std::function<void(std::uint16_t)>{ callback } };
-        if (m_key_down.m_calling_callback)
+        auto out{ new callback_cha_t{ callback } };
+        if (m_callback_cha.m_calling_callback)
         {
-            m_key_down.m_pending.emplace(out);
+            m_callback_cha.m_pending.emplace(out);
         }
         else
         {
-            m_key_down.m_effective.emplace(out);
+            m_callback_cha.m_effective.emplace(out);
         }
         return out;
     }
 
-    auto engine_t::remove_key_down(std::function<void(std::uint16_t)>* in) -> void
+    auto engine_t::callback_cha_remove(callback_cha_t* in) -> void
     {
-        if (!m_key_down.m_effective.erase(in))
+        if (!m_callback_cha.m_effective.erase(in))
         {
-            m_key_down.m_pending.erase(in);
-        }
-        delete in;
-        return;
-    }
-
-    auto engine_t::add_charw(std::function<void(wchar_t)> callback) -> std::function<void(wchar_t)>*
-    {
-        std::function<void(wchar_t)>* out{ new std::function<void(wchar_t)>{ callback } };
-        if (m_charw.m_calling_callback)
-        {
-            m_charw.m_pending.emplace(out);
-        }
-        else
-        {
-            m_charw.m_effective.emplace(out);
-        }
-        return out;
-    }
-
-    auto engine_t::remove_charw(std::function<void(wchar_t)>* in) -> void
-    {
-        if (!m_charw.m_effective.erase(in))
-        {
-            m_charw.m_pending.erase(in);
+            m_callback_cha.m_pending.erase(in);
         }
         delete in;
         return;

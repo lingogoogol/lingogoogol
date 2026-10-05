@@ -15,16 +15,7 @@ import lgo.GUI.object.std;
 
 namespace lgo
 {
-    auto button_plus_t::button_plus_mouse_move_callback(pos_2D) -> void
-    {
-        std::unique_lock lock{ m_mutex };
-        m_rect.border_set_color(std_yellow);
-        m_horizontal.set_color(std_yellow);
-        m_vertical.set_color(std_yellow);
-        return;
-    }
-
-    auto button_plus_t::button_plus_mouse_leave_callback() -> void
+    auto button_plus_t::button_plus_callback_mouse_leave() -> void
     {
         std::unique_lock lock{ m_mutex };
         m_rect.border_set_color(m_border_color);
@@ -34,7 +25,16 @@ namespace lgo
         return;
     }
 
-    auto button_plus_t::button_plus_mouse_left_click_callback(pos_2D) -> void
+    auto button_plus_t::button_plus_callback_mouse_move(pos_2D) -> void
+    {
+        std::unique_lock lock{ m_mutex };
+        m_rect.border_set_color(std_yellow);
+        m_horizontal.set_color(std_yellow);
+        m_vertical.set_color(std_yellow);
+        return;
+    }
+
+    auto button_plus_t::button_plus_callback_mouse_left_click(pos_2D) -> void
     {
         std::unique_lock lock{ m_mutex };
         m_rect.border_set_color(std_white);
@@ -44,7 +44,7 @@ namespace lgo
         return;
     }
 
-    auto button_plus_t::button_plus_mouse_left_release_callback(pos_2D) -> void
+    auto button_plus_t::button_plus_callback_mouse_left_release(pos_2D) -> void
     {
         std::unique_lock lock{ m_mutex };
         m_rect.border_set_color(std_yellow);
@@ -75,10 +75,10 @@ namespace lgo
             depth_range,
             pos,
             size,
-            std::bind(&button_plus_t::button_plus_mouse_move_callback, this, std::placeholders::_1),
-            std::bind(&button_plus_t::button_plus_mouse_leave_callback, this),
-            std::bind(&button_plus_t::button_plus_mouse_left_click_callback, this, std::placeholders::_1),
-            std::bind(&button_plus_t::button_plus_mouse_left_release_callback, this, std::placeholders::_1),
+            std::bind(&button_plus_t::button_plus_callback_mouse_leave, this),
+            std::bind(&button_plus_t::button_plus_callback_mouse_move, this, std::placeholders::_1),
+            std::bind(&button_plus_t::button_plus_callback_mouse_left_click, this, std::placeholders::_1),
+            std::bind(&button_plus_t::button_plus_callback_mouse_left_release, this, std::placeholders::_1),
             callback
         },
         m_rect

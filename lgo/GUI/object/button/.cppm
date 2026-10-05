@@ -23,10 +23,10 @@ export namespace lgo
         click_area_t m_click_area{};
         t_type* m_object{};
         
-        auto button_template_mouse_move_callback(pos_2D pos) -> void;
-        auto button_template_mouse_leave_callback() -> void;
-        auto button_template_mouse_left_click_callback(pos_2D pos) -> void;
-        auto button_template_mouse_left_release_callback(pos_2D pos) -> void;
+        auto button_template_callback_mouse_leave() -> void;
+        auto button_template_callback_mouse_move(pos_2D pos) -> void;
+        auto button_template_callback_mouse_left_click(pos_2D pos) -> void;
+        auto button_template_callback_mouse_left_release(pos_2D pos) -> void;
 
         template<typename u_type>
         friend class button_t;
@@ -52,28 +52,28 @@ export namespace lgo
     };
 
     template<typename t_type>
-    auto button_template_t<t_type>::button_template_mouse_move_callback(pos_2D pos) -> void
-    {
-        m_object->button_move(pos);
-        return;
-    }
-
-    template<typename t_type>
-    auto button_template_t<t_type>::button_template_mouse_leave_callback() -> void
+    auto button_template_t<t_type>::button_template_callback_mouse_leave() -> void
     {
         m_object->button_leave();
         return;
     }
 
     template<typename t_type>
-    auto button_template_t<t_type>::button_template_mouse_left_click_callback(pos_2D pos) -> void
+    auto button_template_t<t_type>::button_template_callback_mouse_move(pos_2D pos) -> void
+    {
+        m_object->button_move(pos);
+        return;
+    }
+
+    template<typename t_type>
+    auto button_template_t<t_type>::button_template_callback_mouse_left_click(pos_2D pos) -> void
     {
         m_object->button_left_click(pos);
         return;
     }
 
     template<typename t_type>
-    auto button_template_t<t_type>::button_template_mouse_left_release_callback(pos_2D pos) -> void
+    auto button_template_t<t_type>::button_template_callback_mouse_left_release(pos_2D pos) -> void
     {
         m_object->button_left_release(pos);
         return;
@@ -97,10 +97,10 @@ export namespace lgo
             depth_range,
             object->get_pos(),
             object->get_size(),
-            std::bind(&button_template_t<t_type>::button_template_mouse_move_callback, this, std::placeholders::_1),
-            std::bind(&button_template_t<t_type>::button_template_mouse_leave_callback, this),
-            std::bind(&button_template_t<t_type>::button_template_mouse_left_click_callback, this, std::placeholders::_1),
-            std::bind(&button_template_t<t_type>::button_template_mouse_left_release_callback, this, std::placeholders::_1),
+            std::bind(&button_template_t<t_type>::button_template_callback_mouse_leave, this),
+            std::bind(&button_template_t<t_type>::button_template_callback_mouse_move, this, std::placeholders::_1),
+            std::bind(&button_template_t<t_type>::button_template_callback_mouse_left_click, this, std::placeholders::_1),
+            std::bind(&button_template_t<t_type>::button_template_callback_mouse_left_release, this, std::placeholders::_1),
             callback
         },
         m_object{ object }

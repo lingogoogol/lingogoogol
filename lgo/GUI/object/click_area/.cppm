@@ -12,6 +12,12 @@ export namespace lgo
 {
     class click_area_t: public GUI_object_t
     {
+    public:
+        using callback_mouse_leave_t = std::function<void(void)>;
+        using callback_mouse_move_t = std::function<void(pos_2D)>;
+        using callback_mouse_left_click_t = std::function<void(pos_2D)>;
+        using callback_mouse_left_release_t = std::function<void(pos_2D)>;
+        using callback_t = std::function<void(void)>;
     private:
         engine_t* m_engine{};
         depth_tracker_t* m_depth_tracker{};
@@ -19,22 +25,20 @@ export namespace lgo
         pos_2D m_pos{};
         size_2D m_size{};
         float m_depth{};
-        std::function<void(pos_2D)> m_mouse_move_callback{};
-        std::function<void(void)> m_mouse_leave_callback{};
-        std::function<void(pos_2D)> m_mouse_left_click_callback{};
-        std::function<void(pos_2D)> m_mouse_left_release_callback{};
-        std::function<void(void)> m_callback{};
-        std::function<void(pos_2D)>* m_mouse_move_callback_key{};
-        std::function<void(void)>* m_mouse_leave_callback_key{};
-        std::function<void(pos_2D)>* m_mouse_left_click_callback_key{};
-        std::function<void(pos_2D)>* m_mouse_left_release_callback_key{};
+        callback_mouse_leave_t m_callback_mouse_leave{};
+        callback_mouse_move_t m_callback_mouse_move{};
+        callback_mouse_left_click_t m_callback_mouse_left_click{};
+        callback_mouse_left_release_t m_callback_mouse_left_release{};
+        callback_t m_callback{};
+        engine_t::callback_mouse_enter_t* m_callback_mouse_enter_key{};
+        engine_t::callback_mouse_move_t* m_callback_mouse_move_key{};
+        engine_t::callback_mouse_button_t* m_callback_mouse_button_key{};
         std::atomic_bool m_inside{ false };
         std::atomic_bool m_clicked_inside{ false };
         
-        auto click_area_mouse_move_callback(pos_2D pos) -> void;
-        auto click_area_mouse_leave_callback() -> void;
-        auto click_area_mouse_left_click_callback(pos_2D pos) -> void;
-        auto click_area_mouse_left_release_callback(pos_2D pos) -> void;
+        auto click_area_callback_mouse_enter(int entered) -> void;
+        auto click_area_callback_mouse_move(pos_2D pos) -> void;
+        auto click_area_callback_mouse_button(int button, int action, int mods) -> void;
     public:
         click_area_t() = default;
         click_area_t(const click_area_t& in);
@@ -45,11 +49,11 @@ export namespace lgo
             depth_range_t depth_range,
             pos_2D pos,
             size_2D size,
-            std::function<void(pos_2D)> mouse_move_callback,
-            std::function<void(void)> mouse_leave_callback,
-            std::function<void(pos_2D)> mouse_left_click_callback,
-            std::function<void(pos_2D)> mouse_left_release_callback,
-            std::function<void(void)> callback
+            callback_mouse_leave_t callback_mouse_leave,
+            callback_mouse_move_t callback_mouse_move,
+            callback_mouse_left_click_t callback_mouse_left_click,
+            callback_mouse_left_release_t callback_mouse_left_release,
+            callback_t callback
         );
         auto operator=(const click_area_t& in) -> click_area_t&;
 

@@ -87,3 +87,4 @@ target_link_directories(
 add_subdirectory(external)
 add_subdirectory(lgo)
 add_subdirectory(storage)
+add_subdirectory(other)

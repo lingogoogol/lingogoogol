@@ -23,10 +23,10 @@ namespace lgo
             depth_range_t{ in.m_depth,in.m_depth },
             in.m_pos,
             in.m_size,
-            in.m_mouse_move_callback,
-            in.m_mouse_leave_callback,
-            in.m_mouse_left_click_callback,
-            in.m_mouse_left_release_callback,
+            in.m_callback_mouse_leave,
+            in.m_callback_mouse_move,
+            in.m_callback_mouse_left_click,
+            in.m_callback_mouse_left_release,
             in.m_callback
         }
     {}
@@ -38,11 +38,11 @@ namespace lgo
         depth_range_t depth_range,
         pos_2D pos,
         size_2D size,
-        std::function<void(pos_2D)> mouse_move_callback,
-        std::function<void(void)> mouse_leave_callback,
-        std::function<void(pos_2D)> mouse_left_click_callback,
-        std::function<void(pos_2D)> mouse_left_release_callback,
-        std::function<void(void)> callback
+        callback_mouse_leave_t callback_mouse_leave,
+        callback_mouse_move_t callback_mouse_move,
+        callback_mouse_left_click_t callback_mouse_left_click,
+        callback_mouse_left_release_t callback_mouse_left_release,
+        callback_t callback
     )
     :
         m_engine{ engine },
@@ -50,10 +50,10 @@ namespace lgo
         m_pos{ pos },
         m_size{ size },
         m_depth{ depth_range.near },
-        m_mouse_move_callback{ mouse_move_callback },
-        m_mouse_leave_callback{ mouse_leave_callback },
-        m_mouse_left_click_callback{ mouse_left_click_callback },
-        m_mouse_left_release_callback{ mouse_left_release_callback },
+        m_callback_mouse_leave{ callback_mouse_leave },
+        m_callback_mouse_move{ callback_mouse_move },
+        m_callback_mouse_left_click{ callback_mouse_left_click },
+        m_callback_mouse_left_release{ callback_mouse_left_release },
         m_callback{ callback }
     {}
 
@@ -64,15 +64,26 @@ namespace lgo
         m_pos = in.m_pos;
         m_size = in.m_size;
         m_depth = in.m_depth;
-        m_mouse_move_callback = in.m_mouse_move_callback;
-        m_mouse_leave_callback = in.m_mouse_leave_callback;
-        m_mouse_left_click_callback = in.m_mouse_left_click_callback;
-        m_mouse_left_release_callback = in.m_mouse_left_release_callback;
+        m_callback_mouse_leave = in.m_callback_mouse_leave;
+        m_callback_mouse_move = in.m_callback_mouse_move;
+        m_callback_mouse_left_click = in.m_callback_mouse_left_click;
+        m_callback_mouse_left_release = in.m_callback_mouse_left_release;
         m_callback = in.m_callback;
         return *this;
     }
 
-    auto click_area_t::click_area_mouse_move_callback(pos_2D pos) -> void
+    auto click_area_t::click_area_callback_mouse_enter(int entered) -> void
+    {
+        if (entered == GLFW_FALSE && m_inside)
+        {
+            std::unique_lock lock{ m_mutex };
+            m_callback_mouse_leave();
+            m_inside = false;
+        }
+        return;
+    }
+
+    auto click_area_t::click_area_callback_mouse_move(pos_2D pos) -> void
     {
         if (inside(m_pos, m_size, pos) && m_depth_tracker->top(pos, m_depth_id))
         {
@@ -80,7 +91,7 @@ namespace lgo
             if (glfwGetMouseButton(m_engine->window_get(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE)
             {
                 std::unique_lock lock{ m_mutex };
-                m_mouse_move_callback(pos);
+                m_callback_mouse_move(pos);
             }
         }
         else
@@ -88,7 +99,7 @@ namespace lgo
             if (m_inside)
             {
                 std::unique_lock lock{ m_mutex };
-                m_mouse_leave_callback();
+                m_callback_mouse_leave();
                 m_inside = false;
             }
             if (glfwGetMouseButton(m_engine->window_get(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
@@ -99,34 +110,23 @@ namespace lgo
         return;
     }
 
-    auto click_area_t::click_area_mouse_leave_callback() -> void
+    auto click_area_t::click_area_callback_mouse_button(int button, int action, int mods) -> void
     {
-        if (m_inside)
+        if (button != GLFW_MOUSE_BUTTON_LEFT || !m_inside)
         {
-            std::unique_lock lock{ m_mutex };
-            m_mouse_leave_callback();
-            m_inside = false;
+            return;
         }
-        return;
-    }
-
-    auto click_area_t::click_area_mouse_left_click_callback(pos_2D pos) -> void
-    {
-        if (m_inside)
+        pos_2D cursor_pos{ m_engine->cursor_pos_get() };
+        if (action == GLFW_PRESS)
         {
             std::unique_lock lock{ m_mutex };
-            m_mouse_left_click_callback(pos);
+            m_callback_mouse_left_click(cursor_pos);
             m_clicked_inside = true;
         }
-        return;
-    }
-
-    auto click_area_t::click_area_mouse_left_release_callback(pos_2D pos) -> void
-    {
-        if (m_inside)
+        else if (action == GLFW_RELEASE)
         {
             std::unique_lock lock{ m_mutex };
-            m_mouse_left_release_callback(pos);
+            m_callback_mouse_left_release(cursor_pos);
             if (m_clicked_inside)
             {
                 auto callback_copy{ m_callback };
@@ -189,23 +189,26 @@ namespace lgo
         }
         std::unique_lock lock{ m_mutex };
         m_depth_id = m_depth_tracker->add(m_pos, m_size, m_depth, true);
-        m_mouse_move_callback_key = m_engine->add_mouse_move
+        m_callback_mouse_enter_key = m_engine->callback_mouse_enter_add
         (
-            std::bind(&click_area_t::click_area_mouse_move_callback, this, std::placeholders::_1)
+            std::bind(&click_area_t::click_area_callback_mouse_enter, this, std::placeholders::_1)
         );
-        m_mouse_leave_callback_key = m_engine->add_mouse_leave
+        m_callback_mouse_move_key = m_engine->callback_mouse_move_add
         (
-            std::bind(&click_area_t::click_area_mouse_leave_callback, this)
+            std::bind(&click_area_t::click_area_callback_mouse_move, this, std::placeholders::_1)
         );
-        m_mouse_left_click_callback_key = m_engine->add_mouse_left_click
+        m_callback_mouse_button_key = m_engine->callback_mouse_button_add
         (
-            std::bind(&click_area_t::click_area_mouse_left_click_callback, this, std::placeholders::_1)
+            std::bind
+            (
+                &click_area_t::click_area_callback_mouse_button,
+                this,
+                std::placeholders::_1,
+                std::placeholders::_2,
+                std::placeholders::_3
+            )
         );
-        m_mouse_left_release_callback_key = m_engine->add_mouse_left_release
-        (
-            std::bind(&click_area_t::click_area_mouse_left_release_callback, this, std::placeholders::_1)
-        );
-        click_area_mouse_move_callback(m_engine->get_cursor_pos());
+        click_area_callback_mouse_move(m_engine->get_cursor_pos());
         show_end(base);
         return;
     }
@@ -217,10 +220,9 @@ namespace lgo
             return;
         }
         std::unique_lock lock{ m_mutex };
-        m_engine->remove_mouse_move(m_mouse_move_callback_key);
-        m_engine->remove_mouse_leave(m_mouse_leave_callback_key);
-        m_engine->remove_mouse_left_click(m_mouse_left_click_callback_key);
-        m_engine->remove_mouse_left_release(m_mouse_left_release_callback_key);
+        m_engine->callback_mouse_enter_remove(m_callback_mouse_enter_key);
+        m_engine->callback_mouse_move_remove(m_callback_mouse_move_key);
+        m_engine->callback_mouse_button_remove(m_callback_mouse_button_key);
         m_depth_tracker->remove(m_depth_id);
         hide_end(base);
         return;

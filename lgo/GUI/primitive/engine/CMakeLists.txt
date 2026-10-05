@@ -85,6 +85,13 @@ function(add_slang_target TARGET OUT_NAME)
         DEPENDS
             ${CMAKE_CURRENT_BINARY_DIR}/${OUT_NAME}.spv
     )
+
+    install(
+        FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/${OUT_NAME}.spv
+        DESTINATION
+            ${CMAKE_INSTALL_PREFIX}/shader
+    )
 endfunction()
 
 add_slang_target(

@@ -23,10 +23,10 @@ export namespace lgo
         rect_t m_horizontal{}, m_vertical{};
         color_t m_border_color{};
         
-        auto button_plus_mouse_move_callback(pos_2D) -> void;
-        auto button_plus_mouse_leave_callback() -> void;
-        auto button_plus_mouse_left_click_callback(pos_2D) -> void;
-        auto button_plus_mouse_left_release_callback(pos_2D) -> void;
+        auto button_plus_callback_mouse_leave() -> void;
+        auto button_plus_callback_mouse_move(pos_2D) -> void;
+        auto button_plus_callback_mouse_left_click(pos_2D) -> void;
+        auto button_plus_callback_mouse_left_release(pos_2D) -> void;
     public:
         button_plus_t() = default;
 

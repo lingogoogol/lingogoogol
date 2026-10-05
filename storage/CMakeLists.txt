@@ -25,3 +25,10 @@ target_link_libraries(
         storage.multipart
         storage.api
 )
+
+install(
+    TARGETS
+        storage
+    DESTINATION
+        ${CMAKE_INSTALL_PREFIX}
+)

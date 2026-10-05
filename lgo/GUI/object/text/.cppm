@@ -46,7 +46,7 @@ export namespace lgo
             const font_preference_t& font_preference,
             color_t color,
             alignment_2D alignment,
-            bool load = true
+            bool load_now = true
         );
 
         auto init
@@ -61,7 +61,7 @@ export namespace lgo
             const font_preference_t& font_preference,
             color_t color,
             alignment_2D alignment,
-            bool load = true
+            bool load_now = true
         )
         -> void;
 
@@ -76,11 +76,11 @@ export namespace lgo
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
         auto get_text() const -> const std::string&;
-        auto set_text(std::string text, bool load = true) -> void;
+        auto set_text(std::string text, bool load_now = true) -> void;
         auto get_clip_pos() const -> pos_2D;
-        auto set_clip_pos(pos_2D clip_pos, bool load = true) -> void;
+        auto set_clip_pos(pos_2D clip_pos, bool load_now = true) -> void;
         auto get_clip_size() const -> size_2D;
-        auto set_clip_size(size_2D clip_size, bool load = true) -> void;
+        auto set_clip_size(size_2D clip_size, bool load_now = true) -> void;
         auto set_color(color_t color) -> void;
         auto set_frame_color(color_t) -> void;
         auto get_text_size() const -> size_2D;
@@ -88,8 +88,8 @@ export namespace lgo
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
 
-        //Always lock m_mutex before m_pending_mutex to prevent deadlock.
-        static std::mutex m_pending_mutex;
+        //Always lock m_mutex before m_load_mutex to prevent deadlock.
+        static std::mutex m_load_mutex;
         static std::set<text_line_t*> m_pending;
 
         static auto pending_load() -> void;
@@ -108,7 +108,8 @@ export namespace lgo
         static std::uint64_t m_font_heap_index;
 
         //Populate m_div and m_glyph based on other members.
-        auto init1() -> void;
+        auto load() -> void;
+        auto load_try(bool load_now) -> void;
 
         const font_preference_t* m_font_preference{};
         std::string m_text{};
@@ -119,7 +120,7 @@ export namespace lgo
         size_2D m_clip_size{};
         size_1D m_margin{};
         color_t m_color{};
-        bool m_pending_load{};
+        bool m_load_pending{};
     };
 
     class text_line_std_t: public text_line_t
@@ -163,7 +164,7 @@ export namespace lgo
             alignment_2D alignment
         );
 
-        auto set_text(std::string text, bool load = true) -> void;
+        auto set_text(std::string text, bool load_now = true) -> void;
     };
 
     class text_line_flex_std_t: public text_line_flex_t

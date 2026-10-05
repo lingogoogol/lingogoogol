@@ -28,7 +28,7 @@ namespace lgo
         std::string text,
         color_t color,
         size_1D size_x,
-        bool load
+        bool load_now
     )
     :
         text_line_scroll_t
@@ -44,7 +44,7 @@ namespace lgo
             font_preference_t::default_get(),
             color,
             alignment_2D{ alignment_x::left, alignment_y::top },
-            load
+            load_now
         }
     {}
 

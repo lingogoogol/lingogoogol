@@ -23,20 +23,20 @@ export namespace lgo
         focus_t* m_focus{};
         std::atomic_bool m_on_focus{ false };
         click_area_t m_click_area{};
-        std::function<void(wchar_t)>* m_callback{};
-        std::function<void(std::string*, wchar_t)> m_constraint{};
+        std::function<void(char32_t)>* m_callback{};
+        std::function<void(std::string*, char32_t)> m_constraint{};
 
-        auto text_input_charw_callback(wchar_t in) -> void;
+        auto text_input_cha_callback(char32_t in) -> void;
         auto text_input_click_area_callback() -> void;
         auto text_input_on_focus_callback() -> void;
 
         auto set_callback() -> void;
         auto clear_callback() -> void;
     public:
-        static auto constraint_default(std::string* text, wchar_t in) -> void;
-        static auto only_num(std::string* text, wchar_t in) -> void;
-        static auto limit_len(std::string* text, wchar_t in, std::size_t len) -> void;
-        static auto only_num_limit_len(std::string* text, wchar_t in, std::size_t len) -> void;
+        static auto constraint_default(std::string* text, char32_t in) -> void;
+        static auto only_num(std::string* text, char32_t in) -> void;
+        static auto limit_len(std::string* text, char32_t in, std::size_t len) -> void;
+        static auto only_num_limit_len(std::string* text, char32_t in, std::size_t len) -> void;
 
         text_input_constraint_impl_t() = default;
 
@@ -48,7 +48,7 @@ export namespace lgo
             depth_range_t depth_range,
             pos_2D pos,
             std::string text,
-            std::function<void(std::string*, wchar_t)> constraint,
+            std::function<void(std::string*, char32_t)> constraint,
             focus_t* focus,
             t_arg&&... arg
         );
@@ -61,7 +61,7 @@ export namespace lgo
     };
 
     template<typename t_text>
-    auto text_input_constraint_impl_t<t_text>::text_input_charw_callback(wchar_t in) -> void
+    auto text_input_constraint_impl_t<t_text>::text_input_cha_callback(char32_t in) -> void
     {
         std::unique_lock lock{ this->m_mutex };
         std::string text{ t_text::get_text() };
@@ -109,9 +109,9 @@ export namespace lgo
     auto text_input_constraint_impl_t<t_text>::set_callback() -> void
     {
         std::unique_lock lock{ this->m_mutex };
-        m_callback = m_engine->add_charw
+        m_callback = m_engine->callback_cha_add
         (
-            std::bind(&text_input_constraint_impl_t::text_input_charw_callback, this, std::placeholders::_1)
+            std::bind(&text_input_constraint_impl_t::text_input_cha_callback, this, std::placeholders::_1)
         );
         return;
     }
@@ -119,12 +119,12 @@ export namespace lgo
     template<typename t_text>
     auto text_input_constraint_impl_t<t_text>::clear_callback() -> void
     {
-        m_engine->remove_charw(m_callback);
+        m_engine->callback_cha_remove(m_callback);
         return;
     }
 
     template<typename t_text>
-    auto text_input_constraint_impl_t<t_text>::constraint_default(std::string* text, wchar_t in) -> void
+    auto text_input_constraint_impl_t<t_text>::constraint_default(std::string* text, char32_t in) -> void
     {
         if (in == L'\b')
         {
@@ -141,7 +141,7 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_input_constraint_impl_t<t_text>::only_num(std::string* text, wchar_t in) -> void
+    auto text_input_constraint_impl_t<t_text>::only_num(std::string* text, char32_t in) -> void
     {
         if ((in >= L'0' && in <= L'9') || (in >= L'A' && in <= L'F') || in == L'\b')
         {
@@ -151,7 +151,7 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_input_constraint_impl_t<t_text>::limit_len(std::string* text, wchar_t in, std::size_t len) -> void
+    auto text_input_constraint_impl_t<t_text>::limit_len(std::string* text, char32_t in, std::size_t len) -> void
     {
         if (text->size() < len || in == L'\b')
         {
@@ -161,7 +161,7 @@ export namespace lgo
     }
 
     template<typename t_text>
-    auto text_input_constraint_impl_t<t_text>::only_num_limit_len(std::string* text, wchar_t in, std::size_t len) -> void
+    auto text_input_constraint_impl_t<t_text>::only_num_limit_len(std::string* text, char32_t in, std::size_t len) -> void
     {
         if ((text->size() < len && ((in >= L'0' && in <= L'9') || (in >= L'A' && in <= L'F'))) || in == L'\b')
         {
@@ -179,7 +179,7 @@ export namespace lgo
         depth_range_t depth_range,
         pos_2D pos,
         std::string text,
-        std::function<void(std::string*, wchar_t)> constraint,
+        std::function<void(std::string*, char32_t)> constraint,
         focus_t* focus,
         t_arg&&... arg
     ):
@@ -201,8 +201,8 @@ export namespace lgo
             depth_range,
             pos,
             t_text::get_size(),
-            [] (pos_2D) {},
             [] () {},
+            [] (pos_2D) {},
             [] (pos_2D) {},
             [] (pos_2D) {},
             std::bind(&text_input_constraint_impl_t::text_input_click_area_callback, this)

@@ -30,6 +30,7 @@
 		"terminal.integrated.cwd": "../",
 		"explorer.autoReveal": false,
 		"cmake.buildDirectory": "${workspaceFolder}/../build/${buildKitTriple}_${buildType}",
+		"cmake.installPrefix": "${workspaceFolder}/../install/${buildKitTriple}_${buildType}",
 		"cmake.generator": "Ninja",
 		"cmake.debugConfig":
 		{
