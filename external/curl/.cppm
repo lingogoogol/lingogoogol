@@ -12,6 +12,8 @@ constexpr auto CURL_GLOBAL_DEFAULT_export{ CURL_GLOBAL_DEFAULT };
 export
 {
     using ::CURL;
+    using ::CURLM;
+    using ::CURLMsg;
     using ::curl_slist;
     using ::curl_header;
     using ::curl_off_t;
@@ -20,6 +22,8 @@ export
     using enum ::CURLcode;
     using ::CURLHcode;
     using enum ::CURLHcode;
+    using ::CURLMcode;
+    using enum ::CURLMcode;
     using ::curl_infotype;
     using enum ::curl_infotype;
     using ::CURLoption;
@@ -37,6 +41,15 @@ export
     using ::curl_easy_setopt;
     using ::curl_easy_perform;
     using ::curl_easy_header;
+
+    using ::curl_multi_init;
+    using ::curl_multi_cleanup;
+    using ::curl_multi_strerror;
+    using ::curl_multi_add_handle;
+    using ::curl_multi_perform;
+    using ::curl_multi_info_read;
+    using ::curl_multi_remove_handle;
+    using ::curl_multi_poll;
 
     using ::curl_slist_append;
     using ::curl_slist_free_all;

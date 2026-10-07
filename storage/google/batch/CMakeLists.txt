@@ -1,19 +1,22 @@
-add_library(storage.multipart STATIC)
+add_library(storage.google.batch STATIC)
 
 target_sources(
-    storage.multipart
+    storage.google.batch
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
 target_link_libraries(
-    storage.multipart
+    storage.google.batch
     PRIVATE
         common
-    PUBLIC
         external.curl
         lgo.dev.error
         lgo.io.file
+        storage.http
+        storage.google.account
 )

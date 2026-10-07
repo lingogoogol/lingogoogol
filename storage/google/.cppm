@@ -1,0 +1,6 @@
+export module storage.google;
+
+export import storage.google.account;
+export import storage.google.easy;
+export import storage.google.batch;
+export import storage.google.drive;

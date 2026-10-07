@@ -3,14 +3,15 @@ add_executable(
     storage.cpp
 )
 
-add_subdirectory(multipart)
-add_subdirectory(api)
+add_subdirectory(encode)
+add_subdirectory(crypto)
+add_subdirectory(http)
+add_subdirectory(google)
 
 target_link_libraries(
     storage
     PRIVATE
         common
-    PUBLIC
         external.curl
         external.Windows
         external.ShObjIdl
@@ -22,8 +23,9 @@ target_link_libraries(
         lgo.math
         lgo.io
         lgo.GUI
-        storage.multipart
-        storage.api
+        storage.encode
+        storage.http
+        storage.google
 )
 
 install(

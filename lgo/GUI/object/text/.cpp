@@ -230,7 +230,7 @@ namespace lgo
 
     auto text_line_t::pending_load() -> void
     {
-        do
+        while (true)
         {
             //Always lock m_mutex before m_load_mutex to prevent deadlock.
             std::unique_lock pending_lock{ m_load_mutex };
@@ -239,14 +239,13 @@ namespace lgo
             end = m_pending.end();
             if (begin == end)
             {
-                break;
+                return;
             }
             text_line_t* ptr{ *begin };
             m_pending.erase(begin);
             pending_lock.unlock();
             ptr->load();
         }
-        while (true);
         return;
     }
 

@@ -1,22 +1,21 @@
-add_library(storage.api STATIC)
+add_library(storage.http.curl.easy STATIC)
 
 target_sources(
-    storage.api
+    storage.http.curl.easy
     PUBLIC
         FILE_SET CXX_MODULES
         FILES
             .cppm
+    PRIVATE
+        .cpp
 )
 
 target_link_libraries(
-    storage.api
+    storage.http.curl.easy
     PRIVATE
         common
-    PUBLIC
-        external.Windows
-        external.wincrypt
-        external.OpenSSL
         external.curl
+        lgo.dev
         lgo.io.file
-        storage.multipart
+        storage.http.curl.curl
 )

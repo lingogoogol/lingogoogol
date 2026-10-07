@@ -15,42 +15,11 @@ import lgo.math;
 import lgo.io;
 import lgo.GUI;
 
-import storage.multipart;
-import storage.api;
+import storage.encode;
+import storage.http;
+import storage.google;
 
-auto curl_main() -> CURL*&
-{
-	static CURL* out{};
-	return out;
-}
-
-auto curl_upload() -> CURL*&
-{
-	static CURL* out{};
-	return out;
-}
-
-auto curl_download() -> CURL*&
-{
-	static CURL* out{};
-	return out;
-}
-
-auto init() -> void
-{
-	api_curl(curl_global_init(CURL_GLOBAL_DEFAULT));
-	curl_main() = curl_easy_init();
-	return;
-}
-
-auto free() -> void
-{
-	curl_easy_cleanup(curl_main());
-	curl_global_cleanup();
-	return;
-}
-
-account_t account_main{};
+curl_t curl_global{};
 
 auto http_api_try
 (
@@ -58,7 +27,7 @@ auto http_api_try
 	std::string url,
 	std::vector<std::pair<std::string, std::string>> query,
 	std::vector<std::string> header,
-	account_t& account
+	google_account_t& account
 )
 -> std::string
 {
@@ -78,7 +47,6 @@ auto http_api_try
 		header_curl = curl_slist_append(header_curl, i.c_str());
 	}
 	std::string response{};
-	debug_str_t debug_str{};
     while (true)
 	{
         try
@@ -86,17 +54,10 @@ auto http_api_try
 			api_curl(curl_easy_setopt(curl, CURLOPT_URL, url.data()));
 			api_curl(curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_curl));
 			api_curl(curl_easy_setopt(curl, CURLOPT_WRITEDATA, static_cast<void*>(&response)));
-			api_curl(curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_callback));
-			api_curl(curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L));
-			api_curl(curl_easy_setopt(curl, CURLOPT_DEBUGDATA, static_cast<void*>(&debug_str)));
-			api_curl(curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, &debug_callback));
-			api_curl(curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L));
-			api_curl(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L));
-			api_curl(curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 30L));
+			api_curl(curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
 			api_curl(curl_easy_perform(curl));
-			api_curl(curl_easy_setopt(curl, CURLOPT_VERBOSE, 0L));
         }
-        catch (error_curl_t error)
+        catch (lgo::error_t error)
 		{
             lgo::log_file(error.message() + "\n");
             continue;
@@ -113,7 +74,7 @@ auto http_api
 	std::string url,
 	std::vector<std::pair<std::string, std::string>> query,
 	std::vector<std::string> header,
-	account_t& account
+	google_account_t& account
 )
 -> std::string
 {
@@ -124,7 +85,7 @@ auto http_api
 		result = http_api_try(curl, url, query, header, account);
 		api_curl(curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code));
 	}
-	while (response_code / 100 != 2);
+	while (response_code < 200 || response_code >= 300);
 	return result;
 }
 
@@ -308,16 +269,16 @@ auto to_date_time(FILETIME file) -> std::string
 
 auto file_exist(std::string id) -> bool
 {
-	api_curl(curl_easy_setopt(curl_main(), CURLOPT_HTTPGET, 1L));
+	api_curl(curl_easy_setopt(curl_easy_t::get(), CURLOPT_HTTPGET, 1L));
 	std::string response
 	{
 		http_api
 		(
-			curl_main(),
+			curl_easy_t::get(),
 			"https://www.googleapis.com/drive/v3/files/" + id,
 			{},
 			{},
-			account_main
+			google_account_t::default_get()
 		)
 	};
 	return !nlohmann::json::parse(response).contains("error");
@@ -349,16 +310,17 @@ auto data_upload(CURL* curl, std::string name, std::string content) -> std::stri
 			{
 				{ "Content-Type: application/json; charset=UTF-8" }
 			},
-			account_main
+			google_account_t::default_get()
 		)
 	};
 	return nlohmann::json::parse(response)["id"];
 }
 
-auto data_get(CURL* curl, std::string id) -> data_t
+auto data_get(CURL* curl, std::string id) -> blob_data_str_t
 {
 	api_curl(curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-	std::string response_str{
+	std::string response_str
+	{
 		http_api
 		(
 			curl,
@@ -367,17 +329,18 @@ auto data_get(CURL* curl, std::string id) -> data_t
 				{ "fields", "name,description" }
 			},
 			{},
-			account_main
+			google_account_t::default_get()
 		)
 	};
 	nlohmann::json response{ nlohmann::json::parse(response_str) };
-	return data_t{ response["name"], response["description"] };
+	return blob_data_str_t{ response["name"], response["description"] };
 }
 
 auto data_name_get(CURL* curl, std::string id) -> std::string
 {
 	api_curl(curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-	std::string response{
+	std::string response
+	{
 		http_api
 		(
 			curl,
@@ -386,7 +349,7 @@ auto data_name_get(CURL* curl, std::string id) -> std::string
 				{ "fields", "name" }
 			},
 			{},
-			account_main
+			google_account_t::default_get()
 		)
 	};
 	return nlohmann::json::parse(response)["name"];
@@ -395,7 +358,8 @@ auto data_name_get(CURL* curl, std::string id) -> std::string
 auto data_content_get(CURL* curl, std::string id) -> std::string
 {
 	api_curl(curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-	std::string response{
+	std::string response
+	{
 		http_api
 		(
 			curl,
@@ -404,7 +368,7 @@ auto data_content_get(CURL* curl, std::string id) -> std::string
 				{ "fields", "description" }
 			},
 			{},
-			account_main
+			google_account_t::default_get()
 		)
 	};
 	return nlohmann::json::parse(response)["description"];
@@ -413,10 +377,10 @@ auto data_content_get(CURL* curl, std::string id) -> std::string
 auto data_update(CURL* curl, std::string id, std::string request) -> void
 {
 	api_curl(curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH"));
-	read_src_t data{ request };
+	curl_easy_t::read_src_t data{ request };
 	api_curl(curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L));
 	api_curl(curl_easy_setopt(curl, CURLOPT_READDATA, static_cast<void*>(&data)));
-	api_curl(curl_easy_setopt(curl, CURLOPT_READFUNCTION, &read_callback));
+	api_curl(curl_easy_setopt(curl, CURLOPT_READFUNCTION, &curl_easy_t::read_callback));
 	http_api
 	(
 		curl,
@@ -425,7 +389,7 @@ auto data_update(CURL* curl, std::string id, std::string request) -> void
 			{ "fields", "description" }
 		},
 		{},
-		account_main
+		google_account_t::default_get()
 	);
 	api_curl(curl_easy_setopt(curl, CURLOPT_UPLOAD, 0L));
 	api_curl(curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, nullptr));
@@ -433,7 +397,7 @@ auto data_update(CURL* curl, std::string id, std::string request) -> void
 	return;
 }
 
-auto data_set(CURL* curl, std::string id, data_t data) -> void
+auto data_set(CURL* curl, std::string id, blob_data_str_opt_t data) -> void
 {
 	data_update
 	(
@@ -481,18 +445,21 @@ auto data_content_set(CURL* curl, std::string id, std::string content) -> void
 
 auto data_upload
 (
-	curl_multipart_t& multipart,
-	blob_empty_queue_t& empty_blob,
+	google_batch_t& batch,
+	blob_queue_t& empty_blob,
 	std::string name,
 	std::string content
 )
 -> std::string
 {
 	std::string id{ empty_blob.get() };
-	data_t data{};
-	data.m_name = name;
-	data.m_content = content;
-	data_set_request(multipart, id, data);
+	blob_opt_t blob
+	{
+		.m_id{ id },
+		.m_name{ name },
+		.m_content{ content }
+	};
+	blob_update(batch, blob);
 	return id;
 }
 
@@ -585,7 +552,7 @@ auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::str
 
 auto folder_data_add
 (
-	blob_empty_queue_t& empty_blob,
+	blob_queue_t& empty_blob,
 	std::map<std::string, blob_t>& data,
 	std::string main_id,
 	std::string last_id
@@ -614,7 +581,7 @@ auto folder_data_add
 
 auto folder_add
 (
-	blob_empty_queue_t& empty_blob,
+	blob_queue_t& empty_blob,
 	blob_t& main,
 	std::map<std::string, blob_t>& data,
 	std::string pos,
@@ -650,8 +617,8 @@ auto folder_add
 
 auto file_upload
 (
-	curl_multipart_t& multipart,
-	blob_empty_queue_t& empty_blob,
+	google_batch_t& batch,
+	blob_queue_t& empty_blob,
 	loading_t* loading,
 	std::shared_ptr<loading_folder_t> loading_folder,
 	std::shared_ptr<lgo::divy_soft_t> progress_bar_div,
@@ -688,20 +655,25 @@ auto file_upload
 	uploading.m_loading = loading;
 	uploading.m_parent = pos;
 	uploading.m_main_id = empty_blob.get();
-	data_t data{};
-	data.m_name =
-		nlohmann::json
+	blob_opt_t blob
+	{
+		.m_id{ uploading.m_main_id },
+		.m_name
 		{
-			{ "name", file.filename() },
-			{ "parent", pos },
-			{ "size", uploading.m_size },
-			{ "last", "null" },
-			{ "next", "null" }
-		}
-		.dump();
-	data.m_content = nlohmann::json::array().dump();
-	data_set_request(multipart, uploading.m_main_id, data);
-	http_api_request_action(multipart);
+			nlohmann::json
+			{
+				{ "name", file.filename() },
+				{ "parent", pos },
+				{ "size", uploading.m_size },
+				{ "last", "null" },
+				{ "next", "null" }
+			}
+			.dump()
+		},
+		.m_content{ nlohmann::json::array().dump() }
+	};
+	blob_update(batch, blob);
+	batch.run_clear_if_full();
 	if (progress_bar_div)
 	{
 		uploading.m_progress_bar->set_text("檔案：0B/" + std::to_string(uploading.m_size) + "B " + file.string(), false);
@@ -713,8 +685,8 @@ auto file_upload
 
 auto folder_upload
 (
-	curl_multipart_t& multipart,
-	blob_empty_queue_t& empty_blob,
+	google_batch_t& batch,
+	blob_queue_t& empty_blob,
 	loading_t* loading,
 	std::shared_ptr<loading_folder_t> loading_folder,
 	std::shared_ptr<lgo::divy_soft_t> progress_bar_div,
@@ -742,7 +714,7 @@ auto folder_upload
 	{
 		if (j->is_regular_file())
 		{
-			std::string id{ file_upload(multipart, empty_blob, loading, loading_folder
+			std::string id{ file_upload(batch, empty_blob, loading, loading_folder
 			, progress_bar_div, main.m_id, j->path(), uploading_list, mutex) };
 			folder_add
 			(
@@ -765,7 +737,7 @@ auto folder_upload
 			{
 				folder_upload
 				(
-					multipart,
+					batch,
 					empty_blob,
 					loading,
 					loading_folder,
@@ -793,11 +765,29 @@ auto folder_upload
 	}
 	for (auto i : data)
 	{
-		data_set_request(multipart, i.second);
-		http_api_request_action(multipart);
+		blob_update
+		(
+			batch,
+			blob_opt_t
+			{
+				.m_id{ i.second.m_id },
+				.m_name{ i.second.m_name },
+				.m_content{ i.second.m_content }
+			}
+		);
+		batch.run_clear_if_full();
 	}
-	data_set_request(multipart, main);
-	http_api_request_action(multipart);
+	blob_update
+	(
+		batch,
+		blob_opt_t
+		{
+			.m_id{ main.m_id },
+			.m_name{ main.m_name },
+			.m_content{ main.m_content }
+		}
+	);
+	batch.run_clear_if_full();
 	lgo::log_file(folder.string() + "\n");
 	return main.m_id;
 }
@@ -1034,7 +1024,7 @@ auto folder_download_callback
 auto list_folder_content(CURL* curl, std::string* pos) -> nlohmann::json
 {
 	api_curl(curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-	data_t response_data{ data_get(curl, *pos) };
+	blob_data_str_t response_data{ data_get(curl, *pos) };
 	std::string next{ nlohmann::json::parse(response_data.m_name)["begin"] };
 	nlohmann::json obj_list{ nlohmann::json::array() };
 	while (next != "null")
@@ -1094,7 +1084,7 @@ auto list
 )
 -> void
 {
-	nlohmann::json obj_list{ list_folder_content(curl_main(), pos) };
+	nlohmann::json obj_list{ list_folder_content(curl_easy_t::get(), pos) };
 	viewer_div->clear_state();
 	for (auto i : obj_list)
 	{
@@ -1355,9 +1345,8 @@ auto home
 
 constexpr std::uint64_t batch_request_max{ 100 };
 
-auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
+auto upload(loading_list_t* list, blob_queue_t* empty_blob) -> void
 {
-	curl_upload() = curl_easy_init();
 	std::deque<loading_file_t> file_list{};
 	std::deque<delete_file_t> delete_id{};
 	while (!close_app)
@@ -1379,12 +1368,12 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 			if (obj_ptr->m_type == "file")
 			{
 				lock1.unlock();
-				curl_multipart_t multipart{ http_api_multipart(curl_upload(), account_main) };
+				google_batch_t batch{ std::move(curl_easy_t::get()), "/drive/v3" };
 				std::string id
 				{
 					file_upload
 					(
-						multipart,
+						batch,
 						*empty_blob,
 						obj_ptr,
 						nullptr,
@@ -1395,10 +1384,11 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						list->m_mutex
 					)
 				};
-				multipart.action();
+				batch.run();
+				curl_easy_t::get() = std::move(batch);
 				folder_add
 				(
-					curl_upload(),
+					curl_easy_t::get(),
 					obj_ptr->m_pos,
 					nlohmann::json
 					{
@@ -1426,12 +1416,12 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 				auto loading_folder{ std::make_shared<loading_folder_t>() };
 				loading_folder->m_name = obj_ptr->m_name;
 				loading_folder->m_progress_bar = progress_bar;
-				curl_multipart_t multipart{ http_api_multipart(curl_upload(), account_main) };
+				google_batch_t batch{ std::move(curl_easy_t::get()), "/drive/v3" };
 				std::string id
 				{
 					folder_upload
 					(
-						multipart,
+						batch,
 						*empty_blob,
 						obj_ptr,
 						loading_folder,
@@ -1442,10 +1432,11 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						list->m_mutex
 					)
 				};
-				multipart.action();
+				batch.run();
+				curl_easy_t::get() = std::move(batch);
 				folder_add
 				(
-					curl_upload(),
+					curl_easy_t::get(),
 					obj_ptr->m_pos,
 					nlohmann::json
 					{
@@ -1470,7 +1461,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 					)
 				};
 				lock1.unlock();
-				data_t folder_root_data{};
+				blob_data_str_opt_t folder_root_data{};
 				folder_root_data.m_name =
 					nlohmann::json
 					{
@@ -1481,8 +1472,8 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						{ "count", 0 }
 					}
 					.dump();
-				data_set(curl_upload(), folder_root_id, folder_root_data);
-				api_curl(curl_easy_setopt(curl_upload(), CURLOPT_HTTPGET, 1L));
+				data_set(curl_easy_t::get(), folder_root_id, folder_root_data);
+				api_curl(curl_easy_setopt(curl_easy_t::get(), CURLOPT_HTTPGET, 1L));
 				empty_blob->clear_begin();
 				nlohmann::json response
 				{
@@ -1490,11 +1481,11 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 					(
 						http_api
 						(
-							curl_upload(),
+							curl_easy_t::get(),
 							"https://www.googleapis.com/drive/v3/files",
 							{},
 							{},
-							account_main
+							google_account_t::default_get()
 						)
 					)
 				};
@@ -1524,13 +1515,13 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						(
 							http_api
 							(
-								curl_upload(),
+								curl_easy_t::get(),
 								"https://www.googleapis.com/drive/v3/files",
 								{
 									{ "pageToken", response["nextPageToken"] }
 								},
 								{},
-								account_main
+								google_account_t::default_get()
 							)
 						);
 				}
@@ -1567,7 +1558,7 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 				std::uint64_t id_new_count{ full ? (request_count + 1) : request_count };
 				std::vector<std::string> id{ empty_blob->get(id_new_count) };
 				std::uint64_t id_i{ 0 };
-				curl_multipart_t multipart{ http_api_multipart(curl_upload(), account_main) };
+				google_batch_t batch{ std::move(curl_easy_t::get()), "/drive/v3" };
 				std::ifstream content_stream{ lgo::create_ifstream(uploading.m_name) };
 				content_stream.seekg(static_cast<std::uint64_t>(uploading.m_progress));
 				nlohmann::json id_array{ nlohmann::json::array() };
@@ -1579,56 +1570,83 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 				}
 				if (full)
 				{
-					data_name_set_request
+					blob_update
 					(
-						multipart,
-						uploading.m_main_last_id,
-						nlohmann::json
+						batch,
+						blob_opt_t
 						{
-							{ "name", uploading.m_name },
-							{ "parent", uploading.m_parent },
-							{ "size", uploading.m_size },
-							{ "last", uploading.m_main_last_last },
-							{ "next", id[id_i] }
+							.m_id{ uploading.m_main_last_id },
+							.m_name
+							{
+								nlohmann::json
+								{
+									{ "name", uploading.m_name },
+									{ "parent", uploading.m_parent },
+									{ "size", uploading.m_size },
+									{ "last", uploading.m_main_last_last },
+									{ "next", id[id_i] }
+								}
+							}
 						}
-						.dump()
 					);
-					data_t main_data{};
-					main_data.m_name =
-						nlohmann::json
+					blob_update
+					(
+						batch,
+						blob_opt_t
 						{
-							{ "name", uploading.m_name },
-							{ "parent", uploading.m_parent },
-							{ "size", uploading.m_size },
-							{ "last", uploading.m_main_last_id },
-							{ "next", "null" }
+							.m_id{ id[id_i] },
+							.m_name
+							{
+								nlohmann::json
+								{
+									{ "name", uploading.m_name },
+									{ "parent", uploading.m_parent },
+									{ "size", uploading.m_size },
+									{ "last", uploading.m_main_last_id },
+									{ "next", "null" }
+								}
+							},
+							.m_content = id_array
 						}
-						.dump();
-					main_data.m_content = id_array.dump();
-					data_set_request(multipart, id[id_i], main_data);
+					);
 					uploading.m_main_last_last = uploading.m_main_last_id;
 					uploading.m_main_last_id = id[id_i];
 					++id_i;
 				}
 				else
 				{
-					data_content_set_request(multipart, uploading.m_main_id, id_array.dump());
+					blob_update
+					(
+						batch,
+						blob_opt_t
+						{
+							.m_id{ uploading.m_main_id },
+							.m_content = id_array
+						}
+					);
 					uploading.m_main_last_last = uploading.m_main_last_id;
 					uploading.m_main_last_id = uploading.m_main_id;
 				}
 				if (uploading.m_last_id != "null")
 				{
-					data_name_set_request
+					blob_update
 					(
-						multipart,
-						uploading.m_last_id,
-						nlohmann::json{
-							{ "main", uploading.m_main_id },
-							{ "last", uploading.m_last_last },
-							{ "next", id[id_i] },
-							{ "size", uploading.m_last_size }
+						batch,
+						blob_opt_t
+						{
+							.m_id{ uploading.m_last_id },
+							.m_name
+							{
+								nlohmann::json
+								{
+									{ "main", uploading.m_main_id },
+									{ "last", uploading.m_last_last },
+									{ "next", id[id_i] },
+									{ "size", uploading.m_last_size }
+								}
+							},
+							.m_content = id_array
 						}
-						.dump()
 					);
 				}
 				for (std::uint64_t i{ 0 }; i < request_count; ++i)
@@ -1657,23 +1675,29 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 						next_id = id[id_i + 1];
 						size = content_size_max_base64;
 					}
-					data_t data{};
-					data.m_name =
-						nlohmann::json
+					blob_str_opt_t blob
+					{
+						.m_id{ id[id_i] },
+						.m_name
 						{
-							{ "main", uploading.m_main_id },
-							{ "last", last_id },
-							{ "next", next_id },
-							{ "size", size }
+							nlohmann::json
+							{
+								{ "main", uploading.m_main_id },
+								{ "last", last_id },
+								{ "next", next_id },
+								{ "size", size }
+							}
+							.dump()
 						}
-						.dump();
-					data.m_content.resize(size);
-					content_stream.read(data.m_content.data(), size);
-					data.m_content = base64url_encode(data.m_content);
-					data_set_request(multipart, id[id_i], data);
+					};
+					std::string content( size, 0 );
+					content_stream.read(content.data(), size);
+					blob.m_content = base64url_encode(content);
+					blob_update(batch, blob);
 					++id_i;
 				}
-				multipart.action();
+				batch.run();
+				curl_easy_t::get() = std::move(batch);
 				uploading.m_progress += batch_size;
 				if (uploading.m_progress_bar)
 				{
@@ -1702,14 +1726,15 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 		else if (!delete_id.empty())
 		{
 			std::uint64_t delete_count{ std::min(delete_id.size(), 100ULL) };
-			curl_multipart_t multipart{ http_api_multipart(curl_upload(), account_main) };
+			google_batch_t batch{ std::move(curl_easy_t::get()), "/drive/v3" };
 			for (std::uint64_t i{ 0 }; i < delete_count; ++i)
 			{
-				http_request_t& request{ http_api_request(multipart) };
+				http_request_t& request{ batch.request_add_handle() };
 				request.method_set("DELETE");
 				request.path_set("/drive/v3/files/" + delete_id[i].m_id);
 			}
-			multipart.action();
+			batch.run();
+			curl_easy_t::get() = std::move(batch);
 			for (std::uint64_t i{ 0 }; i < delete_count; ++i)
 			{
 				++delete_id[i].m_loading->m_progress;
@@ -1725,7 +1750,6 @@ auto upload(loading_list_t* list, blob_empty_queue_t* empty_blob) -> void
 			delete_id.erase(delete_id.begin(), delete_id.begin() + delete_count);
 		}
 	}
-	curl_easy_cleanup(curl_upload());
 	return;
 }
 
@@ -1831,7 +1855,6 @@ auto folder_download
 
 auto download(loading_list_t* list) -> void
 {
-	curl_download() = curl_easy_init();
 	std::deque<loading_file_t> file_list{};
 	while (!close_app)
 	{
@@ -1854,7 +1877,7 @@ auto download(loading_list_t* list) -> void
 				lock1.unlock();
 				file_download
 				(
-					curl_download(),
+					curl_easy_t::get(),
 					obj_ptr,
 					nullptr,
 					progress_bar_div,
@@ -1883,7 +1906,7 @@ auto download(loading_list_t* list) -> void
 				loading_folder->m_progress_bar = progress_bar;
 				folder_download
 				(
-					curl_download(),
+					curl_easy_t::get(),
 					obj_ptr,
 					loading_folder,
 					nullptr,
@@ -1915,23 +1938,24 @@ auto download(loading_list_t* list) -> void
 			}
 			if (downloading.m_progress < downloading.m_size)
 			{
-				data_t main_data{ data_get(curl_download(), downloading.m_main_id) };
+				blob_data_str_t main_data{ data_get(curl_easy_t::get(), downloading.m_main_id) };
 				nlohmann::json main_name{ nlohmann::json::parse(main_data.m_name) };
 				nlohmann::json main_content{ nlohmann::json::parse(main_data.m_content) };
 				downloading.m_main_id = main_name["next"];
 				std::uint64_t request_count{ main_content.size() };
-				curl_multipart_t multipart{ http_api_multipart(curl_download(), account_main) };
+				google_batch_t batch{ std::move(curl_easy_t::get()), "/drive/v3" };
 				for (std::uint64_t i{ 0 }; i < request_count; ++i)
 				{
-					data_download_request(multipart, main_content[i]);
+					blob_download(batch, main_content[i]);
 				}
-				multipart.action();
+				batch.run();
 				std::vector<std::string> content{};
 				content.resize(request_count);
 				for (std::uint64_t i{ 0 }; i < request_count; ++i)
 				{
-					content[i] = nlohmann::json::parse(multipart.response_get(i).body_get())["description"];
+					content[i] = nlohmann::json::parse(batch.response_get(i).body_get())["description"];
 				}
+				curl_easy_t::get() = std::move(batch);
 				std::ofstream content_stream{ lgo::create_ofstream_preserve(downloading.m_name) };
 				content_stream.seekp(static_cast<std::uint64_t>(downloading.m_progress));
 				std::uint64_t batch_size{};
@@ -1969,7 +1993,6 @@ auto download(loading_list_t* list) -> void
 			}
 		}
 	}
-	curl_easy_cleanup(curl_download());
 	return;
 }
 
@@ -1992,8 +2015,7 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 	{
         lgo::log_file("參數數量不正確，不能超過0個\n");
     }
-	init();
-	account_main.init
+	google_account_t::default_get().init
 	(
 		"public@lingogoogol.iam.gserviceaccount.com",
 		"-----BEGIN PRIVATE KEY-----\n"
@@ -2026,7 +2048,7 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 		"-----END PRIVATE KEY-----\n"
 	);
 	{
-		blob_empty_queue_t empty_blob{ "empty_blob", &account_main, &close_app };
+		blob_queue_t empty_blob{ "empty_blob", &google_account_t::default_get(), &close_app };
 		std::string pos{ folder_root_id };
 		std::shared_ptr<lgo::divy_soft_t> upload_progress_bar_div{}, download_progress_bar_div{};
 		home
@@ -2049,8 +2071,6 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 		thread_upload.join();
 		thread_download.join();
 	}
-	account_main.uninit();
-	free();
     state.clear_state();
     lgo::log_file("finished!\n");
     return 0;
