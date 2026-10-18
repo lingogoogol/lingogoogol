@@ -15,5 +15,6 @@ target_link_libraries(
     PRIVATE
         common
         storage.http
+        storage.google.easy
         storage.google.batch
 )

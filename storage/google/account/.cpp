@@ -88,7 +88,9 @@ auto google_account_t::get_token() -> std::string
             "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" +
             encoded + "." + base64url_encode(sha256withrsa(encoded, m_key))
         };
-        std::string response{ m_easy.method_post_run(body) };
+        m_easy.method_post(body);
+        m_easy.run();
+        std::string response{ m_easy.payload() };
         m_token = nlohmann::json::parse(response)["access_token"].get<std::string>();
         m_token_life = time + 3600 / 2;
     }

@@ -19,7 +19,7 @@ auto api_curlm(CURLMcode code) -> void
     return;
 }
 
-auto curl_multi_t::get() -> const curl_multi_t&
+auto curl_multi_t::get() -> curl_multi_t&
 {
     thread_local curl_multi_t multi{};
     return multi;
@@ -59,13 +59,6 @@ auto curl_multi_t::operator->() const -> CURLM*
     return m_interface;
 }
 
-auto curl_multi_t::add(curl_easy_t&& easy) -> void
-{
-    api_curlm(curl_multi_add_handle(m_interface, easy.interface_get()));
-    easy.release();
-    return;
-}
-
 auto curl_multi_t::run() -> int
 {
     api_curlm(curl_multi_perform(m_interface, &m_running_count));
@@ -80,22 +73,44 @@ auto curl_multi_t::run() -> int
                 case CURLMSG_DONE:
                 {
                     api_curl(message->data.result);
-	                long response_code{};
-                    curl_easy_getinfo(message->easy_handle, CURLINFO_RESPONSE_CODE, &response_code);
                     curl_multi_remove_handle(m_interface, message->easy_handle);
-                    if (response_code < 200 || response_code >= 300)
+                    std::unique_ptr<curl_easy_t>& easy_ptr{ m_added[message->easy_handle] };
+		            api_curl
+                    (
+                        curl_easy_getinfo
+                        (
+                            message->easy_handle,
+                            CURLINFO_RESPONSE_CODE,
+                            &easy_ptr->m_response_code
+                        )
+                    );
+                    easy_ptr->parse();
+                    if (easy_ptr->valid())
                     {
-                        add(curl_easy_t{ message->easy_handle });
+                        m_ready.emplace(message->easy_handle);
                     }
                     else
                     {
-                        m_available.emplace(message->easy_handle);
+                        easy_ptr->m_write = std::make_unique<curl_easy_t::write_t>();
+                        api_curl
+                        (
+                            curl_easy_setopt
+                            (
+                                easy_ptr->m_interface,
+                                CURLOPT_WRITEDATA,
+                                static_cast<void*>(easy_ptr->m_write.get())
+                            )
+                        );
+                        easy_ptr->resume();
+                        api_curlm(curl_multi_add_handle(m_interface, easy_ptr->interface_get()));
+                        ++m_running_count;
                     }
                     break;
                 }
                 default:
                 {
                     lgo::log_file("curl_multi_t::run: An unknown message was received.");
+                    break;
                 }
             }
         }
@@ -121,13 +136,7 @@ auto curl_multi_t::poll(int timeout_ms) -> void
     return;
 }
 
-auto curl_multi_t::available() -> curl_easy_t
+auto curl_multi_t::ready_nonempty() -> bool
 {
-    if (m_available.empty())
-    {
-        return curl_easy_t{ nullptr };
-    }
-    CURL* ptr{ *m_available.begin() };
-    m_available.erase(ptr);
-    return curl_easy_t{ ptr };
+    return !m_ready.empty();
 }

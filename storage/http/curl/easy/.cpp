@@ -16,12 +16,19 @@ auto curl_easy_t::get() -> curl_easy_t&
 }
 
 curl_easy_t::curl_easy_t()
-: m_interface{ curl_easy_init() }
+: curl_easy_t{ curl_easy_init() } {}
+
+curl_easy_t::curl_easy_t(CURL* in)
+: m_interface{ in }, m_read{ std::make_unique<read_t>() }, m_write{ std::make_unique<write_t>() }
 {
     if (!m_interface)
     {
         throw;
     }
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_READFUNCTION, &curl_easy_t::read_callback));
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_READDATA, static_cast<void*>(m_read.get())));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 1L));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGDATA, this));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGFUNCTION, &debug_callback));
@@ -31,9 +38,6 @@ curl_easy_t::curl_easy_t()
     return;
 }
 
-curl_easy_t::curl_easy_t(CURL* in)
-: m_interface{ in } {}
-
 curl_easy_t::curl_easy_t(curl_easy_t&& in)
 :
     m_interface{ in.m_interface },
@@ -41,6 +45,8 @@ curl_easy_t::curl_easy_t(curl_easy_t&& in)
     m_host{ std::move(in.m_host) },
     m_query{ std::move(in.m_query) },
     m_header{ std::move(in.m_header) },
+    m_read{ std::move(in.m_read) },
+    m_write{ std::move(in.m_write) },
     m_header_curl{ in.m_header_curl }
 {
     in.m_interface = nullptr;
@@ -105,6 +111,15 @@ curl_easy_t::operator bool() const
     return nonempty();
 }
 
+auto curl_easy_t::clear() -> void
+{
+    m_host.clear();
+    m_path.clear();
+    m_query.clear();
+    m_header.clear();
+    return;
+}
+
 auto curl_easy_t::host_get() const -> std::string
 {
     return m_host;
@@ -149,58 +164,64 @@ auto curl_easy_t::header_set(std::string name, std::string val) -> void
     return;
 }
 
-auto curl_easy_t::method_post(std::string body) -> void
+auto curl_easy_t::method_get() -> void
 {
-    std::string url{ m_host + m_path };
-	if (!m_query.empty())
-	{
-		auto i{ m_query.begin() };
-		url += "?" + i->first + "=" + i->second;
-		++i;
-		for (; i != m_query.end(); ++i) {
-			url += "&" + i->first + "=" + i->second;
-		}
-	}
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_URL, url.c_str()));
-    //Passing in a nullptr in makes curl_slist_free_all return immediately with no action.
-    curl_slist_free_all(m_header_curl);
-    m_header_curl = nullptr;
-    for (auto i : m_header)
-    {
-        m_header_curl = curl_slist_append(m_header_curl, (i.first + ": " + i.second).c_str());
-    }
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_HTTPHEADER, m_header_curl));
-
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_POST, 1L));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body.size())));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_COPYPOSTFIELDS, body.data()));
+    method();
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, nullptr));
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 0L));
+    //When setting CURLOPT_HTTPGET to 1, libcurl automatically sets CURLOPT_NOBODY to 0 and CURLOPT_UPLOAD to 0.
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_HTTPGET, 1L));
     return;
 }
 
-auto curl_easy_t::method_post_run(std::string body) -> std::string
+auto curl_easy_t::method_post(std::string payload) -> void
 {
-	std::string result{};
-	long response_code{};
-	do
-	{
-		result = method_post_run_try(body);
-		api_curl(curl_easy_getinfo(m_interface, CURLINFO_RESPONSE_CODE, &response_code));
-	}
-	while (response_code < 200 || response_code >= 300);
-	return result;
+    method();
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, nullptr));
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 0L));
+    //When setting CURLOPT_POST to 1, libcurl automatically sets CURLOPT_NOBODY and CURLOPT_HTTPGET to 0.
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_POST, 1L));
+    m_read->m_progress = 0;
+    m_read->m_payload = payload;
+    return;
 }
 
-auto curl_easy_t::method_post_run_try(std::string body) -> std::string
+auto curl_easy_t::method_patch(std::string payload) -> void
 {
-    method_post(body);
-    std::string response{};
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(&response)));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
+    method();
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, "PATCH"));
+	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 1L));
+    m_read->m_progress = 0;
+    m_read->m_payload = payload;
+    return;
+}
+
+auto curl_easy_t::run() -> void
+{
+    std::chrono::seconds sleep_duration{ 1 };
+    while (true)
+	{
+		run_try();
+        if (valid())
+        {
+            break;
+        }
+        std::this_thread::sleep_for(sleep_duration);
+        sleep_duration *= 2;
+	}
+	return;
+}
+
+auto curl_easy_t::run_try() -> void
+{
     while (true)
     {
+        m_write = std::make_unique<write_t>();
+        api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
         try
         {
             api_curl(curl_easy_perform(m_interface));
+		    api_curl(curl_easy_getinfo(m_interface, CURLINFO_RESPONSE_CODE, &m_response_code));
         }
         catch (lgo::error_t error)
         {
@@ -209,7 +230,22 @@ auto curl_easy_t::method_post_run_try(std::string body) -> std::string
         }
         break;
     }
-    return response;
+    parse();
+    return;
+}
+
+auto curl_easy_t::parse() -> void {}
+
+auto curl_easy_t::valid() -> bool
+{
+    return m_response_code >= 200 && m_response_code < 300;
+}
+
+auto curl_easy_t::resume() -> void {}
+
+auto curl_easy_t::payload() -> std::string
+{
+    return m_write->m_payload;
 }
 
 auto curl_easy_t::debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void*) -> int
@@ -231,17 +267,17 @@ auto curl_easy_t::debug_callback(CURL*, curl_infotype type, char* data, std::siz
         default: {}
     }
     lgo::log_file("type: " + type_str + "\n");
-    lgo::log_file(std::string( data, size ));
+    lgo::log_file(std::string( data, size ) + "\n");
     return 0;
 }
 
 auto curl_easy_t::read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t
 {
-    auto src{ static_cast<read_src_t*>(src_void) };
-    size = std::min(size, static_cast<std::size_t>(src->m_data.size() - src->m_progress));
+    auto src{ static_cast<read_t*>(src_void) };
+    size = std::min(size, static_cast<std::size_t>(src->m_payload.size() - src->m_progress));
     for (std::size_t i{ 0 }; i < size; ++i)
     {
-        dest[i] = src->m_data[src->m_progress + i];
+        dest[i] = src->m_payload[src->m_progress + i];
     }
     src->m_progress += size;
     return size;
@@ -257,4 +293,32 @@ auto curl_easy_t::write_callback(char* src, std::size_t, std::size_t size, void*
         (*dest)[size_orig + i] = src[i];
     }
     return size;
+}
+
+auto curl_easy_t::method() -> void
+{
+    //Set URL.
+    std::string url{ m_host + m_path };
+	if (!m_query.empty())
+	{
+		auto i{ m_query.begin() };
+		url += "?" + i->first + "=" + i->second;
+		++i;
+		for (; i != m_query.end(); ++i)
+        {
+			url += "&" + i->first + "=" + i->second;
+		}
+	}
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_URL, url.c_str()));
+
+    //Set headers.
+    //Passing in a nullptr in makes curl_slist_free_all return immediately with no action.
+    curl_slist_free_all(m_header_curl);
+    m_header_curl = nullptr;
+    for (auto i : m_header)
+    {
+        m_header_curl = curl_slist_append(m_header_curl, (i.first + ": " + i.second).c_str());
+    }
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_HTTPHEADER, m_header_curl));
+    return;
 }

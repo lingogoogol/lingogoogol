@@ -21,6 +21,7 @@ target_link_libraries(
         lgo.GUI.misc
         lgo.GUI.Vulkan
         lgo.GUI.primitive
+        lgo.GUI.texture
         lgo.GUI.font
         lgo.GUI.object.object
         lgo.GUI.object.depth_tracker

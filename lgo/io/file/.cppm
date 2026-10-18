@@ -28,6 +28,7 @@ export namespace lgo
     -> std::fstream;
     
     auto get_file(const std::string& path) -> std::vector<unsigned char>;
+    auto get_file_str(const std::string& path) -> std::string;
     auto get_logfile_path() -> std::string&;
     auto get_logfile_string() -> std::string&;
     auto log_file(const std::string& in) -> void;

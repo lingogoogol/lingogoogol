@@ -18,5 +18,6 @@ target_link_libraries(
         lgo.dev.error
         lgo.io.file
         storage.http
+        storage.google.easy
         storage.google.account
 )

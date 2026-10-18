@@ -137,7 +137,7 @@ namespace lgo
             vk::Format::eR32G32B32Sfloat,
             16
         );
-        shader_module_t solid_shader_module{ engine->device_get(), "solid.spv" };
+        shader_module_t solid_shader_module{ engine->device_get(), "shader/solid.spv" };
         shader_t solid_shader_vertex
         {
             vk::ShaderStageFlagBits::eVertex,
@@ -196,7 +196,7 @@ namespace lgo
             vk::Format::eR32G32Sfloat,
             16
         );
-        shader_module_t texture_shader_module{ engine->device_get(), "texture.spv" };
+        shader_module_t texture_shader_module{ engine->device_get(), "shader/texture.spv" };
         shader_t texture_shader_vertex
         {
             vk::ShaderStageFlagBits::eVertex,

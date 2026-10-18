@@ -5,27 +5,24 @@ add_executable(
 
 add_subdirectory(encode)
 add_subdirectory(crypto)
+add_subdirectory(dialog)
 add_subdirectory(http)
 add_subdirectory(google)
+add_subdirectory(kernel)
 
 target_link_libraries(
     storage
     PRIVATE
         common
-        external.curl
         external.Windows
-        external.ShObjIdl
-        external.objbase
         external.processenv
         external.shellapi
-        lgo.dev
-        lgo.container
         lgo.math
         lgo.io
         lgo.GUI
-        storage.encode
         storage.http
         storage.google
+        storage.kernel
 )
 
 install(

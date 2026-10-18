@@ -30,6 +30,8 @@ export
     using enum ::CURLoption;
     using ::CURLINFO;
     using enum ::CURLINFO;
+    using ::CURLMSG;
+    using enum ::CURLMSG;
 
     using ::curl_global_init;
     using ::curl_global_cleanup;

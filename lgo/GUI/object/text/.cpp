@@ -10,6 +10,7 @@ import lgo.math.vec;
 import lgo.GUI.misc;
 import lgo.GUI.Vulkan;
 import lgo.GUI.primitive;
+import lgo.GUI.texture;
 import lgo.GUI.font;
 import lgo.GUI.object.object;
 import lgo.GUI.object.depth_tracker;

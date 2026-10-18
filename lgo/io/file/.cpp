@@ -82,6 +82,16 @@ namespace lgo
         return out;
     }
 
+    auto get_file_str(const std::string& path) -> std::string
+    {
+        std::string out{};
+        std::ifstream file{ create_ifstream(path, std::ios_base::in | std::ios_base::binary | std::ios_base::ate) };
+        out.resize(file.tellg());
+        file.seekg(0, std::ios::beg);
+        file.read(out.data(), static_cast<std::streamsize>(out.size()));
+        return out;
+    }
+
     auto get_logfile_path() -> std::string&
     {
         static std::string logfile_path{};

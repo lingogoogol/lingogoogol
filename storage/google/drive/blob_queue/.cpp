@@ -15,9 +15,10 @@ import storage.google.drive.blob;
 
 auto blob_queue_t::process() -> void
 {
-    google_batch_t batch{ curl_easy_t{}, "/drive/v3" };
+    google_batch_t batch{ curl_easy_t{} };
     while (!*m_close)
     {
+        batch.path_set("/drive/v3");
         std::unique_lock lock{ m_mutex };
         if (m_id.size() >= 200)
         {
@@ -29,6 +30,7 @@ auto blob_queue_t::process() -> void
         {
             blob_upload(batch, "", "");
         }
+        batch.method_post();
         batch.run();
         lock.lock();
         if (!m_cleared || clear_copy)
