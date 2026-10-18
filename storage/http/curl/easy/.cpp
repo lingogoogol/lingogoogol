@@ -30,8 +30,10 @@ curl_easy_t::curl_easy_t(CURL* in)
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 1L));
+    #ifdef _DEBUG
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGDATA, this));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGFUNCTION, &debug_callback));
+    #endif
     api_curl(curl_easy_setopt(m_interface, CURLOPT_CONNECTTIMEOUT, 30L));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_LOW_SPEED_TIME, 30L));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_LOW_SPEED_LIMIT, 30L));
