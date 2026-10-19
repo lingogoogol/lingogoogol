@@ -15,6 +15,9 @@ constexpr auto google_batch_t::part_count_max() -> std::uint64_t
     return 100;
 }
 
+google_batch_t::google_batch_t()
+: google_easy_t{} {}
+
 google_batch_t::google_batch_t(curl_easy_t&& easy)
 : google_easy_t{ std::move(easy) }
 {
@@ -105,6 +108,11 @@ auto google_batch_t::run_clear_if_full() -> void
 
 auto google_batch_t::parse() -> void
 {
+    if (!curl_easy_t::valid())
+    {
+        return;
+    }
+    
     std::string& response{ m_write->m_payload };
 
     //Get the boundary between parts.

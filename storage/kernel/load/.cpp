@@ -116,7 +116,6 @@ auto folder_download
 -> void
 {
 	auto obj_list{ list_folder_content(*easy, &pos) };
-	std::filesystem::remove_all(path_local);
 	std::filesystem::create_directories(path_local);
 	for (auto i : obj_list)
 	{

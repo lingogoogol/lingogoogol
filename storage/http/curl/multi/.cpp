@@ -39,6 +39,13 @@ curl_multi_t::~curl_multi_t()
 {
     if (m_interface)
     {
+        for (auto& added : m_added)
+        {
+            if (!m_ready.contains(added.first))
+            {
+                curl_multi_remove_handle(m_interface, added.first);
+            }
+        }
         api_curlm(curl_multi_cleanup(m_interface));
     }
     return;
@@ -72,20 +79,35 @@ auto curl_multi_t::run() -> int
             {
                 case CURLMSG_DONE:
                 {
-                    api_curl(message->data.result);
-                    curl_multi_remove_handle(m_interface, message->easy_handle);
                     std::unique_ptr<curl_easy_t>& easy_ptr{ m_added[message->easy_handle] };
-		            api_curl
-                    (
-                        curl_easy_getinfo
+                    bool successful{ true };
+                    bool handle_removed{ false };
+                    try
+                    {
+                        api_curl(message->data.result);
+                        curl_multi_remove_handle(m_interface, message->easy_handle);
+                        handle_removed = true;
+                        api_curl
                         (
-                            message->easy_handle,
-                            CURLINFO_RESPONSE_CODE,
-                            &easy_ptr->m_response_code
-                        )
-                    );
-                    easy_ptr->parse();
-                    if (easy_ptr->valid())
+                            curl_easy_getinfo
+                            (
+                                message->easy_handle,
+                                CURLINFO_RESPONSE_CODE,
+                                &easy_ptr->m_response_code
+                            )
+                        );
+                        easy_ptr->parse();
+                    }
+                    catch (lgo::error_t e)
+                    {
+                        successful = false;
+                        if (!handle_removed)
+                        {
+                            curl_multi_remove_handle(m_interface, message->easy_handle);
+                        }
+                        lgo::log_file(e.message() + "\n");
+                    }
+                    if (successful && easy_ptr->valid())
                     {
                         m_ready.emplace(message->easy_handle);
                     }

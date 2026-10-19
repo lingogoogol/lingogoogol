@@ -51,6 +51,7 @@ export namespace lgo
         std::recursive_mutex m_rect_mutex{};
         std::set<rect_primitive_t*> m_rect_primitive{};
         std::string m_name{};
+        std::deque<std::chrono::high_resolution_clock::time_point> m_frame_time{};
         
         template<typename t_callback_set, typename... t_in>
         static auto call_callback(t_callback_set& callback, t_in... in) -> void;
@@ -130,6 +131,7 @@ export namespace lgo
         auto remove_rect(rect_primitive_t* in) -> void;
 
         auto cursor_pos_get() const -> pos_2D;
+        auto frame_rate() const -> std::uint64_t;
 
         //This includes both cursor enter and cursor leave.
         using callback_mouse_enter_t = std::function<void(int)>;

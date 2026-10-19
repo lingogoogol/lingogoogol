@@ -651,6 +651,13 @@ namespace lgo {
 
     auto engine_t::message_loop() -> bool
     {
+        using namespace std::chrono_literals;
+        std::chrono::high_resolution_clock::time_point now{ std::chrono::high_resolution_clock::now() };
+        m_frame_time.push_back(now);
+        while (m_frame_time.front() <= now - 1s)
+        {
+            m_frame_time.pop_front();
+        }
         glfwPollEvents();
         draw();
         return glfwWindowShouldClose(m_window);
@@ -847,6 +854,11 @@ namespace lgo {
         double cursor_pos_x_double{}, cursor_pos_y_double{};
         glfwGetCursorPos(m_window, &cursor_pos_x_double, &cursor_pos_y_double);
         return pos_2D{ static_cast<int64_t>(cursor_pos_x_double), static_cast<int64_t>(cursor_pos_y_double) };
+    }
+
+    auto engine_t::frame_rate() const -> std::uint64_t
+    {
+        return m_frame_time.size();
     }
 
     auto engine_t::device_get() -> vk::raii::Device&

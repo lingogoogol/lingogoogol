@@ -15,37 +15,65 @@ import storage.google.drive.blob;
 
 auto blob_queue_t::process() -> void
 {
-    google_batch_t batch{ curl_easy_t{} };
+    using namespace std::chrono_literals;
+
+    curl_multi_t& multi{ curl_multi_t::get() };
+	//A array of easy handle that is currently not used.
+	std::vector<google_batch_t> batch_idle_arr( 20 );
+    for (auto& batch : batch_idle_arr)
+    {
+        batch = google_batch_t{ curl_easy_t{} };
+    }
+
+    std::chrono::steady_clock::time_point last_cycle_time{};
     while (!*m_close)
     {
-        batch.path_set("/drive/v3");
+        std::this_thread::sleep_until(last_cycle_time + 0.1s);
+        last_cycle_time = std::chrono::steady_clock::now();
+        multi.run();
+        while (true)
+        {
+            if (!multi.ready_nonempty())
+            {
+                break;
+            }
+            google_batch_t batch{ multi.ready_get<google_batch_t>() };
+            std::unique_lock lock{ m_mutex };
+            if (!m_cleared)
+            {
+                std::uint64_t size_orig{ m_id.size() };
+                m_id.resize(size_orig + 100);
+                for (std::uint64_t i{ 0 }; i < 100; ++i)
+                {
+                    m_id[size_orig + i] = nlohmann::json::parse(batch.response_get(i).body_get())["id"];
+                }
+                lock.unlock();
+                m_condition_variable.notify_all();
+            }
+            batch.clear();
+            m_cleared = false;
+            batch_idle_arr.push_back(std::move(batch));
+        }
+
         std::unique_lock lock{ m_mutex };
-        if (m_id.size() >= 200)
+        if (m_id.size() >= 20000)
         {
             continue;
         }
-        bool clear_copy{ m_cleared };
         lock.unlock();
-        for (std::uint64_t i{ 0 }; i < 100; ++i)
+        while (batch_idle_arr.size())
         {
-            blob_upload(batch, "", "");
-        }
-        batch.method_post();
-        batch.run();
-        lock.lock();
-        if (!m_cleared || clear_copy)
-        {
-            std::uint64_t size_orig{ m_id.size() };
-            m_id.resize(size_orig + 100);
+            google_batch_t batch{ std::move(batch_idle_arr.back()) };
+            batch_idle_arr.pop_back();
+
+            batch.path_set("/drive/v3");
             for (std::uint64_t i{ 0 }; i < 100; ++i)
             {
-                m_id[size_orig + i] = nlohmann::json::parse(batch.response_get(i).body_get())["id"];
+                blob_upload(batch, "", "");
             }
-            lock.unlock();
-            m_condition_variable.notify_all();
+            batch.method_post();
+            multi.add(std::move(batch));
         }
-        batch.clear();
-        m_cleared = false;
     }
     return;
 }
@@ -59,6 +87,7 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
         std::string content{};
         content.resize(size);
         lgo::create_ifstream(path.string()).read(content.data(), size);
+        std::filesystem::remove(path);
         nlohmann::json arr{ nlohmann::json::parse(content) };
         m_id.resize(arr.size());
         for (std::uint64_t i{ 0 }; i < arr.size(); ++i)
@@ -99,6 +128,12 @@ auto blob_queue_t::get(std::uint64_t count) -> std::vector<std::string>
     std::vector<std::string> out{ m_id.begin(), m_id.begin() + count };
     m_id.erase(m_id.begin(), m_id.begin() + count);
     return out;
+}
+
+auto blob_queue_t::count() -> std::uint64_t
+{
+    std::unique_lock lock{ m_mutex };
+    return m_id.size();
 }
 
 auto blob_queue_t::clear_begin() -> void

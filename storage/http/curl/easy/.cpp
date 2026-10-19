@@ -63,6 +63,9 @@ auto curl_easy_t::operator=(curl_easy_t&& in) -> curl_easy_t&
     m_host = std::move(in.m_host);
     m_query = std::move(in.m_query);
     m_header = std::move(in.m_header);
+    m_read = std::move(in.m_read);
+    m_write = std::move(in.m_write);
+    m_header_curl = in.m_header_curl;
     
     in.m_interface = nullptr;
     in.m_header_curl = nullptr;

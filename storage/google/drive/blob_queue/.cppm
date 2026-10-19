@@ -26,6 +26,7 @@ export
 
 		auto get() -> std::string;
 		auto get(std::uint64_t count) -> std::vector<std::string>;
+		auto count() -> std::uint64_t;
 
 		auto clear_begin() -> void;
 		auto clear_end() -> void;

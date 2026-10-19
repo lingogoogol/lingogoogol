@@ -18,6 +18,7 @@ import storage.kernel.load;
 auto message_loop
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue
@@ -26,6 +27,8 @@ auto message_loop
 {
 	//A array of easy handle that is not transfering and can be used.
 	static std::vector<google_easy_t> easy_idle_arr( 20 );
+	persistent->m_frame_rate->set_text("frame_rate: " + std::to_string(engine->frame_rate()));
+	persistent->m_blob_queue->set_text("blob_queue: " + std::to_string(blob_queue->count()));
 	while (true)
 	{
 		if (!multi->ready_nonempty())
@@ -36,7 +39,7 @@ auto message_loop
 		transfer_end(load_state, easy);
 		easy_idle_arr.push_back(std::move(dynamic_cast<google_easy_t&>(*easy.get())));
 	}
-	while (easy_idle_arr.size())
+	while (easy_idle_arr.size() && blob_queue->count() > 10000)
 	{
 		if (!transfer_begin(load_state, *multi, std::move(easy_idle_arr.back()), blob_queue))
 		{
@@ -51,6 +54,7 @@ auto message_loop
 auto dialog_file
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -61,7 +65,7 @@ auto dialog_file
 	dialog_t dialog{ folder };
 	while (!dialog.ok())
 	{
-		message_loop(engine, multi, load_state, blob_queue);
+		message_loop(engine, persistent, multi, load_state, blob_queue);
 	}
 	return dialog.result();
 }
@@ -74,6 +78,7 @@ auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::str
 auto file_upload_callback
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -81,7 +86,7 @@ auto file_upload_callback
 )
 -> void
 {
-	std::vector<std::string> file_arr{ dialog_file(engine, multi, load_state, blob_queue, false) };
+	std::vector<std::string> file_arr{ dialog_file(engine, persistent, multi, load_state, blob_queue, false) };
 	for (auto file : file_arr)
 	{
 		auto task{ std::make_shared<upload_task_t>() };
@@ -162,6 +167,7 @@ auto file_upload_callback
 auto folder_upload_callback
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -169,7 +175,7 @@ auto folder_upload_callback
 )
 -> void
 {
-	std::vector<std::string> folder_arr{ dialog_file(engine, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder_arr{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
 	for (auto folder : folder_arr)
 	{
 		auto task{ std::make_shared<upload_task_t>() };
@@ -249,6 +255,7 @@ auto folder_upload_callback
 auto file_download_callback
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -257,7 +264,7 @@ auto file_download_callback
 )
 -> void
 {
-	std::vector<std::string> folder{ dialog_file(engine, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
 	if (folder.size() != 1)
 	{
 		throw;
@@ -279,6 +286,7 @@ auto file_download_callback
 		)
 		-> void
 		{
+			std::filesystem::remove_all(path_local);
 			file_download(easy, task, pos, path_local);
 			task->m_idle_first = task->m_file_arr.begin();
 			return;
@@ -320,6 +328,7 @@ auto file_download_callback
 auto folder_download_callback
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -328,7 +337,7 @@ auto folder_download_callback
 )
 -> void
 {
-	std::vector<std::string> folder{ dialog_file(engine, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
 	if (folder.size() != 1)
 	{
 		throw;
@@ -350,7 +359,8 @@ auto folder_download_callback
 		)
 		-> void
 		{
-			file_download(easy, task, pos, path_local);
+			std::filesystem::remove_all(path_local);
+			folder_download(easy, task, pos, path_local);
 			task->m_idle_first = task->m_file_arr.begin();
 			return;
 		},
@@ -481,6 +491,7 @@ auto delete_all_cancel_callback(std::shared_ptr<lgo::divy_hard_t> center_div) ->
 auto folder_button_callback
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -494,6 +505,7 @@ auto folder_button_callback
 	list
 	(
 		engine,
+		persistent,
 		multi,
 		load_state,
 		blob_queue,
@@ -506,6 +518,7 @@ auto folder_button_callback
 auto list
 (
 	lgo::engine_t* engine,
+	GUI_persistent_t* persistent,
 	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
@@ -527,6 +540,7 @@ auto list
 				(
 					&folder_button_callback,
 					engine,
+					persistent,
 					multi,
 					load_state,
 					blob_queue,
@@ -545,6 +559,7 @@ auto list
 				(
 					&folder_download_callback,
 					engine,
+					persistent,
 					multi,
 					load_state,
 					blob_queue,
@@ -579,6 +594,7 @@ auto list
 				(
 					&file_download_callback,
 					engine,
+					persistent,
 					multi,
 					load_state,
 					blob_queue,
@@ -608,6 +624,7 @@ auto home
 (
 	lgo::engine_t* engine,
 	lgo::state_t* state,
+	GUI_persistent_t* persistent,
 	std::shared_ptr<lgo::divy_soft_t>* progress_column,
 	load_state_t* load_state,
 	curl_multi_t* multi,
@@ -678,7 +695,7 @@ auto home
 		)
 	};
 
-    auto path_div
+    auto state_div
 	{
 		work_div->add_object_ghost_shared<lgo::divy_soft_t>
 		(
@@ -688,6 +705,24 @@ auto home
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
 		)
 	};
+
+	persistent->m_frame_rate =
+		state_div->add_object_shared<lgo::text_line_std_t>
+		(
+			lgo::depth_range_t{ 0.0f, 0.0f },
+			"frame_rate: evaluating...",
+			lgo::std_white,
+			lgo::size_1D{ 0x100 }
+		);
+	persistent->m_blob_queue =
+		state_div->add_object_shared<lgo::text_line_std_t>
+		(
+			lgo::depth_range_t{ 0.0f, 0.0f },
+			"blob_queue: evaluating...",
+			lgo::std_white,
+			lgo::size_1D{ 0x100 }
+		);
+	
 	*progress_column =
 		work_div->add_object_shared<lgo::divy_soft_t>
 		(
@@ -736,13 +771,13 @@ auto home
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&folder_upload_callback, engine, multi, load_state, blob_queue, *pos),
+		std::bind(&folder_upload_callback, engine, persistent, multi, load_state, blob_queue, *pos),
 		"上傳資料夾"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&file_upload_callback, engine, multi, load_state, blob_queue, *pos),
+		std::bind(&file_upload_callback, engine, persistent, multi, load_state, blob_queue, *pos),
 		"上傳檔案"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
@@ -754,6 +789,7 @@ auto home
 	list
 	(
 		engine,
+		persistent,
 		multi,
 		load_state,
 		blob_queue,

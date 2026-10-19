@@ -10,9 +10,16 @@ import storage.kernel.load;
 
 export
 {
+    struct GUI_persistent_t
+    {
+        std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
+        std::shared_ptr<lgo::text_line_std_t> m_blob_queue{};
+    };
+
     auto message_loop
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
 	    load_state_t* load_state,
 	    blob_queue_t* blob_queue
@@ -22,6 +29,7 @@ export
     auto dialog_file
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
 	    load_state_t* load_state,
 	    blob_queue_t* blob_queue,
@@ -34,6 +42,7 @@ export
     auto file_upload_callback
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -44,6 +53,7 @@ export
     auto folder_upload_callback
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -54,6 +64,7 @@ export
     auto file_download_callback
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -65,6 +76,7 @@ export
     auto folder_download_callback
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -95,6 +107,7 @@ export
     auto folder_button_callback
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -107,6 +120,7 @@ export
     auto list
     (
         lgo::engine_t* engine,
+        GUI_persistent_t* persistent,
         curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
@@ -119,6 +133,7 @@ export
     (
         lgo::engine_t* engine,
         lgo::state_t* state,
+        GUI_persistent_t* persistent,
         std::shared_ptr<lgo::divy_soft_t>* progress_column,
         load_state_t* load_state,
         curl_multi_t* multi,

@@ -172,17 +172,29 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 		blob_queue_t blob_queue{ "blob_queue", &google_account_t::default_get(), &close_app };
 		std::string pos{ root_id };
 		std::shared_ptr<lgo::divy_soft_t> progress_column{};
+		GUI_persistent_t persistent{};
 		home
 		(
 			&engine,
 			&state,
+			&persistent,
 			&progress_column,
 			&load_state,
 			&curl_multi_t::get(),
 			&blob_queue,
 			&pos
 		);
-		while (!message_loop(&engine, &curl_multi_t::get(), &load_state, &blob_queue))
+		while
+		(
+			!message_loop
+			(
+				&engine,
+				&persistent,
+				&curl_multi_t::get(),
+				&load_state,
+				&blob_queue
+			)
+		)
 		{
 			lgo::text_line_t::pending_load();
 		}

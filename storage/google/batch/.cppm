@@ -15,6 +15,7 @@ export
     public:
         constexpr static auto part_count_max() -> std::uint64_t;
 
+        google_batch_t();
         google_batch_t(curl_easy_t&& easy);
         
         auto size() const -> std::uint64_t;

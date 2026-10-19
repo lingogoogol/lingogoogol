@@ -10,7 +10,7 @@ auto api_curl(CURLcode code) -> void
 {
     if (code != CURLE_OK)
     {
-        throw lgo::error_t{ curl_easy_strerror(code) };
+        throw lgo::error_t{ std::string{ "curl error: " } + curl_easy_strerror(code) };
     }
     return;
 }
