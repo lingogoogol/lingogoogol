@@ -25,7 +25,8 @@ export
 
         template<typename t_easy>
         auto add(t_easy&& easy) -> void;
-        auto run() -> int;
+        //Returns the number of failed requests.
+        auto run() -> std::uint64_t;
         auto running_count() -> int;
         //Block until one of the handles has activity, or the timeout set or the internal timeout expires.
         auto poll(int timeout_ms) -> void;

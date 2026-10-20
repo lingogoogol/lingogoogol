@@ -246,7 +246,13 @@ auto curl_easy_t::valid() -> bool
     return m_response_code >= 200 && m_response_code < 300;
 }
 
-auto curl_easy_t::resume() -> void {}
+auto curl_easy_t::resume() -> void
+{
+    m_read->m_progress = 0;
+    m_write->m_progress = 0;
+    m_write->m_payload.clear();
+    return;
+}
 
 auto curl_easy_t::payload() -> std::string
 {

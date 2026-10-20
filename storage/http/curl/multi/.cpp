@@ -66,10 +66,11 @@ auto curl_multi_t::operator->() const -> CURLM*
     return m_interface;
 }
 
-auto curl_multi_t::run() -> int
+auto curl_multi_t::run() -> std::uint64_t
 {
     api_curlm(curl_multi_perform(m_interface, &m_running_count));
     int message_count{};
+    std::uint64_t failed_count{ 0 };
     while (true)
     {
         CURLMsg* message{ curl_multi_info_read(m_interface, &message_count) };
@@ -113,19 +114,10 @@ auto curl_multi_t::run() -> int
                     }
                     else
                     {
-                        easy_ptr->m_write = std::make_unique<curl_easy_t::write_t>();
-                        api_curl
-                        (
-                            curl_easy_setopt
-                            (
-                                easy_ptr->m_interface,
-                                CURLOPT_WRITEDATA,
-                                static_cast<void*>(easy_ptr->m_write.get())
-                            )
-                        );
                         easy_ptr->resume();
                         api_curlm(curl_multi_add_handle(m_interface, easy_ptr->interface_get()));
                         ++m_running_count;
+                        ++failed_count;
                     }
                     break;
                 }
@@ -142,7 +134,7 @@ auto curl_multi_t::run() -> int
         }
         if (!message_count)
         {
-            return m_running_count;
+            return failed_count;
         }
     }
 }

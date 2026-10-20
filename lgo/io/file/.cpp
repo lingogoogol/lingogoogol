@@ -106,13 +106,16 @@ namespace lgo
 
     auto log_file(const std::string& in) -> void
     {
-        if (get_logfile_path() == "") {
+        if (get_logfile_path() == "")
+        {
             get_logfile_string() += in;
         }
-        else {
+        else
+        {
             std::ofstream stream{ create_ofstream_preserve(get_logfile_path()) };
             stream.seekp(0, std::ios_base::end);
-            for (auto i : in) {
+            for (auto i : in)
+            {
                 stream.put(i);
             }
         }

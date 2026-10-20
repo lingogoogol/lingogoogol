@@ -112,7 +112,7 @@ auto google_batch_t::parse() -> void
     {
         return;
     }
-    
+
     std::string& response{ m_write->m_payload };
 
     //Get the boundary between parts.
@@ -170,7 +170,9 @@ auto google_batch_t::valid() -> bool
 
 auto google_batch_t::resume() -> void
 {
+    curl_easy_t::resume();
     body_generate();
+    curl_easy_t::method_post(m_body);
     return;
 }
 
