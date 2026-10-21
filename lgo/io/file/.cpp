@@ -109,14 +109,23 @@ namespace lgo
         if (get_logfile_path() == "")
         {
             get_logfile_string() += in;
+            return;
         }
-        else
+        while (true)
         {
-            std::ofstream stream{ create_ofstream_preserve(get_logfile_path()) };
-            stream.seekp(0, std::ios_base::end);
-            for (auto i : in)
+            try
             {
-                stream.put(i);
+                std::ofstream stream{ create_ofstream_preserve(get_logfile_path()) };
+                stream.seekp(0, std::ios_base::end);
+                stream.write(in.data(), in.size());
+                return;
+            }
+            catch (const std::exception& e)
+            {
+                std::println("log_file:");
+                std::println("{0}", e.what());
+                std::println("  in:");
+                std::println("{0}", in);
             }
         }
         return;

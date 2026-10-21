@@ -15,5 +15,6 @@ target_link_libraries(
     PRIVATE
         common
         external.FreeType
+        lgo.io.file
         lgo.GUI.font.FreeType
 )

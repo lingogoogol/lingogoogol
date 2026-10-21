@@ -250,6 +250,12 @@ namespace lgo
         return;
     }
 
+    auto text_line_t::free() -> void
+    {
+        m_font.clear();
+        return;
+    }
+
     auto text_line_t::load() -> void
     {
         std::unique_lock lock{ m_mutex };

@@ -108,7 +108,7 @@ std::string root_id{};
 	return;
 }*/
 
-auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
+auto app() -> void
 {
 	lgo::init_logfile("./logfile/" + std::to_string(std::time(nullptr)) + ".txt");
     lgo::log_file("CWD:\n");
@@ -200,8 +200,23 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 		}
 
 		close_app = true;
+		engine.flush();
+        lgo::text_line_t::free();
 	}
     state.clear_state();
-    lgo::log_file("finished!\n");
+	return;
+}
+
+auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
+{
+	try
+	{
+		app();
+	}
+	catch (const std::exception& e)
+	{
+		lgo::log_file(std::string{ "uncaught exception:\n" } + e.what());
+	}
+    lgo::log_file("finished_all!\n");
     return 0;
 }

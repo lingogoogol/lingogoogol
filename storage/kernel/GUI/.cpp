@@ -6,6 +6,8 @@ module storage.kernel.GUI;
 
 import std;
 
+import external.curl;
+
 import lgo.dev;
 import lgo.math;
 import lgo.GUI;
@@ -25,10 +27,59 @@ auto message_loop
 )
 -> bool
 {
+	using namespace std::chrono_literals;
+	
 	//A array of easy handle that is not transfering and can be used.
-	static std::vector<google_easy_t> easy_idle_arr( 20 );
+	static std::vector<google_easy_t> easy_idle_arr( load_easy_count );
+	static bool load_easy_status_init{ false };
+	static std::map<CURL*, easy_status_t> load_easy_status_map{};
+	if (!load_easy_status_init)
+	{
+		for (std::size_t i{ 0 }; i < easy_idle_arr.size(); ++i)
+		{
+			load_easy_status_map[easy_idle_arr[i].interface_get()].m_text_index = i;
+		}
+		load_easy_status_init = true;
+	}
+
 	persistent->m_frame_rate->set_text("frame_rate: " + std::to_string(engine->frame_rate()));
-	persistent->m_blob_queue->set_text("blob_queue: " + std::to_string(blob_queue->count()));
+	persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " + std::to_string(blob_queue->cycle_rate()));
+	persistent->m_blob_queue_count->set_text("blob_queue_count: " + std::to_string(blob_queue->count()));
+	for (auto& load_easy_status : load_easy_status_map)
+	{
+		std::string status_str{};
+		if (load_easy_status.second.m_add_time.time_since_epoch() == std::chrono::steady_clock::duration::zero())
+		{
+			status_str = "idle";
+		}
+		else
+		{
+			status_str = std::format
+				(
+					"{:%T}, {}",
+					std::chrono::steady_clock::now() - load_easy_status.second.m_add_time,
+					multi->read_progress(load_easy_status.first)
+				);
+		}
+		persistent->m_load_easy_status[load_easy_status.second.m_text_index]->set_text
+		(
+			std::format("{:#018x}, {}", reinterpret_cast<std::uint64_t>(load_easy_status.first), status_str)
+		);
+	}
+
+	static std::chrono::steady_clock::time_point last_add_time{};
+	std::chrono::steady_clock::time_point now{ std::chrono::steady_clock::now() };
+	if (now - last_add_time > 0s && easy_idle_arr.size() && blob_queue->count() > 10000)
+	{
+		last_add_time = now;
+		CURL* key{ easy_idle_arr.back().interface_get() };
+		if (transfer_begin(load_state, *multi, std::move(easy_idle_arr.back()), blob_queue))
+		{
+			load_easy_status_map[key].m_add_time = std::chrono::steady_clock::now();
+			easy_idle_arr.pop_back();
+		}
+	}
+	multi->run();
 	while (true)
 	{
 		if (!multi->ready_nonempty())
@@ -37,17 +88,9 @@ auto message_loop
 		}
 		std::unique_ptr<curl_easy_t> easy{ multi->ready_get_unique() };
 		transfer_end(load_state, easy);
+		load_easy_status_map[easy->interface_get()].m_add_time = {};
 		easy_idle_arr.push_back(std::move(dynamic_cast<google_easy_t&>(*easy.get())));
 	}
-	while (easy_idle_arr.size() && blob_queue->count() > 10000)
-	{
-		if (!transfer_begin(load_state, *multi, std::move(easy_idle_arr.back()), blob_queue))
-		{
-			break;
-		}
-		easy_idle_arr.pop_back();
-	}
-	multi->run();
 	return engine->message_loop();
 }
 
@@ -86,7 +129,10 @@ auto file_upload_callback
 )
 -> void
 {
-	std::vector<std::string> file_arr{ dialog_file(engine, persistent, multi, load_state, blob_queue, false) };
+	std::vector<std::string> file_arr
+	{
+		dialog_file(engine, persistent, multi, load_state, blob_queue, false)
+	};
 	for (auto file : file_arr)
 	{
 		auto task{ std::make_shared<upload_task_t>() };
@@ -714,14 +760,35 @@ auto home
 			lgo::std_white,
 			lgo::size_1D{ 0x100 }
 		);
-	persistent->m_blob_queue =
+	persistent->m_blob_queue_cycle_rate =
 		state_div->add_object_shared<lgo::text_line_std_t>
 		(
 			lgo::depth_range_t{ 0.0f, 0.0f },
-			"blob_queue: evaluating...",
+			"blob_queue_cycle_rate: evaluating...",
 			lgo::std_white,
 			lgo::size_1D{ 0x100 }
 		);
+	persistent->m_blob_queue_count =
+		state_div->add_object_shared<lgo::text_line_std_t>
+		(
+			lgo::depth_range_t{ 0.0f, 0.0f },
+			"blob_queue_count: evaluating...",
+			lgo::std_white,
+			lgo::size_1D{ 0x100 }
+		);
+	for (std::size_t i{ 0 }; i < load_easy_count; ++i)
+	{
+		persistent->m_load_easy_status.push_back
+		(
+			state_div->add_object_shared<lgo::text_line_std_t>
+			(
+				lgo::depth_range_t{ 0.0f, 0.0f },
+				"load_easy_status: evaluating...",
+				lgo::std_white,
+				lgo::size_1D{ 0x100 }
+			)
+		);
+	}
 	
 	*progress_column =
 		work_div->add_object_shared<lgo::divy_soft_t>

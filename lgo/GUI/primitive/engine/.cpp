@@ -294,12 +294,16 @@ namespace lgo {
         };
         std::vector<const char*> layer
         {
+            #ifdef _DEBUG
             "VK_LAYER_KHRONOS_validation"
+            #endif
         };
         std::uint32_t glfw_extension_count{};
         const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
         std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
+        #ifdef _DEBUG
         extension_instance.push_back("VK_EXT_debug_utils");
+        #endif
         extension_instance.push_back("VK_KHR_get_surface_capabilities2");
         vk::InstanceCreateInfo instance_info
         {
@@ -312,6 +316,7 @@ namespace lgo {
         m_instance = vk::raii::Instance{ m_context, instance_info };
 
         //Create a debug messenger.
+        #ifdef _DEBUG
         vk::DebugUtilsMessengerCreateInfoEXT messenger_info
         {
             .messageSeverity
@@ -331,6 +336,7 @@ namespace lgo {
             .pUserData{ this }
         };
         m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+        #endif
 
         //Create a surface.
         //The window surface needs to be created right after the instance creation,

@@ -4,6 +4,7 @@ import std;
 
 import external.FreeType;
 
+import lgo.io.file;
 import lgo.GUI.font.FreeType;
 
 namespace lgo

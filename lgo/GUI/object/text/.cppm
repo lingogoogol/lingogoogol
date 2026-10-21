@@ -93,6 +93,7 @@ export namespace lgo
         static std::set<text_line_t*> m_pending;
 
         static auto pending_load() -> void;
+        static auto free() -> void;
     protected:
         engine_t* m_engine{};
     private:

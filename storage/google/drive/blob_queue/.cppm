@@ -18,6 +18,7 @@ export
 		const std::atomic_bool* m_close{};
 		bool m_clearing{ false };
 		bool m_cleared{ false };
+		std::deque<std::chrono::steady_clock::time_point> m_cycle_time{};
 
 		auto process() -> void;
 	public:
@@ -27,6 +28,7 @@ export
 		auto get() -> std::string;
 		auto get(std::uint64_t count) -> std::vector<std::string>;
 		auto count() -> std::uint64_t;
+        auto cycle_rate() const -> std::uint64_t;
 
 		auto clear_begin() -> void;
 		auto clear_end() -> void;

@@ -19,7 +19,7 @@ auto blob_queue_t::process() -> void
 
     curl_multi_t& multi{ curl_multi_t::get() };
 	//A array of easy handle that is currently not used.
-	std::vector<google_batch_t> batch_idle_arr( 20 );
+	std::vector<google_batch_t> batch_idle_arr( 32 );
     for (auto& batch : batch_idle_arr)
     {
         batch = google_batch_t{ curl_easy_t{} };
@@ -29,7 +29,14 @@ auto blob_queue_t::process() -> void
     while (!*m_close)
     {
         std::this_thread::sleep_until(last_cycle_time + 0.1s);
-        last_cycle_time = std::chrono::steady_clock::now();
+        std::chrono::high_resolution_clock::time_point now{ std::chrono::high_resolution_clock::now() };
+        last_cycle_time = now;
+        m_cycle_time.push_back(now);
+        while (m_cycle_time.front() <= now - 1s)
+        {
+            m_cycle_time.pop_front();
+        }
+
         multi.run();
         while (true)
         {
@@ -134,6 +141,11 @@ auto blob_queue_t::count() -> std::uint64_t
 {
     std::unique_lock lock{ m_mutex };
     return m_id.size();
+}
+
+auto blob_queue_t::cycle_rate() const -> std::uint64_t
+{
+    return m_cycle_time.size();
 }
 
 auto blob_queue_t::clear_begin() -> void

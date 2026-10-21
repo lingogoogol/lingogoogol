@@ -144,6 +144,11 @@ auto curl_multi_t::running_count() -> int
     return m_running_count;
 }
 
+auto curl_multi_t::read_progress(CURL* key) -> std::uint64_t
+{
+    return m_added[key]->m_read->m_progress;
+}
+
 auto curl_multi_t::poll(int timeout_ms) -> void
 {
     api_curlm(curl_multi_poll(m_interface, nullptr, 0, timeout_ms, nullptr));

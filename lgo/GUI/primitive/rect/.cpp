@@ -234,7 +234,15 @@ namespace lgo
         return;
     }
 
-    auto rect_primitive_t::uninit() -> void {}
+    auto rect_primitive_t::uninit() -> void
+    {
+        m_solid_descriptor_set_layout = {};
+        m_texture_descriptor_set_layout = {};
+        m_solid_pipeline_state = {};
+        m_texture_pipeline_state = {};
+        m_sampler.clear();
+        return;
+    }
 
     auto rect_primitive_t::render
     (

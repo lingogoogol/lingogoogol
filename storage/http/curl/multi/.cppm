@@ -28,6 +28,7 @@ export
         //Returns the number of failed requests.
         auto run() -> std::uint64_t;
         auto running_count() -> int;
+        auto read_progress(CURL* key) -> std::uint64_t;
         //Block until one of the handles has activity, or the timeout set or the internal timeout expires.
         auto poll(int timeout_ms) -> void;
 

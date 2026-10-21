@@ -14,6 +14,7 @@ target_link_libraries(
     storage.kernel.GUI
     PRIVATE
         common
+        external.curl
         lgo.dev
         lgo.math
         lgo.GUI

@@ -24,7 +24,12 @@ namespace lgo
         float depth{ m_depth_data[id].m_depth };
         for (auto i{ m_depth_data.begin() }; i != m_depth_data.end(); ++i)
         {
-            if (inside(i->second.m_pos, i->second.m_size, pos) && i->second.m_depth < depth && i->second.m_opaque)
+            if
+            (
+                inside(i->second.m_pos, i->second.m_size, pos) &&
+                i->second.m_depth < depth &&
+                i->second.m_opaque
+            )
             {
                 return false;
             }

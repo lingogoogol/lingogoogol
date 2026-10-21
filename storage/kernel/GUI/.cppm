@@ -13,7 +13,15 @@ export
     struct GUI_persistent_t
     {
         std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
-        std::shared_ptr<lgo::text_line_std_t> m_blob_queue{};
+        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_cycle_rate{};
+        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_count{};
+        std::vector<std::shared_ptr<lgo::text_line_std_t>> m_load_easy_status{};
+    };
+
+    struct easy_status_t
+    {
+        std::size_t m_text_index{};
+        std::chrono::steady_clock::time_point m_add_time{};
     };
 
     auto message_loop
@@ -141,4 +149,6 @@ export
         std::string* pos
     )
     -> void;
+
+    constexpr std::size_t load_easy_count{ 32 };
 }

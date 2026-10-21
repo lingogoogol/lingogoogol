@@ -912,8 +912,10 @@ export namespace lgo
         state_t::remove_object(id);
         if (m_ghost[id])
         {
+            m_ghost.erase(id);
             return;
         }
+        m_ghost.erase(id);
         switch (m_alignment_forward)
         {
         case 0:
@@ -1030,6 +1032,7 @@ export namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         state_t::clear_state();
+        m_ghost.clear();
         m_length = 0;
         return;
     }
