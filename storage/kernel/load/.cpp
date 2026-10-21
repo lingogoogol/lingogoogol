@@ -1006,6 +1006,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_ch
             chunk_filesystem.m_content[i] = base64url_decode(chunk_filesystem.m_content[i]);
             content_stream.write(chunk_filesystem.m_content[i].data(), chunk_filesystem.m_content[i].size());
             filesystem_size += chunk_filesystem.m_content[i].size();
+            chunk_filesystem.m_content[i].clear();
         }
         ++chunk_filesystem.m_file->m_filesystem_progress;
     }
