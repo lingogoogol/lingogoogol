@@ -127,37 +127,11 @@ auto app() -> void
 	{
         lgo::log_file("參數數量不正確，不能超過0個\n");
     }
+	nlohmann::json key{ nlohmann::json::parse(lgo::get_file("key.json")) };
 	google_account_t::default_get().init
 	(
-		"public@lingogoogol.iam.gserviceaccount.com",
-		"-----BEGIN PRIVATE KEY-----\n"
-		"MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDhuOYPiqBJLtRf\n"
-		"pB1z8JHFFcWf14NsUrsdzd4ZrM3T9cbC3KD5bO0rwDGOFfuwEXx1miQtKD1R9nOe\n"
-		"EUetHH8oUA0sOtR7SJe+1OTou/zHLK4YckjWP6HGktMKcqT650i3kpUCyBu0eB2z\n"
-		"r8rFfk6PW1cEkTe9c2e07X0V5HG8dEZ43P3bueVgNamoP5s1N9hdKFfszLlU3zt1\n"
-		"to2gxizPRCWDqOx8hIn478c+GCFkpvfmkkSqMDdlHe3hJyxwCAd/E73HORnAk7ww\n"
-		"GDXi24S5jZDOm3kpNK6uXSaoWSOFYbduJY6x7s48nM1F+45rdP4IOerHOOGuRNft\n"
-		"CBTXIZvZAgMBAAECggEABk3B3Qq/zbNpWm9spCWCiKjCP2PHJ5IK6Drs2jY1fFcn\n"
-		"kR8UvsqAOCHSsHdkM0dVvLoMixdN2RljIrW0VP0P/wn3SDYvY28ET9/Fscs4NL7G\n"
-		"cOfWKWeXBsLocmj/uwMVCI1nLG/2uBxHphJBfTD5FC9Wl4nPrvKHYanlPaSG2Z6v\n"
-		"PoYfMAXCFY7oIBVlbZ935HfbwoWL0DIMlruxRZ6b82bsRvnYLhTCuKKapr7V0gwT\n"
-		"YklBKEcyGznNCmoe+7669JwfFFt8Y7JMVbGurx7ulBBztC/5OckbmQrs+un5iuZC\n"
-		"+kwlHjZKHtmTE826u2Joks834xxDYZjR5vJL3lRP4QKBgQD5i1oRf92LuoRF5ZZK\n"
-		"bglq2H+wXmUEa0lve/hcQsyJvZzA0ZfB9zgwBgrwu4zcmMiT/3Nt3rJkpCG9Bi0h\n"
-		"OJJ+uYNItNs9o8IlohnnLv0clUzh38zrDFSrOPrJd9KJAKeEl1xZBZFJ9abNACaT\n"
-		"bGzjPrfzipMGNTVNBWQN0SIEqQKBgQDnj8f9ggSwLvppdiYLXTVHhFgOe8tac59o\n"
-		"fMNm/8nKgtzVjRbGLFkkbXIjWv9IcxCULYbFhCR/Fi4NgfX3g3MO90cjWs+cYCQA\n"
-		"yck+QqBhf4yzdYxff9KRMoW2n/mMlXgpUckvv642CNSm4HyueHSdrS2GmCNJ0PEe\n"
-		"4v9I2bQrsQKBgFeCHJWiZ0iGobf5KNj0+Wx0e2KX14jTLq9fo9qGuj9bNMsRNMya\n"
-		"KyP8Gn4M5vq8wSnVHN9chuZwADzPG6hYtFaoK3elpHRbJswXqkm92pjZalqTJsMO\n"
-		"UeqxUpCv6i6NAjGm+oVlRGvRLysYcG6mSRDvf4ZyA9jbc9OMnmeR/QHxAoGBAOO8\n"
-		"Lo4N/xpfOXva7NOkWa/6Yrfr3DUbHZ2fhnWX/xeh2BpWZh2EpC8FTImlBwhz0cxJ\n"
-		"chBzQ4mRgL1cIVHJ/7CqVVZaC3DZxM7ZpYgL8ruwu+oLI4EQr0CJlaPkdYNjxQeu\n"
-		"HdVOCMGvsaRlh3n3kYk5Nlr26U3BpkIgMb2uDlohAoGBAOTI0j0YADYxCzUMOStD\n"
-		"5IYy4ws33DUPu57NxoWVZRGaiPVAv/OmYdR++cZEAKeRNFMBLcJpKj1AFMVRAeyP\n"
-		"2GVlqjPq81CsAClh+GZgRHwHyEGOo4OxecVUN7f2jW8p1tbPbc0Hd0EXfOoBwsKS\n"
-		"WHB8uTlWqeZxM5LdFLOpGNr1\n"
-		"-----END PRIVATE KEY-----\n"
+		key["client_email"].get<std::string>(),
+		key["private_key"].get<std::string>()
 	);
 	if (std::filesystem::exists("root"))
 	{
