@@ -658,8 +658,8 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
     )
     {
         ++file->m_chunk_transfer_end_progress;
-        task->m_progress += chunk.m_size;
     }
+    task->m_progress += chunk.m_size;
     task->m_progress_text->set_text
     (
         task->m_type + "：" +

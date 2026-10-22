@@ -15,6 +15,8 @@ constexpr auto GLFW_FALSE_export{ GLFW_FALSE };
 #undef GLFW_FALSE
 constexpr auto GLFW_MOUSE_BUTTON_LEFT_export{ GLFW_MOUSE_BUTTON_LEFT };
 #undef GLFW_MOUSE_BUTTON_LEFT
+constexpr auto GLFW_KEY_F3_export{ GLFW_KEY_F3 };
+#undef GLFW_KEY_F3
 constexpr auto GLFW_PRESS_export{ GLFW_PRESS };
 #undef GLFW_PRESS
 constexpr auto GLFW_RELEASE_export{ GLFW_RELEASE };
@@ -41,6 +43,7 @@ export
     
     using ::glfwGetCursorPos;
     using ::glfwGetMouseButton;
+    using ::glfwGetKey;
     using ::glfwSetCursorPosCallback;
     using ::glfwSetCursorEnterCallback;
     using ::glfwSetMouseButtonCallback;
@@ -56,6 +59,7 @@ export
     constexpr auto GLFW_RESIZABLE{ GLFW_RESIZABLE_export };
     constexpr auto GLFW_FALSE{ GLFW_FALSE_export };
     constexpr auto GLFW_MOUSE_BUTTON_LEFT{ GLFW_MOUSE_BUTTON_LEFT_export };
+    constexpr auto GLFW_KEY_F3{ GLFW_KEY_F3_export };
     constexpr auto GLFW_PRESS{ GLFW_PRESS_export };
     constexpr auto GLFW_RELEASE{ GLFW_RELEASE_export };
 }

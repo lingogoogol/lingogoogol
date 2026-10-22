@@ -15,6 +15,7 @@ target_link_libraries(
     PRIVATE
         common
         external.curl
+        external.GLFW
         lgo.dev
         lgo.math
         lgo.GUI

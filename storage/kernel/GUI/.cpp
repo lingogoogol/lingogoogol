@@ -45,7 +45,20 @@ auto message_loop
 	persistent->m_frame_rate->set_text("frame_rate: " + std::to_string(engine->frame_rate()));
 	persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " + std::to_string(blob_queue->cycle_rate()));
 	persistent->m_blob_queue_count->set_text("blob_queue_count: " + std::to_string(blob_queue->count()));
-	#ifdef _DEBUG
+	if (glfwGetKey(engine->window_get(), GLFW_KEY_F3))
+	{
+		for (auto& load_easy_status : load_easy_status_map)
+		{
+			persistent->m_load_easy_status[load_easy_status.second.m_text_index]->show();
+		}
+	}
+	else
+	{
+		for (auto& load_easy_status : load_easy_status_map)
+		{
+			persistent->m_load_easy_status[load_easy_status.second.m_text_index]->hide();
+		}
+	}
 	for (auto& load_easy_status : load_easy_status_map)
 	{
 		std::string status_str{};
@@ -67,7 +80,6 @@ auto message_loop
 			std::format("{:#018x}, {}", reinterpret_cast<std::uint64_t>(load_easy_status.first), status_str)
 		);
 	}
-	#endif
 
 	static std::chrono::steady_clock::time_point last_add_time{};
 	std::chrono::steady_clock::time_point now{ std::chrono::steady_clock::now() };
@@ -778,12 +790,31 @@ auto home
 			lgo::std_white,
 			lgo::size_1D{ 0x100 }
 		);
-	#ifdef _DEBUG
-	for (std::size_t i{ 0 }; i < load_easy_count; ++i)
+	for (std::size_t i{ 0 }; i < load_easy_count / 2; ++i)
 	{
+		auto div
+		{
+			state_div->add_object_shared<lgo::divx_soft_t>
+			(
+				lgo::depth_range_t{ 0.0f, 0.5f },
+				lgo::size_2D{ 0x100, 0x20 },
+				lgo::std_margin,
+				lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
+			)
+		};
 		persistent->m_load_easy_status.push_back
 		(
-			state_div->add_object_shared<lgo::text_line_std_t>
+			div->add_object_shared<lgo::text_line_std_t>
+			(
+				lgo::depth_range_t{ 0.0f, 0.0f },
+				"load_easy_status: evaluating...",
+				lgo::std_white,
+				lgo::size_1D{ 0x100 }
+			)
+		);
+		persistent->m_load_easy_status.push_back
+		(
+			div->add_object_shared<lgo::text_line_std_t>
 			(
 				lgo::depth_range_t{ 0.0f, 0.0f },
 				"load_easy_status: evaluating...",
@@ -792,7 +823,6 @@ auto home
 			)
 		);
 	}
-	#endif
 	
 	*progress_column =
 		work_div->add_object_shared<lgo::divy_soft_t>
