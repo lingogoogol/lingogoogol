@@ -314,7 +314,7 @@ auto curl_easy_t::seek_callback(void* read_void, curl_off_t offset, int origin) 
         }
         case SEEK_END:
         {
-            read->m_progress = 0;
+            read->m_progress = read->m_payload.size();
             break;
         }
         default:
