@@ -790,7 +790,7 @@ auto home
 			lgo::std_white,
 			lgo::size_1D{ 0x100 }
 		);
-	for (std::size_t i{ 0 }; i < load_easy_count / 2; ++i)
+	for (std::size_t i{ 0 }; i < load_easy_count / 4; ++i)
 	{
 		auto div
 		{
@@ -802,26 +802,19 @@ auto home
 				lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
 			)
 		};
-		persistent->m_load_easy_status.push_back
-		(
-			div->add_object_shared<lgo::text_line_std_t>
+		for (std::size_t j{ 0 }; j < 4; ++j)
+		{
+			persistent->m_load_easy_status.push_back
 			(
-				lgo::depth_range_t{ 0.0f, 0.0f },
-				"load_easy_status: evaluating...",
-				lgo::std_white,
-				lgo::size_1D{ 0x100 }
-			)
-		);
-		persistent->m_load_easy_status.push_back
-		(
-			div->add_object_shared<lgo::text_line_std_t>
-			(
-				lgo::depth_range_t{ 0.0f, 0.0f },
-				"load_easy_status: evaluating...",
-				lgo::std_white,
-				lgo::size_1D{ 0x100 }
-			)
-		);
+				div->add_object_shared<lgo::text_line_std_t>
+				(
+					lgo::depth_range_t{ 0.0f, 0.0f },
+					"load_easy_status: evaluating...",
+					lgo::std_white,
+					lgo::size_1D{ 0x100 }
+				)
+			);
+		}
 	}
 	
 	*progress_column =
