@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 module storage.http.curl.easy;
 
 import std;
@@ -27,6 +29,8 @@ curl_easy_t::curl_easy_t(CURL* in)
     }
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_READFUNCTION, &curl_easy_t::read_callback));
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_READDATA, static_cast<void*>(m_read.get())));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_SEEKFUNCTION, &curl_easy_t::seek_callback));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_SEEKDATA, static_cast<void*>(m_read.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 1L));
@@ -292,6 +296,34 @@ auto curl_easy_t::read_callback(char* dest, std::size_t, std::size_t size, void*
     }
     src->m_progress += size;
     return size;
+}
+
+auto curl_easy_t::seek_callback(void* read_void, curl_off_t offset, int origin) -> int
+{
+    auto read{ static_cast<read_t*>(read_void) };
+    switch (origin)
+    {
+        case SEEK_SET:
+        {
+            read->m_progress = 0;
+            break;
+        }
+        case SEEK_CUR:
+        {
+            break;
+        }
+        case SEEK_END:
+        {
+            read->m_progress = 0;
+            break;
+        }
+        default:
+        {
+            throw;
+        }
+    }
+    read->m_progress += offset;
+    return CURL_SEEKFUNC_OK;
 }
 
 auto curl_easy_t::write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t

@@ -8,6 +8,8 @@ constexpr auto CURLH_HEADER_export{ CURLH_HEADER };
 #undef CURLH_HEADER
 constexpr auto CURL_GLOBAL_DEFAULT_export{ CURL_GLOBAL_DEFAULT };
 #undef CURL_GLOBAL_DEFAULT
+constexpr auto CURL_SEEKFUNC_OK_export{ CURL_SEEKFUNC_OK };
+#undef CURL_SEEKFUNC_OK
 
 export
 {
@@ -58,4 +60,5 @@ export
     
     constexpr auto CURLH_HEADER{ CURLH_HEADER_export };
     constexpr auto CURL_GLOBAL_DEFAULT{ CURL_GLOBAL_DEFAULT_export };
+    constexpr auto CURL_SEEKFUNC_OK{ CURL_SEEKFUNC_OK_export };
 }

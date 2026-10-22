@@ -67,6 +67,7 @@ export
     protected:
         static auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void*) -> int;
         static auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t;
+        static auto seek_callback(void* read_void, curl_off_t offset, int origin) -> int;
         static auto write_callback(char* src, std::size_t, std::size_t size, void* dest_void) -> std::size_t;
 
         CURL* m_interface{};
