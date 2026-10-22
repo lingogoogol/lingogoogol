@@ -38,9 +38,8 @@ curl_easy_t::curl_easy_t(CURL* in)
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGDATA, this));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGFUNCTION, &debug_callback));
     #endif
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_CONNECTTIMEOUT, 600L));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_LOW_SPEED_TIME, 600L));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_LOW_SPEED_LIMIT, 600L));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_TIMEOUT, 300L));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_CONNECTTIMEOUT, 100L));
     return;
 }
 
