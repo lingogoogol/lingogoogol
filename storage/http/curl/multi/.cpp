@@ -114,6 +114,17 @@ auto curl_multi_t::run() -> std::uint64_t
                     }
                     else
                     {
+                        lgo::log_file
+                        (
+                            "A transfer failed in curl_multi_t::run:\n"
+                            "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
+                            "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
+                            "  response_code: " + std::to_string(easy_ptr->m_response_code) +
+                            "  request:\n" +
+                            easy_ptr->m_read->m_payload +
+                            "  response:\n" +
+                            easy_ptr->m_write->m_payload
+                        );
                         easy_ptr->resume();
                         api_curlm(curl_multi_add_handle(m_interface, easy_ptr->interface_get()));
                         ++m_running_count;

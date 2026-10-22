@@ -214,8 +214,17 @@ auto curl_easy_t::run() -> void
         {
             break;
         }
-        std::this_thread::sleep_for(sleep_duration);
-        sleep_duration *= 2;
+        lgo::log_file
+        (
+            "A transfer failed in curl_easy_t::run:"
+            "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
+            "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(m_interface)) +
+            "  response_code: " + std::to_string(m_response_code) +
+            "  request:\n" +
+            m_read->m_payload +
+            "  response:\n" +
+            m_write->m_payload
+        );
 	}
 	return;
 }
