@@ -150,5 +150,5 @@ export
     )
     -> void;
 
-    constexpr std::size_t load_easy_count{ 32 };
+    constexpr std::size_t load_easy_count{ 64 };
 }

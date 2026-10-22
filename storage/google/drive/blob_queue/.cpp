@@ -19,7 +19,7 @@ auto blob_queue_t::process() -> void
 
     curl_multi_t& multi{ curl_multi_t::get() };
 	//A array of easy handle that is currently not used.
-	std::vector<google_batch_t> batch_idle_arr( 32 );
+	std::vector<google_batch_t> batch_idle_arr( 64 );
     for (auto& batch : batch_idle_arr)
     {
         batch = google_batch_t{ curl_easy_t{} };
