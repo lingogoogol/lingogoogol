@@ -1,3 +1,5 @@
+module;
+
 #include <stdio.h>
 
 module storage.http.curl.easy;
