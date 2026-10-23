@@ -9,7 +9,7 @@ auto main() -> int
 
     std::ofstream stream{ "filegen" };
     std::mt19937_64 random_engine{ std::random_device{}() };
-    std::uniform_int_distribution distribution{ 0, 7 };
+    std::uniform_int_distribution distribution{ 0, 255 };
     for (std::uint64_t i{ 0 }; i < size; ++i)
     {
         stream.put(static_cast<unsigned char>(distribution(random_engine)));
