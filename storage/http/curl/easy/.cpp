@@ -36,7 +36,7 @@ curl_easy_t::curl_easy_t(CURL* in)
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 1L));
-    #ifdef _DEBUG
+    #ifdef LGO_DEBUG_CURL
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGDATA, this));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGFUNCTION, &debug_callback));
     #endif
