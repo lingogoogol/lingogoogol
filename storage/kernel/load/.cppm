@@ -356,7 +356,7 @@ export
     )
     -> void;
     auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void;
-    auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_chunk_t* chunk) -> void;
+    auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_file_t* file, std::size_t chunk_i) -> void;
 
     constexpr std::uint64_t content_size_max{ 25000 };
     constexpr std::uint64_t content_size_max_base64{ 18750 };

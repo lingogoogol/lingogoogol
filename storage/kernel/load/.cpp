@@ -961,7 +961,7 @@ auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, down
     chunk.m_file->m_task->m_state->m_end.emplace
     (
         key,
-        std::bind(download_chunk_transfer_end, std::placeholders::_1, &chunk)
+        std::bind(download_chunk_transfer_end, std::placeholders::_1, chunk.m_file, &chunk - chunk.m_file->m_chunk_arr.data())
     );
     download_idle_update
     (
@@ -971,32 +971,33 @@ auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, down
     return;
 }
 
-//We can't use an iterator for `chunk` because this file may still be loading,
+//We can't use an iterator nor an address for `chunk` because this file may still be loading,
 // so m_chunk_arr may be modified, invalidating the iterator.
-auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_chunk_t* chunk) -> void
+auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_file_t* file, std::size_t chunk_i) -> void
 {
     google_batch_t& batch{ dynamic_cast<google_batch_t&>(*easy) };
-    chunk->m_content.resize(batch.part_count());
+    download_chunk_t& chunk{ file->m_chunk_arr[chunk_i] };
+    chunk.m_content.resize(batch.part_count());
     for (std::uint64_t i{ 0 }; i < batch.part_count(); ++i)
     {
-        chunk->m_content[i] = nlohmann::json::parse(batch.response_get(i).body_get())["description"];
+        chunk.m_content[i] = nlohmann::json::parse(batch.response_get(i).body_get())["description"];
     }
-    if (&chunk->m_file->m_chunk_arr[chunk->m_file->m_filesystem_progress] < chunk)
+    if (chunk.m_file->m_filesystem_progress < chunk_i)
     {
         return;
     }
 
-    std::ofstream content_stream{ lgo::create_ofstream_preserve(chunk->m_file->m_path_local) };
+    std::ofstream content_stream{ lgo::create_ofstream_preserve(chunk.m_file->m_path_local) };
     content_stream.seekp(0, std::ios_base::end);
     std::uint64_t filesystem_size{};
     while (true)
     {
-        if (chunk->m_file->m_filesystem_progress == chunk->m_file->m_chunk_arr.size())
+        if (chunk.m_file->m_filesystem_progress == chunk.m_file->m_chunk_arr.size())
         {
             break;
         }
         //This chunk is going to be written to local filesystem.
-        download_chunk_t& chunk_filesystem{ chunk->m_file->m_chunk_arr[chunk->m_file->m_filesystem_progress] };
+        download_chunk_t& chunk_filesystem{ chunk.m_file->m_chunk_arr[chunk.m_file->m_filesystem_progress] };
         if (chunk_filesystem.m_content.empty())
         {
             break;
@@ -1012,7 +1013,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_ch
     }
 
     //Update progress.
-    download_task_t& task{ *chunk->m_file->m_task };
+    download_task_t& task{ *chunk.m_file->m_task };
     task.m_progress += filesystem_size;
     task.m_progress_text->set_text
     (
