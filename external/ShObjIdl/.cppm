@@ -1,7 +1,7 @@
 module;
 
 #define WIN32_LEAN_AND_MEAN
-#include <ShObjIdl.h>
+#include <shobjidl.h>
 
 export module external.ShObjIdl;
 

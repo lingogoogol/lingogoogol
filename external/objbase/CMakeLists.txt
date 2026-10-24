@@ -12,5 +12,5 @@ target_link_libraries(
     external.objbase
     PRIVATE
         common
-        Ole32
+        ole32
 )

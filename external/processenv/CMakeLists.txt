@@ -12,5 +12,5 @@ target_link_libraries(
     external.processenv
     PRIVATE
         common
-        Kernel32
+        kernel32
 )

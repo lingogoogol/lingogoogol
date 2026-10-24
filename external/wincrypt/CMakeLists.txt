@@ -12,5 +12,5 @@ target_link_libraries(
     external.wincrypt
     PRIVATE
         common
-        Crypt32
+        crypt32
 )
