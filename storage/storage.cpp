@@ -115,7 +115,7 @@ auto app() -> void
 	lgo::log_file("  " + std::filesystem::current_path().string() + "\n\n");
 	lgo::FreeType_t freetype{};
 	lgo::font_face_t::freetype_set(&freetype);
-	lgo::font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", 12 };
+	lgo::font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", static_cast<std::uint64_t>(lgo::std_font_size.x) };
 	lgo::font_preference_t::default_get().push_back(&font_face);
     lgo::engine_t engine{ lgo::size_2D{ 0x600, 0x400 }, "wWinMain.engine" };
     lgo::depth_tracker_t depth_tracker{};
