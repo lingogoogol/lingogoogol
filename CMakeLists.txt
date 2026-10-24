@@ -1,17 +1,29 @@
 cmake_minimum_required(VERSION 4.0...4.4 FATAL_ERROR)
 
-set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "f35a9ac6-8463-4d38-8eec-5d6008153e7d")
+# CMake's experimental `import std;` UUID is version-specific:
+# - CMake 4.0..4.2 uses "d0edc3af-4c50-42ea-a356-e2862fe7a444"
+# - CMake 4.3+     uses "f35a9ac6-8463-4d38-8eec-5d6008153e7d"
+if(CMAKE_VERSION VERSION_LESS 4.3)
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
+else()
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "f35a9ac6-8463-4d38-8eec-5d6008153e7d")
+endif()
 set(CMAKE_CXX_MODULE_STD ON)
+
+# IMPORTANT: Keep `CMAKE_CXX_STANDARD` and `CMAKE_CXX_EXTENSIONS OFF` BEFORE `project()`.
+# CMake synthesizes the `__cmake_cxx23` (`import std;`) target during `project(... LANGUAGES CXX)`.
+# If `CMAKE_CXX_EXTENSIONS OFF` is placed after `project()`, Clang/GCC will compile `std.pcm` with
+# `-std=gnu++23` (GNU extensions enabled) while project targets use `-std=c++23` (due to `-pedantic-errors`),
+# causing Clang to reject importing `std.pcm` due to a language-extension flag mismatch.
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(
     lingogoogol
     VERSION 0.0.5.0
     LANGUAGES CXX
 )
-
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
 set(
@@ -76,13 +88,15 @@ target_include_directories(
         ${VCPKG_DYNAMIC_INCLUDE_DIR}
 )
 
-target_link_directories(
-    common
-    INTERFACE
-        "../lib/"
-        "C:/lingogoogol/application/vcpkg/installed/x64-windows-static/lib/"
-        "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
-)
+if(MSVC)
+    target_link_directories(
+        common
+        INTERFACE
+            "../lib/"
+            "C:/lingogoogol/application/vcpkg/installed/x64-windows-static/lib/"
+            "C:/lingogoogol/application/vcpkg/installed/x64-windows/lib/"
+    )
+endif()
 
 add_subdirectory(external)
 add_subdirectory(lgo)

@@ -12,6 +12,6 @@ target_link_libraries(
     external.OpenSSL
     PRIVATE
         common
-        libssl
-        libcrypto
+        $<IF:$<BOOL:${MINGW}>,ssl,libssl>
+        $<IF:$<BOOL:${MINGW}>,crypto,libcrypto>
 )
