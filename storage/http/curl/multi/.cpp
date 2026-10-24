@@ -94,7 +94,7 @@ auto curl_multi_t::run() -> std::uint64_t
                             (
                                 message->easy_handle,
                                 CURLINFO_RESPONSE_CODE,
-                                &easy_ptr->m_response_code
+                                &curl_easy_multi_access_t::response_code_get(*easy_ptr)
                             )
                         );
                         easy_ptr->parse();
@@ -119,11 +119,11 @@ auto curl_multi_t::run() -> std::uint64_t
                             "A transfer failed in curl_multi_t::run:\n"
                             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
                             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
-                            "  response_code: " + std::to_string(easy_ptr->m_response_code) +
+                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) +
                             "  request:\n" +
-                            easy_ptr->m_read->m_payload +
+                            curl_easy_multi_access_t::read_get(*easy_ptr)->m_payload +
                             "  response:\n" +
-                            easy_ptr->m_write->m_payload
+                            curl_easy_multi_access_t::write_get(*easy_ptr)->m_payload
                         );
                         easy_ptr->resume();
                         api_curlm(curl_multi_add_handle(m_interface, easy_ptr->interface_get()));
@@ -157,7 +157,7 @@ auto curl_multi_t::running_count() -> int
 
 auto curl_multi_t::read_progress(CURL* key) -> std::uint64_t
 {
-    return m_added[key]->m_read->m_progress;
+    return curl_easy_multi_access_t::read_get(*m_added[key])->m_progress;
 }
 
 auto curl_multi_t::poll(int timeout_ms) -> void

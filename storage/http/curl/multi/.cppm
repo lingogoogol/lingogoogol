@@ -49,8 +49,8 @@ export
 template<typename t_easy>
 auto curl_multi_t::add(t_easy&& easy) -> void
 {
-    easy.m_write = std::make_unique<curl_easy_t::write_t>();
-    api_curl(curl_easy_setopt(easy.m_interface, CURLOPT_WRITEDATA, static_cast<void*>(easy.m_write.get())));
+    curl_easy_multi_access_t::write_get(easy) = std::make_unique<curl_easy_t::write_t>();
+    api_curl(curl_easy_setopt(curl_easy_multi_access_t::interface_get(easy), CURLOPT_WRITEDATA, static_cast<void*>(curl_easy_multi_access_t::write_get(easy).get())));
     api_curlm(curl_multi_add_handle(m_interface, easy.interface_get()));
     ++m_running_count;
     //Get the key to `m_added` first before `easy` is moved.

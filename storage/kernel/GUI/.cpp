@@ -7,6 +7,7 @@ module storage.kernel.GUI;
 import std;
 
 import external.curl;
+import external.GLFW;
 
 import lgo.dev;
 import lgo.math;

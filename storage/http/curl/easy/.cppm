@@ -85,6 +85,18 @@ export
         //Finalizes URL and headers.
         virtual auto method() -> void;
 
-        friend class curl_multi_t;
+        //Do NOT write `friend class curl_multi_t;` here.
+        //In standard C++23 modules (enforced by Clang), an unqualified friend declaration
+        //`friend class curl_multi_t;` forward-declares `curl_multi_t` as belonging to module
+        //`storage.http.curl.easy`, which conflicts with its actual definition in downstream module
+        //`storage.http.curl.multi`. Instead, expose a helper struct in this module for `curl_multi_t`.
+        friend struct curl_easy_multi_access_t;
+    };
+    struct curl_easy_multi_access_t
+    {
+        static auto write_get(curl_easy_t& e) -> std::unique_ptr<curl_easy_t::write_t>& { return e.m_write; }
+        static auto read_get(curl_easy_t& e) -> std::unique_ptr<curl_easy_t::read_t>& { return e.m_read; }
+        static auto interface_get(curl_easy_t& e) -> CURL*& { return e.m_interface; }
+        static auto response_code_get(curl_easy_t& e) -> long& { return e.m_response_code; }
     };
 }
