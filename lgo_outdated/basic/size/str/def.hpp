@@ -1,4 +1,0 @@
-#ifndef LGO_BASIC_SIZE_STR_DEF
-#define LGO_BASIC_SIZE_STR_DEF
-
-#endif

@@ -1,6 +1,0 @@
-#ifndef LGO_IO_TLS_EXTENSION_SUPPORTED_VERSIONS
-#define LGO_IO_TLS_EXTENSION_SUPPORTED_VERSIONS
-
-#include "impl.hpp"
-
-#endif

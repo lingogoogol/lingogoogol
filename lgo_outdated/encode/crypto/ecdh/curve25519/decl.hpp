@@ -1,8 +1,0 @@
-#ifndef LGO_ENCODE_CRYPTO_ECDH_CURVE25519_DECL
-#define LGO_ENCODE_CRYPTO_ECDH_CURVE25519_DECL
-
-namespace lgo {
-	class curve25519;
-}
-
-#endif
