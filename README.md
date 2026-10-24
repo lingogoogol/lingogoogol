@@ -6,6 +6,13 @@
 
 **歡迎提交 [Pull Request](https://github.com/lingogoogol/lingogoogol/pulls) 與 [Issue](https://github.com/lingogoogol/lingogoogol/issues)！** 功能建議、錯誤回報、文件改善與程式碼貢獻都很歡迎。
 
+## 分支說明
+
+| 分支 | 說明 |
+| --- | --- |
+| `main` | 由作者親自撰寫的版本。 |
+| `storage_ai` | 由 Antigravity 與 Codex 協作開發的版本。 |
+
 ## 無上限容量的設計
 
 檔案內容會經過 Base64URL 編碼，分散儲存在多個 Google Drive 物件的 `description` 欄位，再透過索引串接與還原。資料夾結構與檔案名稱也由程式管理，因此可以持續新增分塊，擴展儲存規模。
@@ -161,6 +168,7 @@ cmake --install "$project_workspace/build/x64-win32-pe-mingw_Release"
 2. 每個 PR 聚焦單一問題，說明修改目的與使用者可觀察到的行為變化。
 3. 修改程式碼後，確認能成功編譯，並實際驗證相關操作；GUI 修改請包含視窗操作與正常關閉的測試結果。
 4. 維持清楚易讀的 C++ 程式碼。遇到特殊語法、跨平台限制或非直覺的實作，請註解說明原因。
-5. Commit 訊息請使用清楚完整的英文句子，並以句號結尾。
+5. 功能、操作方式、設定或使用限制有變更時，請同步更新 README，讓文件與程式的實際行為一致。
+6. Commit 訊息請使用清楚完整的英文句子，並以句號結尾。
 
 小修正、文件補充與首次貢獻都很歡迎；較大的功能或架構調整，建議先開 Issue 討論。
