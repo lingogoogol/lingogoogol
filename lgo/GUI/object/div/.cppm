@@ -629,36 +629,43 @@ export namespace lgo
         std::unique_lock lock{ m_mutex };
         GUI_div_t::set_size(size);
         std::int64_t size_forward{ t_y ? size.y : size.x }, size_sideways{ t_y ? size.x : size.y };
-        std::int64_t size_orig_forward{ t_y ? m_size.y : m_size.x };
+        std::int64_t size_orig_forward{ t_y ? m_size.y : m_size.x },
+            size_orig_sideways{ t_y ? m_size.x : m_size.y };
         m_size = size;
         switch (m_alignment_forward)
         {
         case 1:
         {
-            size_1D offset
+            if (m_current.m_object.size())
             {
-                m_from_large ? (size_forward + static_cast<std::int64_t>(m_length)) / 2 -
-                    (size_orig_forward + static_cast<std::int64_t>(m_length)) / 2 :
-                    (size_forward - static_cast<std::int64_t>(m_length)) / 2 -
-                    (size_orig_forward - static_cast<std::int64_t>(m_length)) / 2
-            };
-            move_child
-            (
-                0,
-                m_current.m_object.rbegin()->first + 1,
-                size_2D{ t_y ? 0 : offset.x, t_y ? offset.x : 0 }
-            );
+                size_1D offset
+                {
+                    m_from_large ? (size_forward + static_cast<std::int64_t>(m_length)) / 2 -
+                        (size_orig_forward + static_cast<std::int64_t>(m_length)) / 2 :
+                        (size_forward - static_cast<std::int64_t>(m_length)) / 2 -
+                        (size_orig_forward - static_cast<std::int64_t>(m_length)) / 2
+                };
+                move_child
+                (
+                    0,
+                    m_current.m_object.rbegin()->first + 1,
+                    size_2D{ t_y ? 0 : offset.x, t_y ? offset.x : 0 }
+                );
+            }
             break;
         }
         case 2:
         {
-            size_1D offset{ size_forward - size_orig_forward };
-            move_child
-            (
-                0,
-                m_current.m_object.rbegin()->first + 1,
-                size_2D{ t_y ? 0 : offset.x, t_y ? offset.x : 0 }
-            );
+            if (m_current.m_object.size())
+            {
+                size_1D offset{ size_forward - size_orig_forward };
+                move_child
+                (
+                    0,
+                    m_current.m_object.rbegin()->first + 1,
+                    size_2D{ t_y ? 0 : offset.x, t_y ? offset.x : 0 }
+                );
+            }
             break;
         }
         }
@@ -667,19 +674,22 @@ export namespace lgo
         case 1:
             for (auto i{ m_current.m_object.begin() }; i != m_current.m_object.end(); ++i)
             {
-                std::int64_t object_size_sideways{ t_y ? i->second->get_pos().x : i->second->get_pos().y };
-                size_1D offset{ (size_sideways - object_size_sideways) / 2 - (size_orig_forward - object_size_sideways) / 2 };
-                i->second->set_pos(pos_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x });
+                std::int64_t object_size_sideways{ t_y ? i->second->get_size().x : i->second->get_size().y };
+                size_1D offset{ (size_sideways - object_size_sideways) / 2 - (size_orig_sideways - object_size_sideways) / 2 };
+                i->second->set_pos(i->second->get_pos() + size_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x });
             }
             break;
         case 2:
-            size_1D offset{ size_sideways - size_orig_forward };
-            move_child
-            (
-                0,
-                m_current.m_object.rbegin()->first + 1,
-                size_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x }
-            );
+            if (m_current.m_object.size())
+            {
+                size_1D offset{ size_sideways - size_orig_sideways };
+                move_child
+                (
+                    0,
+                    m_current.m_object.rbegin()->first + 1,
+                    size_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x }
+                );
+            }
             break;
         }
         return;
