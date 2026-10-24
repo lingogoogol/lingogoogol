@@ -34,24 +34,12 @@ export
     )
     -> bool;
     
-    auto dialog_file
-    (
-        lgo::engine_t* engine,
-        GUI_persistent_t* persistent,
-        curl_multi_t* multi,
-	    load_state_t* load_state,
-	    blob_queue_t* blob_queue,
-        bool folder
-    )
-    -> std::vector<std::string>;
+    auto dialog_file(bool folder) -> std::vector<std::string>;
 
     auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::string* pos) -> void;
 
     auto file_upload_callback
     (
-        lgo::engine_t* engine,
-        GUI_persistent_t* persistent,
-        curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
         std::string pos
@@ -60,9 +48,6 @@ export
     
     auto folder_upload_callback
     (
-        lgo::engine_t* engine,
-        GUI_persistent_t* persistent,
-        curl_multi_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
         std::string pos
@@ -71,11 +56,7 @@ export
 
     auto file_download_callback
     (
-        lgo::engine_t* engine,
-        GUI_persistent_t* persistent,
-        curl_multi_t* multi,
         load_state_t* load_state,
-        blob_queue_t* blob_queue,
         std::string name,
         std::string pos
     )
@@ -83,11 +64,7 @@ export
 
     auto folder_download_callback
     (
-        lgo::engine_t* engine,
-        GUI_persistent_t* persistent,
-        curl_multi_t* multi,
         load_state_t* load_state,
-        blob_queue_t* blob_queue,
         std::string name,
         std::string pos
     )

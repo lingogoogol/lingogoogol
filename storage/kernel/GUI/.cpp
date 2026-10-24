@@ -109,22 +109,11 @@ auto message_loop
 	return engine->message_loop();
 }
 
-auto dialog_file
-(
-	lgo::engine_t* engine,
-	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
-	load_state_t* load_state,
-	blob_queue_t* blob_queue,
-	bool folder
-)
--> std::vector<std::string>
+auto dialog_file(bool folder) -> std::vector<std::string>
 {
+	// IFileDialog::Show is modal: the constructor returns after selection or cancellation.
+	// Waiting for ok() after cancellation would loop forever and ignore window-close requests.
 	dialog_t dialog{ folder };
-	while (!dialog.ok())
-	{
-		message_loop(engine, persistent, multi, load_state, blob_queue);
-	}
 	return dialog.result();
 }
 
@@ -135,9 +124,6 @@ auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::str
 
 auto file_upload_callback
 (
-	lgo::engine_t* engine,
-	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
 	std::string pos
@@ -146,7 +132,7 @@ auto file_upload_callback
 {
 	std::vector<std::string> file_arr
 	{
-		dialog_file(engine, persistent, multi, load_state, blob_queue, false)
+		dialog_file(false)
 	};
 	for (auto file : file_arr)
 	{
@@ -227,16 +213,13 @@ auto file_upload_callback
 
 auto folder_upload_callback
 (
-	lgo::engine_t* engine,
-	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
 	std::string pos
 )
 -> void
 {
-	std::vector<std::string> folder_arr{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder_arr{ dialog_file(true) };
 	for (auto folder : folder_arr)
 	{
 		auto task{ std::make_shared<upload_task_t>() };
@@ -315,17 +298,18 @@ auto folder_upload_callback
 
 auto file_download_callback
 (
-	lgo::engine_t* engine,
-	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
 	load_state_t* load_state,
-	blob_queue_t* blob_queue,
 	std::string name,
 	std::string pos
 )
 -> void
 {
-	std::vector<std::string> folder{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder{ dialog_file(true) };
+	// Cancellation returns no paths; do not create a download task.
+	if (folder.empty())
+	{
+		return;
+	}
 	if (folder.size() != 1)
 	{
 		throw;
@@ -388,17 +372,18 @@ auto file_download_callback
 
 auto folder_download_callback
 (
-	lgo::engine_t* engine,
-	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
 	load_state_t* load_state,
-	blob_queue_t* blob_queue,
 	std::string name,
 	std::string pos
 )
 -> void
 {
-	std::vector<std::string> folder{ dialog_file(engine, persistent, multi, load_state, blob_queue, true) };
+	std::vector<std::string> folder{ dialog_file(true) };
+	// Cancellation returns no paths; do not create a download task.
+	if (folder.empty())
+	{
+		return;
+	}
 	if (folder.size() != 1)
 	{
 		throw;
@@ -621,11 +606,7 @@ auto list
 				std::bind
 				(
 					&folder_download_callback,
-					engine,
-					persistent,
-					multi,
 					load_state,
-					blob_queue,
 					i["name"].get<std::string>(),
 					i["id"].get<std::string>()
 				),
@@ -656,11 +637,7 @@ auto list
 				std::bind
 				(
 					&file_download_callback,
-					engine,
-					persistent,
-					multi,
 					load_state,
-					blob_queue,
 					i["name"].get<std::string>(),
 					i["id"].get<std::string>()
 				),
@@ -868,13 +845,13 @@ auto home
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&folder_upload_callback, engine, persistent, multi, load_state, blob_queue, *pos),
+		std::bind(&folder_upload_callback, load_state, blob_queue, *pos),
 		"上傳資料夾"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&file_upload_callback, engine, persistent, multi, load_state, blob_queue, *pos),
+		std::bind(&file_upload_callback, load_state, blob_queue, *pos),
 		"上傳檔案"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
