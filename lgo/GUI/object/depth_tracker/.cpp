@@ -19,6 +19,13 @@ namespace lgo
         return;
     }
 
+    auto depth_tracker_t::update(std::uint64_t id, pos_2D pos, size_2D size) -> void
+    {
+        auto& data{ m_depth_data.at(id) };
+        data.m_pos = pos;
+        data.m_size = size;
+    }
+
     auto depth_tracker_t::top(pos_2D pos, std::uint64_t id) -> bool
     {
         float depth{ m_depth_data[id].m_depth };

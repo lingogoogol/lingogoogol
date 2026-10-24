@@ -179,6 +179,7 @@ export namespace lgo
         );
 
         auto set_pos(pos_2D pos) -> void override;
+        auto set_size(size_2D size) -> void override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
         auto show_impl(bool base) -> void override;
@@ -208,6 +209,14 @@ export namespace lgo
         t_type::set_pos(pos);
         m_button.set_pos(pos);
         return;
+    }
+
+    template<typename t_type>
+    auto button_t<t_type>::set_size(size_2D size) -> void
+    {
+        std::unique_lock lock{ this->m_mutex };
+        t_type::set_size(size);
+        m_button.m_click_area.set_size(size);
     }
 
     template<typename t_type>

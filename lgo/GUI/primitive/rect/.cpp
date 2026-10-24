@@ -493,18 +493,29 @@ namespace lgo
             );
         }
 
-        //(0, 0) is at the top left corner of the window.
+        // GUI coordinates are logical pixels; Vulkan scissors use framebuffer pixels.
+        // Clamp before conversion so a shrinking window cannot produce negative Vulkan offsets.
+        const auto window_size{ m_engine->get_window_size() };
+        const auto framebuffer_size{ m_engine->get_framebuffer_size() };
+        const auto clip_pos{ m_clip_pos ? *m_clip_pos : pos_2D{} };
+        const auto clip_size{ m_clip_size ? *m_clip_size : window_size };
+        const auto left{ std::clamp<std::int64_t>(clip_pos.x, 0, window_size.x) };
+        const auto top{ std::clamp<std::int64_t>(clip_pos.y, 0, window_size.y) };
+        const auto right{ std::clamp(clip_pos.x + clip_size.x, left, window_size.x) };
+        const auto bottom{ std::clamp(clip_pos.y + clip_size.y, top, window_size.y) };
+        if (left == right || top == bottom)
+        {
+            return;
+        }
+        const auto x{ left * framebuffer_size.x / window_size.x };
+        const auto y{ top * framebuffer_size.y / window_size.y };
         vk::Rect2D scissor_rect
         {
-            .offset
-            {
-                .x{ static_cast<std::int32_t>(m_clip_pos ? m_clip_pos->x : 0) },
-                .y{ static_cast<std::int32_t>(m_clip_pos ? m_clip_pos->y : 0) }
-            },
+            .offset{ static_cast<std::int32_t>(x), static_cast<std::int32_t>(y) },
             .extent
             {
-                .width{ static_cast<std::uint32_t>(m_clip_size ? m_clip_size->x : m_engine->get_window_size().x) },
-                .height{ static_cast<std::uint32_t>(m_clip_size ? m_clip_size->y : m_engine->get_window_size().y) }
+                static_cast<std::uint32_t>(right * framebuffer_size.x / window_size.x - x),
+                static_cast<std::uint32_t>(bottom * framebuffer_size.y / window_size.y - y)
             }
         };
         command_buffer.setScissor(0, scissor_rect);

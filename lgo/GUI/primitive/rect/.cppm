@@ -18,6 +18,8 @@ export namespace lgo
 {
     class rect_primitive_t
     {
+        // The engine refreshes normalized vertices after the logical window size changes.
+        friend class engine_t;
     private:
         struct solid_vertex_t
         {

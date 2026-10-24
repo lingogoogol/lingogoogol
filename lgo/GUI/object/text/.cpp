@@ -119,9 +119,17 @@ namespace lgo
     auto text_line_t::set_size(size_2D size) -> void
     {
         std::unique_lock lock{ m_mutex };
-        m_div.set_size(size);
+        // Parent layout needs the previous size when it computes the child's size delta.
         GUI_object_t::set_size(size);
+        resize_text(size);
         return;
+    }
+
+    auto text_line_t::resize_text(size_2D size) -> void
+    {
+        std::unique_lock lock{ m_mutex };
+        m_div.set_size(size);
+        m_clip_size = size;
     }
 
     auto text_line_t::get_margin() const -> size_1D

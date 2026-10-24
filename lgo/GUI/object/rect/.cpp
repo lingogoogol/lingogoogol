@@ -157,6 +157,7 @@ namespace lgo
         if (m_primitive)
         {
             m_primitive->set_pos(pos);
+            m_depth_tracker->update(m_depth_id, m_pos, m_size);
         }
         return;
     }
@@ -170,10 +171,12 @@ namespace lgo
     auto rect_t::set_size(size_2D size) -> void
     {
         std::unique_lock lock{ m_mutex };
+        GUI_object_t::set_size(size);
         m_size = size;
         if (m_primitive)
         {
             m_primitive->set_size(size);
+            m_depth_tracker->update(m_depth_id, m_pos, m_size);
         }
         return;
     }

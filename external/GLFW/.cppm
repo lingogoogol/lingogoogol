@@ -22,6 +22,12 @@ constexpr auto GLFW_PRESS_export{ GLFW_PRESS };
 constexpr auto GLFW_RELEASE_export{ GLFW_RELEASE };
 #undef GLFW_RELEASE
 
+constexpr auto GLFW_ICONIFIED_export{ GLFW_ICONIFIED };
+#undef GLFW_ICONIFIED
+
+constexpr auto GLFW_DONT_CARE_export{ GLFW_DONT_CARE };
+#undef GLFW_DONT_CARE
+
 export
 {
     using ::VkSurfaceKHR;
@@ -38,6 +44,10 @@ export
     using ::glfwWindowHint;
     using ::glfwCreateWindowSurface;
     using ::glfwGetFramebufferSize;
+    using ::glfwGetWindowSize;
+    using ::glfwGetWindowAttrib;
+    using ::glfwSetWindowSizeLimits;
+    using ::glfwSetWindowRefreshCallback;
     using ::glfwSetWindowUserPointer;
     using ::glfwGetWindowUserPointer;
     
@@ -52,8 +62,11 @@ export
     using ::glfwSetCharCallback;
 
     using ::glfwPollEvents;
+    using ::glfwWaitEventsTimeout;
     using ::glfwWindowShouldClose;
 
+    constexpr auto GLFW_ICONIFIED{ GLFW_ICONIFIED_export };
+    constexpr auto GLFW_DONT_CARE{ GLFW_DONT_CARE_export };
     constexpr auto GLFW_CLIENT_API{ GLFW_CLIENT_API_export };
     constexpr auto GLFW_NO_API{ GLFW_NO_API_export };
     constexpr auto GLFW_RESIZABLE{ GLFW_RESIZABLE_export };

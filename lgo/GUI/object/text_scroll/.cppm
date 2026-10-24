@@ -54,6 +54,7 @@ export namespace lgo
         auto get_pos() const -> pos_2D override;
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;
+        auto set_size(size_2D size) -> void override;
         auto get_margin() const -> size_1D override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
@@ -131,7 +132,7 @@ export namespace lgo
     {
         std::unique_lock lock{ this->m_mutex };
         pos_2D text_pos{ this->get_pos() };
-        std::int64_t scroll_y{ std::max(this->get_text_size().y, this->get_clip_size().y) };
+        std::int64_t scroll_y{ std::max<std::int64_t>({ 1, this->get_text_size().y, this->get_clip_size().y }) };
         m_scrollbar_y.set_pos
         (
             pos_2D
@@ -140,7 +141,7 @@ export namespace lgo
                 this->get_clip_pos().y - (text_pos.y - this->get_clip_pos().y) * this->get_clip_size().y / scroll_y
             }
         );
-        std::int64_t scroll_x{ std::max(this->get_text_size().x, this->get_clip_size().x) };
+        std::int64_t scroll_x{ std::max<std::int64_t>({ 1, this->get_text_size().x, this->get_clip_size().x }) };
         m_scrollbar_x.set_pos
         (
             pos_2D
@@ -239,6 +240,26 @@ export namespace lgo
     {
         std::unique_lock lock{ this->m_mutex };
         return m_size;
+    }
+
+    template<typename t_text>
+    auto text_scroll_impl_t<t_text>::set_size(size_2D size) -> void
+    {
+        std::unique_lock lock{ this->m_mutex };
+        // Notify once with the outer size; the inner text excludes the scrollbar border.
+        GUI_object_t::set_size(size);
+        m_size = size;
+        this->resize_text
+        (
+            size_2D{ std::max<std::int64_t>(0, size.x - scrollbar_width.x),
+                std::max<std::int64_t>(0, size.y - scrollbar_width.x) }
+        );
+        m_click_area.set_size(size);
+        const auto pos{ get_pos() };
+        m_scrollbar_x.set_pos(pos_2D{ pos.x, pos.y + size.y - scrollbar_width.x });
+        m_scrollbar_y.set_pos(pos_2D{ pos.x + size.x - scrollbar_width.x, pos.y });
+        update_scrollbar_size();
+        update_scrollbar_pos();
     }
 
     template<typename t_text>

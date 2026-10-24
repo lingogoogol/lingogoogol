@@ -43,7 +43,6 @@ auto message_loop
 		load_easy_status_init = true;
 	}
 
-	persistent->m_frame_rate->set_text("frame_rate: " + std::to_string(engine->frame_rate()));
 	persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " + std::to_string(blob_queue->cycle_rate()));
 	persistent->m_blob_queue_count->set_text("blob_queue_count: " + std::to_string(blob_queue->count()));
 	if (glfwGetKey(engine->window_get(), GLFW_KEY_F3))
@@ -718,7 +717,7 @@ auto home
 			lgo::alignment_2D{ lgo::alignment_x::right, lgo::alignment_y::center }
 		)
 	};
-    main_div->add_object_shared<lgo::std_linex_t>
+    auto header_line = main_div->add_object_shared<lgo::std_linex_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
 		main_div->space_x(lgo::std_margin),
@@ -754,6 +753,21 @@ auto home
 			lgo::std_white,
 			lgo::size_1D{ 0x100 }
 		);
+    // The main application loop pauses during interactive resizing; update FPS before each repaint.
+    engine->callback_frame_rate_set
+    (
+        [frame_rate = std::weak_ptr{ persistent->m_frame_rate }](std::uint64_t rate)
+        {
+            if (auto label{ frame_rate.lock() })
+            {
+                auto text{ "frame_rate: " + std::to_string(rate) };
+                if (label->get_text() != text)
+                {
+                    label->set_text(std::move(text));
+                }
+            }
+        }
+    );
 	persistent->m_blob_queue_cycle_rate =
 		state_div->add_object_shared<lgo::text_line_std_t>
 		(
@@ -807,7 +821,7 @@ auto home
 			true
 		);
 	load_state->m_progress_column = *progress_column;
-    work_div->add_object<lgo::std_liney_t>
+    auto column_line = work_div->add_object_shared<lgo::std_liney_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
 		work_div->space_y(lgo::std_margin),
@@ -860,6 +874,52 @@ auto home
 		std::bind(&delete_all_callback, center_div, *progress_column, load_state),
 		"清除"
 	);
+    // Weak references keep the engine callback from retaining an obsolete UI after clear_state().
+    engine->callback_window_resize_set
+    (
+        [main = std::weak_ptr{ main_div }, left = std::weak_ptr{ menu_left },
+            right = std::weak_ptr{ menu_right }, header = std::weak_ptr{ header_line },
+            work = std::weak_ptr{ work_div }, status = std::weak_ptr{ state_div },
+            progress = std::weak_ptr{ *progress_column }, separator = std::weak_ptr{ column_line },
+            viewer = std::weak_ptr{ viewer_div }, center = std::weak_ptr{ center_div }]
+        (lgo::size_2D size)
+        {
+            auto main_div{ main.lock() };
+            auto menu_left{ left.lock() };
+            auto menu_right{ right.lock() };
+            auto header_line{ header.lock() };
+            auto work_div{ work.lock() };
+            auto state_div{ status.lock() };
+            auto progress_column{ progress.lock() };
+            auto column_line{ separator.lock() };
+            auto viewer_div{ viewer.lock() };
+            auto center_div{ center.lock() };
+            if (!main_div || !menu_left || !menu_right || !header_line || !work_div ||
+                !state_div || !progress_column || !column_line || !viewer_div || !center_div)
+            {
+                return;
+            }
+            main_div->set_size(size);
+            menu_left->set_size(lgo::size_2D{ main_div->space_x(lgo::std_margin).x, menu_left->get_size().y });
+            menu_right->set_size(lgo::size_2D{ main_div->space_x(lgo::std_margin).x, menu_right->get_size().y });
+            header_line->set_size(lgo::size_2D{ main_div->space_x(lgo::std_margin).x, header_line->get_size().y });
+            // space_2D() reports unused space; add back the existing child along the flow axis.
+            auto work_size{ main_div->space_2D(lgo::std_margin) };
+            work_size.y += work_div->get_size().y;
+            work_div->set_size(work_size);
+            const auto height{ work_div->space_y(lgo::std_margin).x };
+            state_div->set_size(lgo::size_2D{ state_div->get_size().x, height });
+            progress_column->set_size(lgo::size_2D{ progress_column->get_size().x, height });
+            column_line->set_size(lgo::size_2D{ column_line->get_size().x, height });
+            auto viewer_size{ work_div->space_2D(lgo::std_margin) };
+            viewer_size.x += viewer_div->get_size().x;
+            viewer_div->set_size(viewer_size);
+            viewer_div->fit_children_sideways();
+            center_div->set_size(size);
+        }
+    );
+    // Below this size the fixed-width desktop controls and status column would overlap.
+    glfwSetWindowSizeLimits(engine->window_get(), 800, 480, GLFW_DONT_CARE, GLFW_DONT_CARE);
 	list
 	(
 		engine,

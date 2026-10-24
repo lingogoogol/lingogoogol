@@ -23,6 +23,12 @@ export namespace lgo
         GLFWwindow* m_window{};
         pos_2D m_window_pos{};
         size_2D m_window_size{};
+        size_2D m_framebuffer_size{};
+        bool m_swap_chain_dirty{ true };
+        bool m_rendering{ false };
+        std::exception_ptr m_refresh_error{};
+        std::function<void(size_2D)> m_callback_window_resize{};
+        std::function<void(std::uint64_t)> m_callback_frame_rate{};
 
         vk::raii::Context m_context{};
         vk::raii::Instance m_instance{ nullptr };
@@ -51,7 +57,7 @@ export namespace lgo
         std::recursive_mutex m_rect_mutex{};
         std::set<rect_primitive_t*> m_rect_primitive{};
         std::string m_name{};
-        std::deque<std::chrono::high_resolution_clock::time_point> m_frame_time{};
+        std::deque<std::chrono::steady_clock::time_point> m_frame_time{};
         
         template<typename t_callback_set, typename... t_in>
         static auto call_callback(t_callback_set& callback, t_in... in) -> void;
@@ -70,6 +76,7 @@ export namespace lgo
         static auto call_callback_char(std::function<void(char32_t)>* callback, char32_t cha) -> void;
 
         //This includes both cursor enter and cursor leave.
+        static auto GLFW_callback_window_refresh(GLFWwindow* window) -> void;
         static auto GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void;
         static auto GLFW_callback_cursor_move(GLFWwindow* window, double x, double y) -> void;
         static auto GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void;
@@ -84,6 +91,10 @@ export namespace lgo
             void* engine_voidptr
         )
         -> vk::Bool32;
+
+        auto recreate_swap_chain() -> bool;
+        auto update_window_size() -> void;
+        auto render_frame() -> void;
 
         auto transition_image_layout
         (
@@ -119,6 +130,9 @@ export namespace lgo
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;
         auto get_window_size() -> const size_2D&;
+        auto get_framebuffer_size() const -> size_2D;
+        auto callback_window_resize_set(std::function<void(size_2D)> callback) -> void;
+        auto callback_frame_rate_set(std::function<void(std::uint64_t)> callback) -> void;
         auto get_cursor_pos() -> pos_2D;
         auto device_get() -> vk::raii::Device&;
         auto device_physical_get() -> vk::raii::PhysicalDevice&;

@@ -95,6 +95,7 @@ export namespace lgo
         static auto pending_load() -> void;
         static auto free() -> void;
     protected:
+        auto resize_text(size_2D size) -> void;
         engine_t* m_engine{};
     private:
         struct glyph_t

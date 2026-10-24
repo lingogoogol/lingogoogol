@@ -147,6 +147,10 @@ namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         m_pos = pos;
+        if (status() == shown)
+        {
+            m_depth_tracker->update(m_depth_id, m_pos, m_size);
+        }
         return;
     }
 
@@ -161,6 +165,10 @@ namespace lgo
         GUI_object_t::set_size(size);
         std::unique_lock lock{ m_mutex };
         m_size = size;
+        if (status() == shown)
+        {
+            m_depth_tracker->update(m_depth_id, m_pos, m_size);
+        }
         return;
     }
 

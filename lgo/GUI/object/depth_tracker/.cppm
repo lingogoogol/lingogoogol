@@ -24,6 +24,7 @@ export namespace lgo
 
         auto add(pos_2D pos, size_2D size, float depth, bool opaque) -> std::uint64_t;
         auto remove(std::uint64_t id) -> void;
+        auto update(std::uint64_t id, pos_2D pos, size_2D size) -> void;
         auto top(pos_2D pos, std::uint64_t id) -> bool;
     };
 }

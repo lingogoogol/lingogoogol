@@ -94,6 +94,7 @@ export namespace lgo
         auto get_margin() const -> size_1D override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
+        auto fit_children_sideways() -> void;
         auto len() const -> size_1D;
         auto space_2D(const size_1D& margin) const -> size_2D;
         auto space_2D(const GUI_object_t& object) const -> size_2D;
@@ -693,6 +694,28 @@ export namespace lgo
             break;
         }
         return;
+    }
+
+    template<bool t_y, bool t_hard>
+    auto GUI_div_impl_t<t_y, t_hard>::fit_children_sideways() -> void
+    {
+        std::unique_lock lock{ m_mutex };
+        for (const auto& [id, object] : m_current.m_object)
+        {
+            auto size{ object->get_size() };
+            if constexpr (t_y)
+            {
+                size.x = std::max<std::int64_t>(0, space_x(*object).x);
+            }
+            else
+            {
+                size.y = std::max<std::int64_t>(0, space_y(*object).x);
+            }
+            if (size.x != object->get_size().x || size.y != object->get_size().y)
+            {
+                object->set_size(size);
+            }
+        }
     }
 
     template<bool t_y, bool t_hard>

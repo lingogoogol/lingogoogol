@@ -41,6 +41,21 @@ namespace lgo {
         return;
     }
 
+    auto engine_t::GLFW_callback_window_refresh(GLFWwindow* window) -> void
+    {
+        auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        try
+        {
+            // Win32's modal move/size loop blocks glfwPollEvents(); repaint before it returns.
+            engine->render_frame();
+        }
+        catch (...)
+        {
+            // Exceptions must not cross the native window-procedure boundary.
+            engine->m_refresh_error = std::current_exception();
+        }
+    }
+
     auto engine_t::GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
@@ -273,7 +288,7 @@ namespace lgo {
         //Create a window.
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        // GLFW windows are resizable by default, including maximize and restore.
         m_window = glfwCreateWindow
         (
             static_cast<int>(m_window_size.x),
@@ -282,6 +297,10 @@ namespace lgo {
             nullptr,
             nullptr
         );
+
+        int window_width{}, window_height{};
+        glfwGetWindowSize(m_window, &window_width, &window_height);
+        m_window_size = size_2D{ window_width, window_height };
 
         //Create an instance.
         vk::ApplicationInfo app_info
@@ -507,21 +526,65 @@ namespace lgo {
                 }
             )
         };
-        m_surface_format = *surface_format_it;
-        std::vector<vk::PresentModeKHR> surface_present_mode_arr
+        m_surface_format = surface_format_it != surface_format_arr.end() ?
+            *surface_format_it : surface_format_arr.front();
+        //Create a command pool.
+        vk::CommandPoolCreateInfo command_pool_info
         {
-            m_device_physical.getSurfacePresentModesKHR(*m_surface)
+            .flags{ vk::CommandPoolCreateFlagBits::eResetCommandBuffer },
+            .queueFamilyIndex = queue_family_index
         };
-        //The vk::PresentModeKHR::eFifo mode is guaranteed to be available.
-        vk::PresentModeKHR surface_present_mode{ vk::PresentModeKHR::eFifo };
+        m_command_pool = vk::raii::CommandPool{ m_device, command_pool_info };
+
+        //Create a command buffer.
+        m_command_buffer = command_buffer_create();
+        m_command_buffer.end();
+
+        //Create semaphores and a fence.
+        m_fence =
+            vk::raii::Fence
+            {
+                m_device,
+                {
+                    .flags{ vk::FenceCreateFlagBits::eSignaled }
+                }
+            };
+
+        recreate_swap_chain();
+
+        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
+        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
+        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
+        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
+        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
+        glfwSetKeyCallback(m_window, GLFW_callback_key);
+        glfwSetCharCallback(m_window, GLFW_callback_char);
+
+        rect_primitive_t::init(this);
+        m_device.waitIdle();
+        // Register only after the swapchain and rendering resources are ready.
+        glfwSetWindowRefreshCallback(m_window, GLFW_callback_window_refresh);
+        return;
+    }
+
+    auto engine_t::recreate_swap_chain() -> bool
+    {
+        int width{}, height{};
+        glfwGetFramebufferSize(m_window, &width, &height);
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+        // Retire GPU work before replacing attachments, command-buffer references, or semaphores.
+        m_device.waitIdle();
+        m_command_buffer.reset();
+        vk::PhysicalDeviceSurfaceInfo2KHR surface_info{ .surface{ *m_surface } };
         vk::SurfaceCapabilities2KHR surface_capability
         {
             m_device_physical.getSurfaceCapabilities2KHR(surface_info)
         };
         if (surface_capability.surfaceCapabilities.currentExtent.width == std::numeric_limits<std::uint32_t>::max())
         {
-            int width{}, height{};
-            glfwGetFramebufferSize(m_window, &width, &height);
             m_swap_chain_extent.width = std::clamp
             (
                 static_cast<std::uint32_t>(width),
@@ -560,11 +623,18 @@ namespace lgo {
             .imageSharingMode{ vk::SharingMode::eExclusive },
             .preTransform{ surface_capability.surfaceCapabilities.currentTransform },
             .compositeAlpha{ vk::CompositeAlphaFlagBitsKHR::eOpaque },
-            .presentMode{ surface_present_mode },
+            .presentMode{ vk::PresentModeKHR::eFifo },
             .clipped{ true },
-            .oldSwapchain{ nullptr }
+            .oldSwapchain{ *m_swap_chain }
         };
-        m_swap_chain = vk::raii::SwapchainKHR{ m_device, swapchain_info };
+        vk::raii::SwapchainKHR swap_chain{ m_device, swapchain_info };
+        // Views must be released before their images and the retired swapchain.
+        m_swap_chain_image_view.clear();
+        m_depth_image_view = image_view_t{};
+        m_depth_image = image_t{};
+        m_semaphore_image.clear();
+        m_semaphore_draw.clear();
+        m_swap_chain = std::move(swap_chain);
         m_swap_chain_image = m_swap_chain.getImages();
 
         //Create image views.
@@ -606,48 +676,41 @@ namespace lgo {
             .aspect{ vk::ImageAspectFlagBits::eDepth }
         });
 
-        //Create a command pool.
-        vk::CommandPoolCreateInfo command_pool_info
-        {
-            .flags{ vk::CommandPoolCreateFlagBits::eResetCommandBuffer },
-            .queueFamilyIndex = queue_family_index
-        };
-        m_command_pool = vk::raii::CommandPool{ m_device, command_pool_info };
-
-        //Create a command buffer.
-        m_command_buffer = command_buffer_create();
-        m_command_buffer.end();
-
-        //Create semaphores and a fence.
-        for (int i{ 0 }; i < m_swap_chain_image.size(); ++i)
+        for (std::size_t i{ 0 }; i < m_swap_chain_image.size(); ++i)
         {
             m_semaphore_image.emplace_back(m_device, vk::SemaphoreCreateInfo{});
             m_semaphore_draw.emplace_back(m_device, vk::SemaphoreCreateInfo{});
         }
-        m_fence =
-            vk::raii::Fence
-            {
-                m_device,
-                {
-                    .flags{ vk::FenceCreateFlagBits::eSignaled }
-                }
-            };
-        
-        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
-        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
-        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
-        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
-        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
-        glfwSetKeyCallback(m_window, GLFW_callback_key);
-        glfwSetCharCallback(m_window, GLFW_callback_char);
-        
-        rect_primitive_t::init(this);
-        m_device.waitIdle();
-        return;
+        m_framebuffer_size = size_2D{ width, height };
+        m_swap_chain_dirty = false;
+        return true;
+    }
+
+    auto engine_t::update_window_size() -> void
+    {
+        int width{}, height{};
+        glfwGetWindowSize(m_window, &width, &height);
+        if (width <= 0 || height <= 0 || (width == m_window_size.x && height == m_window_size.y))
+        {
+            return;
+        }
+        flush();
+        m_window_size = size_2D{ width, height };
+        if (m_callback_window_resize)
+        {
+            m_callback_window_resize(m_window_size);
+        }
+        // Even unchanged rectangles need new normalized coordinates; keep text in logical pixels.
+        std::unique_lock lock{ m_rect_mutex };
+        for (auto* rect : m_rect_primitive)
+        {
+            rect->upload_vertex_data();
+        }
     }
 
     engine_t::~engine_t()
     {
+        glfwSetWindowRefreshCallback(m_window, nullptr);
         m_device.waitIdle();
         rect_primitive_t::uninit();
         glfwDestroyWindow(m_window);
@@ -657,20 +720,69 @@ namespace lgo {
 
     auto engine_t::message_loop() -> bool
     {
-        using namespace std::chrono_literals;
-        std::chrono::high_resolution_clock::time_point now{ std::chrono::high_resolution_clock::now() };
-        m_frame_time.push_back(now);
-        while (m_frame_time.front() <= now - 1s)
-        {
-            m_frame_time.pop_front();
-        }
         glfwPollEvents();
-        draw();
+        if (m_refresh_error)
+        {
+            std::rethrow_exception(std::exchange(m_refresh_error, {}));
+        }
+        if (glfwWindowShouldClose(m_window))
+        {
+            return true;
+        }
+        int width{}, height{};
+        glfwGetFramebufferSize(m_window, &width, &height);
+        if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) || width <= 0 || height <= 0)
+        {
+            // Minimized surfaces cannot acquire drawable images. Keep pumping close/restore events.
+            glfwWaitEventsTimeout(0.05);
+            return glfwWindowShouldClose(m_window);
+        }
+        render_frame();
         return glfwWindowShouldClose(m_window);
+    }
+
+    auto engine_t::render_frame() -> void
+    {
+        // Native messages can re-enter during layout or swapchain operations; never nest GPU work.
+        if (m_rendering || m_refresh_error || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+        {
+            return;
+        }
+        m_rendering = true;
+        try
+        {
+            update_window_size();
+            // Refresh the displayed rate on both regular frames and Win32 modal-loop repaints.
+            if (m_callback_frame_rate)
+            {
+                m_callback_frame_rate(frame_rate());
+            }
+            draw();
+        }
+        catch (...)
+        {
+            m_rendering = false;
+            throw;
+        }
+        m_rendering = false;
     }
 
     auto engine_t::draw() -> void
     {
+        int width{}, height{};
+        glfwGetFramebufferSize(m_window, &width, &height);
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+        if (width != m_framebuffer_size.x || height != m_framebuffer_size.y)
+        {
+            m_swap_chain_dirty = true;
+        }
+        if (m_swap_chain_dirty && !recreate_swap_chain())
+        {
+            return;
+        }
         //Acquire next image.
 		if
         (
@@ -685,17 +797,25 @@ namespace lgo {
 		{
 			throw;
 		}
-		m_device.resetFences(*m_fence);
         std::size_t semaphore_index{ m_frame_number % m_swap_chain_image.size() };
-        auto [result, image_index]
+        vk::Result result{};
+        std::uint32_t image_index{};
+        try
         {
-            m_swap_chain.acquireNextImage
+            std::tie(result, image_index) = m_swap_chain.acquireNextImage
             (
                 std::numeric_limits<std::uint64_t>::max(),
                 *m_semaphore_image[semaphore_index],
                 nullptr
-            )
-        };
+            );
+        }
+        catch (const vk::OutOfDateKHRError&)
+        {
+            // Leave the fence signaled: no submission will signal it on this path.
+            m_swap_chain_dirty = true;
+            return;
+        }
+        m_swap_chain_dirty = result == vk::Result::eSuboptimalKHR;
 
         //Record the command buffer.
         m_command_buffer.begin({});
@@ -778,6 +898,7 @@ namespace lgo {
         );
         m_command_buffer.end();
 
+        // Present waits are tied to acquired images, so reuse the draw semaphore by image index.
         //Submit the command buffer.
         vk::PipelineStageFlags stage_wait{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
         const vk::SubmitInfo submit_info
@@ -788,21 +909,38 @@ namespace lgo {
             .commandBufferCount{ 1 },
             .pCommandBuffers{ &*m_command_buffer },
             .signalSemaphoreCount{ 1 },
-            .pSignalSemaphores{ &*m_semaphore_draw[semaphore_index] }
+            .pSignalSemaphores{ &*m_semaphore_draw[image_index] }
         };
+        // Reset only when a successful acquisition is followed by an actual submission.
+        m_device.resetFences(*m_fence);
         m_command_queue.submit(submit_info, *m_fence);
 
         //Present the image.
         const vk::PresentInfoKHR present_info
         {
             .waitSemaphoreCount{ 1 },
-            .pWaitSemaphores{ &*m_semaphore_draw[semaphore_index] },
+            .pWaitSemaphores{ &*m_semaphore_draw[image_index] },
             .swapchainCount{ 1 },
             .pSwapchains{ &*m_swap_chain },
             .pImageIndices{ &image_index }
         };
-        result = m_command_queue.presentKHR(present_info);
-        
+        try
+        {
+            result = m_command_queue.presentKHR(present_info);
+            m_swap_chain_dirty = m_swap_chain_dirty || result == vk::Result::eSuboptimalKHR;
+            // Count presented frames, not event-loop iterations or failed/minimized draws.
+            const auto now{ std::chrono::steady_clock::now() };
+            while (!m_frame_time.empty() && m_frame_time.front() <= now - std::chrono::seconds{ 1 })
+            {
+                m_frame_time.pop_front();
+            }
+            m_frame_time.push_back(now);
+        }
+        catch (const vk::OutOfDateKHRError&)
+        {
+            m_swap_chain_dirty = true;
+        }
+
         ++m_frame_number;
         return;
     }
@@ -855,6 +993,21 @@ namespace lgo {
         return m_window_size;
     }
 
+    auto engine_t::get_framebuffer_size() const -> size_2D
+    {
+        return size_2D{ m_swap_chain_extent.width, m_swap_chain_extent.height };
+    }
+
+    auto engine_t::callback_window_resize_set(std::function<void(size_2D)> callback) -> void
+    {
+        m_callback_window_resize = std::move(callback);
+    }
+
+    auto engine_t::callback_frame_rate_set(std::function<void(std::uint64_t)> callback) -> void
+    {
+        m_callback_frame_rate = std::move(callback);
+    }
+
     auto engine_t::get_cursor_pos() -> pos_2D
     {
         double cursor_pos_x_double{}, cursor_pos_y_double{};
@@ -864,7 +1017,9 @@ namespace lgo {
 
     auto engine_t::frame_rate() const -> std::uint64_t
     {
-        return m_frame_time.size();
+        const auto cutoff{ std::chrono::steady_clock::now() - std::chrono::seconds{ 1 } };
+        return static_cast<std::uint64_t>(std::ranges::count_if(m_frame_time,
+            [cutoff](auto time) { return time > cutoff; }));
     }
 
     auto engine_t::device_get() -> vk::raii::Device&
