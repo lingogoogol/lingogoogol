@@ -83,14 +83,35 @@ namespace lgo
                     };
                 }
             };
+            glm::vec3 color{ m_color.R, m_color.G, m_color.B };
             auto vertex_data
             {
                 std::to_array<texture_vertex_t>
                 ({
-                    { { pos_x, pos_y, m_depth }, texture_index, calc_uv(m_pos) },
-                    { { pos_x + size_x, pos_y, m_depth }, texture_index, calc_uv(m_pos + size_2D{ m_size.x, 0 }) },
-                    { { pos_x, pos_y + size_y, m_depth }, texture_index, calc_uv(m_pos + size_2D{ 0, m_size.y }) },
-                    { { pos_x + size_x, pos_y + size_y, m_depth }, texture_index, calc_uv(m_pos + m_size) }
+                    {
+                        { pos_x, pos_y, m_depth },
+                        texture_index,
+                        calc_uv(m_pos),
+                        color
+                    },
+                    {
+                        { pos_x + size_x, pos_y, m_depth },
+                        texture_index,
+                        calc_uv(m_pos + size_2D{ m_size.x, 0 }),
+                        color
+                    },
+                    {
+                        { pos_x, pos_y + size_y, m_depth },
+                        texture_index,
+                        calc_uv(m_pos + size_2D{ 0, m_size.y }),
+                        color
+                    },
+                    {
+                        { pos_x + size_x, pos_y + size_y, m_depth },
+                        texture_index,
+                        calc_uv(m_pos + m_size),
+                        color
+                    }
                 })
             };
             upload_vertex_data(vertex_data);
@@ -225,6 +246,13 @@ namespace lgo
             0,
             vk::Format::eR32G32Sfloat,
             16
+        );
+        m_texture_pipeline_state.vertex_attribute_add
+        (
+            3,
+            0,
+            vk::Format::eR32G32B32Sfloat,
+            32
         );
         shader_module_t texture_shader_module{ engine->device_get(), "shader/texture.spv" };
         shader_t texture_shader_vertex

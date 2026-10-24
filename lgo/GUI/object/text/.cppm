@@ -115,6 +115,7 @@ export namespace lgo
         const font_preference_t* m_font_preference{};
         std::string m_text{};
         std::vector<glyph_t*> m_glyph{};
+        std::vector<std::uint64_t> m_rect_id{};
         divx_soft_t m_div{};
         depth_range_t m_depth_range{};
         pos_2D m_clip_pos{};

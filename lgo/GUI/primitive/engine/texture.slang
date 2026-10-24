@@ -3,6 +3,7 @@ struct vertex_in_t
     float3 pos;
     uint32_t texture_index;
     float2 texcoord;
+    float3 color;
 };
 
 struct vertex_out_t
@@ -10,6 +11,7 @@ struct vertex_out_t
     float4 pos : SV_Position;
     uint32_t texture_index;
     float2 texcoord;
+    float3 color;
 };
 
 [[vk::binding(0, 0)]]
@@ -22,6 +24,7 @@ vertex_out_t vertex_main(vertex_in_t input)
     output.pos = float4(input.pos, 1.0);
     output.texture_index = input.texture_index;
     output.texcoord = input.texcoord;
+    output.color = input.color;
     return output;
 }
 
@@ -35,5 +38,5 @@ float4 fragment_main(vertex_out_t input) : SV_Target
     {
         discard;
     }
-    return float4(1.0, 1.0, 1.0, alpha);
+    return float4(input.color, alpha);
 }

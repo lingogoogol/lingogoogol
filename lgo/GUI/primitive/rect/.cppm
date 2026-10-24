@@ -30,6 +30,7 @@ export namespace lgo
             alignas(16) glm::vec3 pos{};
             alignas(4) glm::uint32_t texture_index{};
             alignas(8) glm::vec2 texcoord{};
+            alignas(16) glm::vec3 color{};
         };
 
         static engine_t* m_engine;

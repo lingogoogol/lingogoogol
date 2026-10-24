@@ -117,7 +117,8 @@ namespace lgo
         image_view_t* image_view,
         pos_2D texture_pos,
         size_2D texture_axis_x,
-        size_2D texture_axis_y
+        size_2D texture_axis_y,
+        color_t color
     )
     :
         rect_t
@@ -131,6 +132,7 @@ namespace lgo
             clip_size
         }
     {
+        m_color = color;
         m_image_view = image_view;
         m_texture_pos = texture_pos;
         m_texture_axis_x = texture_axis_x;
@@ -266,6 +268,7 @@ namespace lgo
                 .depth{ depth_range.near },
                 .clip_pos{},//...
                 .clip_size{},//...
+                .color{ color },
                 .image_view{ m_image_view },
                 .texture_pos{ m_texture_pos },
                 .texture_axis_x{ m_texture_axis_x },

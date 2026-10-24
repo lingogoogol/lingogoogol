@@ -192,8 +192,12 @@ namespace lgo
 
     auto text_line_t::set_color(color_t color) -> void
     {
+        std::unique_lock lock{ m_mutex };
         m_color = color;
-        //...
+        for (std::uint64_t id : m_rect_id)
+        {
+            m_div.get_object_shared<rect_t>(id)->set_color(color);
+        }
         return;
     }
 
@@ -335,12 +339,13 @@ namespace lgo
         m_engine->command_queue_get().submit(submit_info, nullptr);
         m_engine->command_queue_get().waitIdle();
 
+        m_rect_id.resize(text_w.size());
         for (std::size_t i{ 0 }; i < text_w.size(); ++i)
         {
             font_face_t* face{ face_arr[i] };
             //Since (0, 0) is at the top-left of the cell and +y points downward, the baseline is at
             //`y = face->ascender_get()` from the top of the cell, and `m_bbox_pos` is `(bitmap_left, -bitmap_top)`.
-            m_div.add_object<rect_t>
+            m_rect_id[i] = m_div.add_object<rect_t>
             (
                 m_depth_range,
                 size_2D{ m_glyph[i]->m_font.advance_get().x, face->height_get() },
@@ -349,7 +354,8 @@ namespace lgo
                 &m_glyph[i]->m_image_view,
                 pos_2D{ 0, face->ascender_get() } + m_glyph[i]->m_font.bbox_pos_get(),
                 size_2D{ m_glyph[i]->m_font.bbox_size_get().x, 0 },
-                size_2D{ 0, m_glyph[i]->m_font.bbox_size_get().y }
+                size_2D{ 0, m_glyph[i]->m_font.bbox_size_get().y },
+                m_color
             );
         }
         return;

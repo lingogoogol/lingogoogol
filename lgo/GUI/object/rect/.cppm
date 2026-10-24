@@ -85,7 +85,8 @@ export namespace lgo
             image_view_t* image_view,
             pos_2D texture_pos,
             size_2D texture_axis_x,
-            size_2D texture_axis_y
+            size_2D texture_axis_y,
+            color_t color = std_white
         );
 
         auto get_pos() const -> pos_2D override;
