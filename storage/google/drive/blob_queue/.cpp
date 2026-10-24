@@ -95,7 +95,9 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
         content.resize(size);
         lgo::create_ifstream(path.string()).read(content.data(), size);
         std::filesystem::remove(path);
-        nlohmann::json arr{ nlohmann::json::parse(content) };
+        //Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
+        //and wraps `expr` into a 1-element JSON array instead of copy/move-constructing the JSON value.
+        nlohmann::json arr = nlohmann::json::parse(content);
         m_id.resize(arr.size());
         for (std::uint64_t i{ 0 }; i < arr.size(); ++i)
         {
@@ -109,7 +111,8 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
 blob_queue_t::~blob_queue_t()
 {
     m_thread.join();
-    nlohmann::json arr{ nlohmann::json::array() };
+    //Use `=` instead of `{}` to avoid wrapping the empty array into `[[]]`.
+    nlohmann::json arr = nlohmann::json::array();
     for (std::uint64_t i{ 0 }; i < m_id.size(); ++i)
     {
         arr.push_back(m_id[i]);

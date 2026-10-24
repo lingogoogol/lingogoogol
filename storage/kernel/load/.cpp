@@ -19,11 +19,14 @@ import storage.google;
 auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::json
 {
     std::string next{ *pos };
-	nlohmann::json entity_arr{ nlohmann::json::array() };
+	//Use `=` instead of `{}` when initializing `nlohmann::json` from a single `nlohmann::json` expression:
+	//brace-initialization `nlohmann::json{ expr }` selects the `std::initializer_list` constructor and
+	//wraps `expr` into a 1-element JSON array `[expr]`, causing runtime `type_error.305` on key lookup.
+	nlohmann::json entity_arr = nlohmann::json::array();
 	while (next != "null")
 	{
-		nlohmann::json response_data{ blob_get_run(easy, next, "name,description") };
-		nlohmann::json response_content{ nlohmann::json::parse(response_data["description"].get<std::string>()) };
+		nlohmann::json response_data = blob_get_run(easy, next, "name,description");
+		nlohmann::json response_content = nlohmann::json::parse(response_data["description"].get<std::string>());
 		entity_arr.insert(entity_arr.end(), response_content.begin(), response_content.end());
 		next = nlohmann::json::parse(response_data["name"].get<std::string>())["next"];
 	}
@@ -174,7 +177,7 @@ auto folder_data_add
 	};
 	if (last_id != "null")
 	{
-		nlohmann::json last_json{ nlohmann::json::parse(blob_get_name_run(easy, last_id)) };
+		nlohmann::json last_json = nlohmann::json::parse(blob_get_name_run(easy, last_id));
 		last_json["next"] = id;
 		blob_update_name_run(easy, last_id, last_json.dump());
 	}
@@ -201,7 +204,7 @@ auto folder_add
         }
         pos = folder_name["next"];
 	}
-	nlohmann::json folder_content{ nlohmann::json::parse(folder["description"].get<std::string>()) };
+	nlohmann::json folder_content = nlohmann::json::parse(folder["description"].get<std::string>());
 
 	folder_content.emplace_back(entity);
 	std::string content{ folder_content.dump() };
@@ -209,7 +212,7 @@ auto folder_add
     //It can occur when the name of its entities are too long for example.
 	if (folder_content.size() > 100 || content.size() > content_size_max)
 	{
-		nlohmann::json array{ nlohmann::json::array() };
+		nlohmann::json array = nlohmann::json::array();
 		array.push_back(entity);
 		std::string data_id
         {
@@ -510,7 +513,7 @@ auto upload_chunk_load_begin(curl_multi_t& multi, curl_easy_t&& easy, upload_fil
     for (std::uint64_t i{ 0 }; i < chunk_count; ++i)
     {
         upload_chunk_t& chunk{ file->m_chunk_arr[file->m_chunk_load_begin_progress + i] };
-        nlohmann::json id_array{ nlohmann::json::array() };
+        nlohmann::json id_array = nlohmann::json::array();
         for (std::uint64_t j{ 0 }; j < chunk.m_content_id.size(); ++j)
         {
             id_array.push_back(chunk.m_content_id[j]);
@@ -842,9 +845,9 @@ auto download_file_load_begin
 
 auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<download_file_t>::iterator file_i) -> void
 {
-    nlohmann::json payload{ nlohmann::json::parse(easy->payload()) };
-    nlohmann::json blob_name{ nlohmann::json::parse(payload["name"].get<std::string>()) };
-    nlohmann::json blob_content{ nlohmann::json::parse(payload["description"].get<std::string>()) };
+    nlohmann::json payload = nlohmann::json::parse(easy->payload());
+    nlohmann::json blob_name = nlohmann::json::parse(payload["name"].get<std::string>());
+    nlohmann::json blob_content = nlohmann::json::parse(payload["description"].get<std::string>());
     file_i->m_next_id = blob_name["next"];
     for (const auto& i : blob_content)
     {
@@ -911,8 +914,8 @@ auto download_chunk_load_end
     for (std::uint64_t i{ 0 }; i < batch.part_count(); ++i)
     {
         download_chunk_t& chunk{ file_i->m_chunk_arr[i_begin + i] };
-        nlohmann::json payload{ nlohmann::json::parse(batch.response_get(i).body_get()) };
-        nlohmann::json content_id_arr{ nlohmann::json::parse(payload["description"].get<std::string>()) };
+        nlohmann::json payload = nlohmann::json::parse(batch.response_get(i).body_get());
+        nlohmann::json content_id_arr = nlohmann::json::parse(payload["description"].get<std::string>());
         chunk.m_content_id.resize(content_id_arr.size());
         std::ranges::copy(content_id_arr, chunk.m_content_id.begin());
     }

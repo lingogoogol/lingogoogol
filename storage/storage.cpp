@@ -51,7 +51,7 @@ std::string root_id{};
 		google_easy_t::get().clear();
 		google_easy_t::get().path_set("/drive/v3/files");
 		empty_blob->clear_begin();
-		nlohmann::json response{ google_easy_t::get().method_get_run() };
+		nlohmann::json response = google_easy_t::get().method_get_run();
 		while (true)
 		{
 			auto& array{ response["files"] };
@@ -127,7 +127,9 @@ auto app() -> void
 	{
         lgo::log_file("參數數量不正確，不能超過0個\n");
     }
-	nlohmann::json key{ nlohmann::json::parse(lgo::get_file("key.json")) };
+	//Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
+	//and wraps the parsed JSON object into a 1-element JSON array `[obj]`, which crashes `key["client_email"]`.
+	nlohmann::json key = nlohmann::json::parse(lgo::get_file("key.json"));
 	google_account_t::default_get().init
 	(
 		key["client_email"].get<std::string>(),

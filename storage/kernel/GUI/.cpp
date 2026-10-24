@@ -588,7 +588,9 @@ auto list
 )
 -> void
 {
-	nlohmann::json obj_list{ list_folder_content(google_easy_t::get(), pos) };
+	//Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
+	//and wraps the returned array into a 1-element outer array `[expr]`.
+	nlohmann::json obj_list = list_folder_content(google_easy_t::get(), pos);
 	viewer_div->clear_state();
 	for (auto i : obj_list)
 	{

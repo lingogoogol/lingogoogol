@@ -297,7 +297,9 @@ auto blob_get_run(google_easy_t& easy, blob_boo_t blob) -> blob_data_str_t
 		field += "description,";
 	}
 	field.pop_back();
-	nlohmann::json response{ blob_get_run(easy, blob.m_id, field) };
+	//Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
+	//and wraps `expr` into a 1-element JSON array instead of copy/move-constructing the JSON value.
+	nlohmann::json response = blob_get_run(easy, blob.m_id, field);
 	blob_data_str_t out{};
 	if (blob.m_name)
 	{
