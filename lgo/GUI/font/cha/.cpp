@@ -79,13 +79,22 @@ namespace lgo
         m_advance.x = face_handle->glyph->advance.x >> 6;
         m_advance.y = 0;
         m_bbox_pos.x = face_handle->glyph->bitmap_left;
-        m_bbox_pos.y = face_handle->glyph->bitmap_top - face_handle->glyph->bitmap.rows;
+        //In our window/Vulkan coordinate system, (0, 0) is at the top-left and +y points downward.
+        //FreeType's `bitmap_top` is the upward distance from the baseline to the top edge of the glyph bitmap,
+        //so the top-left corner of the glyph bitmap relative to the baseline is `(bitmap_left, -bitmap_top)`.
+        m_bbox_pos.y = -face_handle->glyph->bitmap_top;
         m_bbox_size.x = face_handle->glyph->bitmap.width;
         m_bbox_size.y = face_handle->glyph->bitmap.rows;
         m_pixmap.dim_set(face_handle->glyph->bitmap.width, face_handle->glyph->bitmap.rows);
-        for (pixmap_t::size_t xy{ 0 }; xy < m_pixmap.pixel_count(); ++xy)
+        for (pixmap_t::size_t y{ 0 }; y < face_handle->glyph->bitmap.rows; ++y)
         {
-            m_pixmap[xy] = static_cast<std::byte>(face_handle->glyph->bitmap.buffer[xy]);
+            for (pixmap_t::size_t x{ 0 }; x < face_handle->glyph->bitmap.width; ++x)
+            {
+                m_pixmap[x, y] = static_cast<std::byte>
+                (
+                    face_handle->glyph->bitmap.buffer[y * face_handle->glyph->bitmap.pitch + x]
+                );
+            }
         }
         return;
     }

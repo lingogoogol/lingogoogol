@@ -264,10 +264,12 @@ namespace lgo
         std::wstring text_w{ to_wstring(m_text) };
         vk::raii::CommandBuffer command_buffer{ m_engine->command_buffer_create() };
         m_glyph.resize(text_w.size());
+        std::vector<font_face_t*> face_arr(text_w.size());
         for (std::size_t i{ 0 }; i < text_w.size(); ++i)
         {
             std::uint32_t index{};
             font_face_t* face{ m_font_preference->favorite(text_w[i], &index) };
+            face_arr[i] = face;
             if (!m_font.contains(face))
             {
                 m_font.emplace(face, std::map<char32_t, glyph_t>{});
@@ -320,18 +322,10 @@ namespace lgo
             {
                 m_glyph[i] = &find_result->second;
             }
-            m_div.add_object<rect_t>
-            (
-                m_depth_range,
-                size_2D{ m_glyph[i]->m_font.advance_get().x, face->height_get() >> 6 },
-                m_clip_pos,
-                m_clip_size,
-                &m_glyph[i]->m_image_view,
-                pos_2D{ 0, -face->descender_get() } + m_glyph[i]->m_font.bbox_pos_get(),
-                size_2D{ m_glyph[i]->m_font.bbox_size_get().x, 0 },
-                size_2D{ 0, m_glyph[i]->m_font.bbox_size_get().y }
-            );
         }
+        //Submit and wait for glyph image uploads to finish before adding `rect_t` objects to `m_div`:
+        //if `m_div` is already shown, `m_div.add_object<rect_t>` immediately shows each `rect_t` and
+        //registers its `rect_primitive_t` with `m_engine`, which requires `m_image` to be in `eShaderReadOnlyOptimal`.
         command_buffer.end();
         const vk::SubmitInfo submit_info
         {
@@ -340,6 +334,24 @@ namespace lgo
         };
         m_engine->command_queue_get().submit(submit_info, nullptr);
         m_engine->command_queue_get().waitIdle();
+
+        for (std::size_t i{ 0 }; i < text_w.size(); ++i)
+        {
+            font_face_t* face{ face_arr[i] };
+            //Since (0, 0) is at the top-left of the cell and +y points downward, the baseline is at
+            //`y = face->ascender_get()` from the top of the cell, and `m_bbox_pos` is `(bitmap_left, -bitmap_top)`.
+            m_div.add_object<rect_t>
+            (
+                m_depth_range,
+                size_2D{ m_glyph[i]->m_font.advance_get().x, face->height_get() },
+                m_clip_pos,
+                m_clip_size,
+                &m_glyph[i]->m_image_view,
+                pos_2D{ 0, face->ascender_get() } + m_glyph[i]->m_font.bbox_pos_get(),
+                size_2D{ m_glyph[i]->m_font.bbox_size_get().x, 0 },
+                size_2D{ 0, m_glyph[i]->m_font.bbox_size_get().y }
+            );
+        }
         return;
     }
 

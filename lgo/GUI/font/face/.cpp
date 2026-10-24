@@ -46,24 +46,27 @@ namespace lgo
         return m_handle;
     }
 
+    //Use `m_handle->size->metrics` (26.6 fixed-point pixels for the active `pixel_size`, shifted right by 6)
+    //instead of `m_handle->height` / `ascender` / `descender` directly on `FT_FaceRec`, which are in unscaled
+    //font design units (e.g. 1000 or 2048 units per EM) regardless of `FT_Set_Pixel_Sizes`.
     auto font_face_t::leading_get() const -> std::int16_t
     {
-        return m_handle->height >> 6;
+        return static_cast<std::int16_t>(m_handle->size->metrics.height >> 6);
     }
 
     auto font_face_t::ascender_get() const -> std::int16_t
     {
-        return m_handle->ascender;
+        return static_cast<std::int16_t>(m_handle->size->metrics.ascender >> 6);
     }
 
     auto font_face_t::descender_get() const -> std::int16_t
     {
-        return m_handle->descender;
+        return static_cast<std::int16_t>(m_handle->size->metrics.descender >> 6);
     }
 
     auto font_face_t::height_get() const -> std::int16_t
     {
-        return m_handle->ascender - m_handle->descender;
+        return ascender_get() - descender_get();
     }
 
     auto font_face_t::family_get() const -> std::string

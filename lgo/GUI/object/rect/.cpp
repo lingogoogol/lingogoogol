@@ -148,7 +148,9 @@ namespace lgo
     auto rect_t::set_pos(pos_2D pos) -> void
     {
         std::unique_lock lock{ m_mutex };
-        m_clip_pos = m_clip_pos + (pos - m_pos);
+        size_2D offset{ pos - m_pos };
+        m_clip_pos = m_clip_pos + offset;
+        m_texture_pos = m_texture_pos + offset;
         m_pos = pos;
         if (m_primitive)
         {

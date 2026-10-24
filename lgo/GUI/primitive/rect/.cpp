@@ -1,3 +1,7 @@
+module;
+
+#include <glm/glm.hpp>
+
 module lgo.GUI.primitive;
 
 import std;
@@ -53,14 +57,40 @@ namespace lgo
         std::uint32_t texture_index{ 0 };
         if (m_texture_enable)
         {
+            //Compute UV coordinates for any screen-space point `p` using `(m_texture_pos, m_texture_axis_x, m_texture_axis_y)`
+            //as the 2D affine basis of the texture's [0, 1] x [0, 1] UV space:
+            //  p = m_texture_pos + u * m_texture_axis_x + v * m_texture_axis_y.
+            //If `det == 0` (e.g. a whitespace glyph with a 0x0 bounding box), return `(-1, -1)` so the
+            //border-clamped sampler evaluates to transparent black `(0, 0, 0, 0)` instead of dividing by zero.
+            std::int64_t det
+            {
+                m_texture_axis_x.x * m_texture_axis_y.y - m_texture_axis_y.x * m_texture_axis_x.y
+            };
+            auto calc_uv
+            {
+                [this, det] (pos_2D p) -> glm::vec2
+                {
+                    if (det == 0)
+                    {
+                        return { -1.0f, -1.0f };
+                    }
+                    size_2D d{ p - m_texture_pos };
+                    float det_f{ static_cast<float>(det) };
+                    return
+                    {
+                        static_cast<float>(d.x * m_texture_axis_y.y - d.y * m_texture_axis_y.x) / det_f,
+                        static_cast<float>(-d.x * m_texture_axis_x.y + d.y * m_texture_axis_x.x) / det_f
+                    };
+                }
+            };
             auto vertex_data
             {
                 std::to_array<texture_vertex_t>
                 ({
-                    { { pos_x, pos_y, m_depth }, texture_index, { 0.0f, 0.0f } },
-                    { { pos_x + size_x, pos_y, m_depth }, texture_index, { 1.0f, 0.0f } },
-                    { { pos_x, pos_y + size_y, m_depth }, texture_index, { 0.0f, 1.0f } },
-                    { { pos_x + size_x, pos_y + size_y, m_depth }, texture_index, { 1.0f, 1.0f } }
+                    { { pos_x, pos_y, m_depth }, texture_index, calc_uv(m_pos) },
+                    { { pos_x + size_x, pos_y, m_depth }, texture_index, calc_uv(m_pos + size_2D{ m_size.x, 0 }) },
+                    { { pos_x, pos_y + size_y, m_depth }, texture_index, calc_uv(m_pos + size_2D{ 0, m_size.y }) },
+                    { { pos_x + size_x, pos_y + size_y, m_depth }, texture_index, calc_uv(m_pos + m_size) }
                 })
             };
             upload_vertex_data(vertex_data);
@@ -214,19 +244,23 @@ namespace lgo
         m_texture_pipeline_state.serialize(engine->device_get());
 
         vk::PhysicalDeviceProperties device_physical_property{ engine->device_physical_get().getProperties() };
+        //Use `eClampToBorder` with `eFloatTransparentBlack` so that fragments outside `[0, 1] x [0, 1]`
+        //(where the rectangle cell `m_pos..m_pos+m_size` extends beyond the glyph's `m_texture_pos` bounding box)
+        //sample as transparent `(0, 0, 0, 0)` instead of repeating or smearing edge texels.
         vk::SamplerCreateInfo sampler_info
         {
             .magFilter{ vk::Filter::eLinear },
             .minFilter{ vk::Filter::eLinear },
             .mipmapMode{ vk::SamplerMipmapMode::eLinear },
-            .addressModeU{ vk::SamplerAddressMode::eRepeat },
-            .addressModeV{ vk::SamplerAddressMode::eRepeat },
-            .addressModeW{ vk::SamplerAddressMode::eRepeat },
+            .addressModeU{ vk::SamplerAddressMode::eClampToBorder },
+            .addressModeV{ vk::SamplerAddressMode::eClampToBorder },
+            .addressModeW{ vk::SamplerAddressMode::eClampToBorder },
             .mipLodBias{ 0.0f },
             .anisotropyEnable{ vk::False },
             .maxAnisotropy{ device_physical_property.limits.maxSamplerAnisotropy },
             .compareEnable{ vk::False },
             .compareOp{ vk::CompareOp::eAlways },
+            .borderColor{ vk::BorderColor::eFloatTransparentBlack },
             .unnormalizedCoordinates{ vk::False }
         };
         m_sampler = vk::raii::Sampler{ engine->device_get(), sampler_info };
@@ -347,6 +381,7 @@ namespace lgo
     auto rect_primitive_t::set_pos(pos_2D pos) -> void
     {
         std::unique_lock lock{ m_mutex };
+        m_texture_pos = m_texture_pos + (pos - m_pos);
         m_pos = pos;
         m_engine->flush();
         upload_vertex_data();
