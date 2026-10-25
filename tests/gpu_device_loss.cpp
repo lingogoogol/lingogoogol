@@ -28,12 +28,14 @@ auto test_names() -> void
     auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(device.getDispatcher())>>*>(device.getDispatcher());
     static decltype(dispatch->vkSetDebugUtilsObjectNameEXT) original_name{};
     static std::vector<std::pair<vk::ObjectType, std::string>> names;
+    static std::uint64_t instance_handle;
     original_name = dispatch->vkSetDebugUtilsObjectNameEXT;
     if constexpr (lgo::vulkan_names_enabled)
         check(original_name != nullptr, "Mock driver must support VK_EXT_debug_utils for this test.");
     static decltype(original_name) spy = [](auto device, auto info)
     {
         names.emplace_back(static_cast<vk::ObjectType>(info->objectType), info->pObjectName);
+        if (static_cast<vk::ObjectType>(info->objectType) == vk::ObjectType::eInstance) instance_handle = info->objectHandle;
         using result_t = decltype(original_name(device, info));
         return original_name ? original_name(device, info) : static_cast<result_t>(0);
     };
@@ -53,6 +55,8 @@ auto test_names() -> void
     };
     check(!lgo::vulkan_name(device, *device, "failed-name"), "Naming failure was not contained.");
     dispatch->vkSetDebugUtilsObjectNameEXT = spy;
+    check(!lgo::vulkan_name(device, *device, []() -> std::string { throw std::runtime_error{ "name builder failed" }; }),
+        "Diagnostic string construction interrupted rendering.");
 
     // New device dispatch tables obtain commands through the instance dispatcher.
     // Intercept lookup so the test observes initial names on the replacement device.
@@ -78,6 +82,17 @@ auto test_names() -> void
         check(std::chrono::steady_clock::now() < deadline, "Naming recovery timed out.");
     } while (!engine.gpu_available());
     instance->vkGetDeviceProcAddr = original_get_proc;
+    #if defined(_DEBUG) && defined(DEBUG_VULKAN_NAME)
+    check(instance_handle != 0, "The instance name was not captured.");
+    // Send a real error through the engine's driver callback. A null optional
+    // message ID must be safe; the former bare throw terminated this process.
+    const vk::Instance named_instance{ reinterpret_cast<vk::Instance::CType>(static_cast<std::uintptr_t>(instance_handle)) };
+    named_instance.submitDebugUtilsMessageEXT(vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
+        vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral,
+        vk::DebugUtilsMessengerCallbackDataEXT{ .pMessage{ "synthetic validation callback error" } }, *instance);
+    check(lgo::get_file_str(lgo::get_logfile_path()).contains("synthetic validation callback error"),
+        "The driver callback did not record the validation error.");
+    #endif
     lgo::depth_tracker_t depth{};
     lgo::state_t state{ &engine, &depth };
     struct cleanup_t

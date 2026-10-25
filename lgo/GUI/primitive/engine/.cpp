@@ -156,92 +156,24 @@ namespace lgo {
     )
     -> vk::Bool32
     {
-        std::string severity_str{};
-        switch (severity)
+        try
         {
-            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose:
-            {
-                severity_str = "verbose";
-                break;
-            }
-            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo:
-            {
-                severity_str = "info";
-                break;
-            }
-            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning:
-            {
-                severity_str = "warning";
-                break;
-            }
-            case vk::DebugUtilsMessageSeverityFlagBitsEXT::eError:
-            {
-                severity_str = "error";
-                break;
-            }
-            default:
-            {
-                severity_str = "unknown";
-                break;
-            }
+            if (!data) return vk::False;
+            log_file(std::format("Vulkan validation {} {}: {} ({}): {}\n",
+                vk::to_string(severity), vk::to_string(type),
+                data->pMessageIdName ? data->pMessageIdName : "[unknown]", data->messageIdNumber,
+                data->pMessage ? data->pMessage : "[no message]"));
+            if (data->pObjects)
+                for (std::uint32_t i{}; i < data->objectCount; ++i)
+                {
+                    const auto& object{ data->pObjects[i] };
+                    log_file(std::format("    {} {:#x}: {}\n", vk::to_string(object.objectType),
+                        object.objectHandle, object.pObjectName ? object.pObjectName : "[no name]"));
+                }
         }
-        std::string type_str{};
-        switch (static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type))
-        {
-            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral):
-            {
-                type_str = "general";
-                break;
-            }
-            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation):
-            {
-                type_str = "validation";
-                break;
-            }
-            case std::to_underlying(vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance):
-            {
-                type_str = "performance";
-                break;
-            }
-            default:
-            {
-                type_str = "unknown";
-                break;
-            }
-        }
-        log_file
-        (
-            "debug_message:\n"
-            "    severity: " + severity_str + " (code: " + std::to_string(std::to_underlying(severity)) + ")\n"
-            "    type: " + type_str +
-                " (code: " + std::to_string(static_cast<vk::DebugUtilsMessageTypeFlagsEXT::MaskType>(type)) + ")\n"
-            "    message_id: " + data->pMessageIdName + " (code: " + std::to_string(data->messageIdNumber) + ")\n"
-            "    message: " + data->pMessage + "\n"
-        );
-        for (int i{ 0 }; i < static_cast<int>(data->objectCount); ++i)
-        {
-            std::string object_name{};
-            const char* object_name_ptr{ data->pObjects[i].pObjectName };
-            if (object_name_ptr)
-            {
-                object_name = object_name_ptr;
-            }
-            else
-            {
-                object_name = "[no name]";
-            }
-            log_file
-            (
-                "    object:\n"
-                "        type: " "(code: " + std::to_string(std::to_underlying(data->pObjects[i].objectType)) + ")\n"
-                "        handle: " + std::to_string(data->pObjects[i].objectHandle) + "\n"
-                "        name: " + object_name + "\n"
-            );
-        }
-        if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
-        {
-            throw;
-        }
+        catch (...) {}
+        // Validation is diagnostic. Throwing through a driver C callback invokes
+        // undefined behavior; Vulkan API results are handled at the call site.
         return vk::False;
     }
 
@@ -346,12 +278,14 @@ namespace lgo {
             .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
             .apiVersion{ Vulkan_version_encode(0, 1, 4, 0) }
         };
-        std::vector<const char*> layer
-        {
-            #ifdef _DEBUG
-            "VK_LAYER_KHRONOS_validation"
-            #endif
-        };
+        std::vector<const char*> layer;
+        #ifdef _DEBUG
+        const auto available_layers{ m_context.enumerateInstanceLayerProperties() };
+        if (std::ranges::any_of(available_layers, [](const auto& value)
+            { return std::string_view{ value.layerName.data() } == "VK_LAYER_KHRONOS_validation"; }))
+            layer.push_back("VK_LAYER_KHRONOS_validation");
+        else log_file("Vulkan validation layer is unavailable; continuing without it.\n");
+        #endif
         std::uint32_t glfw_extension_count{};
         const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
         std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
