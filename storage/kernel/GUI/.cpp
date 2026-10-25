@@ -294,19 +294,18 @@ auto file_download_callback
 		std::launch::async,
 		[]
 		(
-			google_easy_t* easy,
 			download_task_t* task,
 			std::string pos,
 			std::filesystem::path path_local
 		)
 		-> void
 		{
-			std::filesystem::remove_all(path_local);
-			file_download(easy, task, pos, path_local);
+            // get() is thread_local: acquire it in this worker, never on the GUI thread.
+            std::filesystem::remove_all(path_local);
+			file_download(&google_easy_t::get(), task, pos, path_local);
 			task->m_idle_first = task->m_file_arr.begin();
 			return;
 		},
-		&google_easy_t::get(),
 		task.get(),
 		pos,
 		std::filesystem::path{ folder[0] } / name
@@ -368,19 +367,18 @@ auto folder_download_callback
 		std::launch::async,
 		[]
 		(
-			google_easy_t* easy,
 			download_task_t* task,
 			std::string pos,
 			std::filesystem::path path_local
 		)
 		-> void
 		{
-			std::filesystem::remove_all(path_local);
-			folder_download(easy, task, pos, path_local);
+            // get() is thread_local: acquire it in this worker, never on the GUI thread.
+            std::filesystem::remove_all(path_local);
+			folder_download(&google_easy_t::get(), task, pos, path_local);
 			task->m_idle_first = task->m_file_arr.begin();
 			return;
 		},
-		&google_easy_t::get(),
 		task.get(),
 		pos,
 		std::filesystem::path{ folder[0] } / name
