@@ -267,9 +267,14 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
         if (task_ptr->m_type == "upload")
         {
             auto upload_task_ptr{ std::dynamic_pointer_cast<upload_task_t>(task_ptr) };
-            if (upload_task_ptr->m_prepared.wait_for(0s) != std::future_status::ready)
+            if (upload_task_ptr->m_prepared.valid())
             {
-                continue;
+                if (upload_task_ptr->m_prepared.wait_for(0s) != std::future_status::ready)
+                {
+                    continue;
+                }
+                //Consume the future so preparation failures cannot be mistaken for success.
+                upload_task_ptr->m_prepared.get();
             }
             auto entity_i{ upload_task_ptr->m_begin_progress };
             if (entity_i == upload_task_ptr->m_entity_arr.end())
