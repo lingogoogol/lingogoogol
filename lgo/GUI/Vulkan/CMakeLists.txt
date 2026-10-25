@@ -10,6 +10,7 @@ target_sources(
 )
 
 add_subdirectory(debug)
+add_subdirectory(support)
 add_subdirectory(pipeline_state)
 add_subdirectory(descriptor_set_layout)
 add_subdirectory(shader_module)
@@ -24,6 +25,7 @@ target_link_libraries(
     PRIVATE
         common
         lgo.GUI.Vulkan.debug.def
+        lgo.GUI.Vulkan.support.def
         lgo.GUI.Vulkan.pipeline_state.def
         lgo.GUI.Vulkan.descriptor_set_layout.def
         lgo.GUI.Vulkan.shader_module.def

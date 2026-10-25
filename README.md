@@ -188,6 +188,8 @@ cmake --build "$project_workspace/build/x64-win32-pe-mingw_Release" --parallel 4
 
 將 `DEBUG_GUI_OBJECT_LOG` 設為 `ON` 可啟用詳細事件；將它與 `DEBUG_GUI_OBJECT_NAME` 都設為 `OFF` 則關閉自動 GUI 命名及事件，手動 `name_set()` 仍可使用。
 
+Vulkan 記憶體配置會同時檢查資源允許的類型位元遮罩與所需屬性；找不到合適類型時會回報明確錯誤。
+
 GPU 裝置遺失與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
 
 ```bash

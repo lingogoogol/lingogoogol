@@ -1,6 +1,7 @@
 export module lgo.GUI.Vulkan;
 
 export import :debug;
+export import :support;
 export import :pipeline_state;
 export import :descriptor_set_layout;
 export import :shader_module;

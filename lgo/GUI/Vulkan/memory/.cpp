@@ -14,6 +14,9 @@ namespace lgo
 
     auto memory_t::init(const ctor_t& ctor) -> void
     {
+        if (!ctor.device || !ctor.device_physical || !*(*ctor.device) || !*(*ctor.device_physical) ||
+            bool(ctor.buffer) == bool(ctor.image))
+            throw std::invalid_argument{ "Vulkan memory allocation requires a device and exactly one buffer or image." };
         vk::MemoryRequirements memory_requirement{};
         if (ctor.buffer)
         {
@@ -23,28 +26,8 @@ namespace lgo
         {
             memory_requirement = ctor.image->getMemoryRequirements();
         }
-        else
-        {
-            throw;
-        }
-        vk::PhysicalDeviceMemoryProperties memory_property{ ctor.device_physical->getMemoryProperties() };
-        auto memory_type_index{ std::numeric_limits<std::uint32_t>::max() };
-        for (std::uint32_t i{ 0 }; i < memory_property.memoryTypeCount; ++i)
-        {
-            if
-            (
-                (memory_requirement.memoryTypeBits >> i) &&
-                !(~memory_property.memoryTypes[i].propertyFlags & ctor.property)
-            )
-            {
-                memory_type_index = i;
-                break;
-            }
-        }
-        if (memory_type_index == std::numeric_limits<std::uint32_t>::max())
-        {
-            throw;
-        }
+        const auto memory_type_index{ vulkan_memory_type_index(memory_requirement,
+            ctor.device_physical->getMemoryProperties(), ctor.property) };
         vk::MemoryAllocateInfo memory_info
         {
             .allocationSize  = memory_requirement.size,

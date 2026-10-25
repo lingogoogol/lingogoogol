@@ -223,6 +223,22 @@ auto test_gui_names() -> void
         lgo::gui_object_events_enabled ? "enabled" : "disabled");
 }
 
+auto test_capabilities() -> void
+{
+    vk::PhysicalDeviceMemoryProperties properties{};
+    properties.memoryTypeCount = 3;
+    for (std::uint32_t i{}; i < 3; ++i) properties.memoryTypes[i].propertyFlags = vk::MemoryPropertyFlagBits::eDeviceLocal;
+    vk::MemoryRequirements requirements{ .size{ 256 }, .alignment{ 1 }, .memoryTypeBits{ 4 } };
+    check(lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal) == 2,
+        "An unsupported memory type passed the type-bit mask.");
+    properties.memoryTypes[2].propertyFlags = vk::MemoryPropertyFlagBits::eHostVisible;
+    bool rejected{};
+    try { lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal); }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    check(rejected, "Missing device memory properties were not rejected.");
+    std::println("PASS: Vulkan memory type bits and required properties");
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -350,6 +366,11 @@ int main(int argc, char** argv)
         if (mode == "gui-names")
         {
             test_gui_names();
+            return 0;
+        }
+        if (mode == "capabilities")
+        {
+            test_capabilities();
             return 0;
         }
         if (mode == "names")
