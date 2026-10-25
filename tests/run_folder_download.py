@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
         shutil.copy2(library, test / library.name)
     for resource in ('font', 'shader'):
         shutil.copytree(runtime / resource, test / resource)
-    (test / 'blob_queue').write_text(json.dumps(['reserved-placeholder'] * 21000))
+    (test / 'blob_queue').write_text('[]')
     (test / 'output').mkdir()
     fixture = {}
 

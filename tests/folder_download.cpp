@@ -36,7 +36,15 @@ int main()
         GUI_persistent_t persistent{};
         curl_multi_t multi{};
         home(&engine, &gui, &persistent, &column, &loads, &multi, &queue, &pos);
-        check(queue.count() == 21000, "This test requires the upload reserve threshold.");
+        check(queue.count() == 0, "This test requires an empty blob reserve.");
+        // A queued upload must not prevent downloads from using otherwise idle connections.
+        auto blocked_upload{ std::make_shared<upload_task_t>() };
+        blocked_upload->m_type = "upload";
+        std::promise<void> prepared;
+        prepared.set_value();
+        blocked_upload->m_prepared = prepared.get_future();
+        auto upload_i{ loads.m_task_list.emplace(loads.m_task_list.end(), blocked_upload) };
+
         auto add = [&](const std::string& id, const std::filesystem::path& path, bool folder = true)
         {
             // The fixture replaces only the native picker with an "output" selection;
@@ -55,13 +63,16 @@ int main()
         // Browsing uses the GUI thread's connection while preparation uses worker-local connections.
         for (int i{}; i != 3; ++i) check(list_folder_content(google_easy_t::get(), &pos).empty(), "Browsing returned wrong data.");
         const auto deadline{ std::chrono::steady_clock::now() + 20s };
-        while (!loads.m_task_list.empty())
+        while (loads.m_task_list.size() > 1)
         {
             check(std::chrono::steady_clock::now() < deadline, "Folder download stalled.");
             check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed during preparation/download.");
             lgo::text_line_t::pending_load();
         }
         check(loads.m_end.empty(), "A completed download still has pending callbacks.");
+        check(loads.m_task_list.front() == blocked_upload && queue.count() == 0,
+            "An upload ran without enough reserved blobs.");
+        loads.m_task_list.erase(upload_i);
         for (const auto& directory : { "output/nested", "output/concurrent" })
         {
             const std::filesystem::path path{ directory };
@@ -76,7 +87,7 @@ int main()
         check(std::filesystem::file_size("output/zeros/zero.bin") == 0, "Zero-only folder file missing.");
         check(std::filesystem::file_size("output/single-empty.bin") == 0, "Standalone empty file missing.");
         check(nested->m_progress == nested->m_size && nested->m_files_remaining == 0, "Task completion counters differ.");
-        std::println("PASS: concurrent recursive folders, pagination, empty files/directories, and delayed empty-file metadata");
+        std::println("PASS: concurrent recursive folders, pagination, empty files/directories, delayed metadata and empty blob reserve");
 
         auto bad{ add("folder-bad", "output/bad") };
         check(bad->m_prepared.wait_for(5s) == std::future_status::ready, "Bad preparation never completed.");

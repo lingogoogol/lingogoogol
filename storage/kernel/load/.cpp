@@ -296,6 +296,8 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                 //Consume the future so preparation failures cannot be mistaken for success.
                 upload_task_ptr->m_prepared.get();
             }
+            // Downloads consume no reserved blobs. Apply the upload reserve only here.
+            if (blob_queue->count() <= 10000) continue;
             auto entity_i{ upload_task_ptr->m_begin_progress };
             if (entity_i == upload_task_ptr->m_entity_arr.end())
             {

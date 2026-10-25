@@ -83,7 +83,7 @@ auto message_loop
 
 	static std::chrono::steady_clock::time_point last_add_time{};
 	std::chrono::steady_clock::time_point now{ std::chrono::steady_clock::now() };
-	if (now - last_add_time > 0s && easy_idle_arr.size() && blob_queue->count() > 10000)
+	if (now - last_add_time > 0s && easy_idle_arr.size())
 	{
 		last_add_time = now;
 		CURL* key{ easy_idle_arr.back().interface_get() };
