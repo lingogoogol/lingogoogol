@@ -46,7 +46,7 @@ auto file_upload
 	file->m_task = task;
 	file->m_parent = parent;
 	file->m_type = "file";
-	file->m_name = path_local.string();
+	file->m_name = path_local.filename().string();
 	file->m_main_id = blob_queue->get();
 	file->m_next_id = file->m_main_id;
 	file->m_path_local = path_local.string();
@@ -70,7 +70,7 @@ auto folder_upload
 	folder->m_task = task;
 	folder->m_parent = parent;
 	folder->m_type = "folder";
-	folder->m_name = path_local.string();
+	folder->m_name = path_local.filename().string();
 	folder->m_main_id = blob_queue->get();
 	folder->m_next_id = folder->m_main_id;
 	folder->m_self_i = task->m_entity_arr.size();
