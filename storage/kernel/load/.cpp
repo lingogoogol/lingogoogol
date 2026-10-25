@@ -385,7 +385,10 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
             }
             else
             {
-                throw;
+                // A response can complete out of order while earlier requests
+                // remain in flight. Waiting is a normal scheduler state.
+                download_idle_update(file_i);
+                continue;
             }
             return true;
         }
@@ -1027,6 +1030,7 @@ auto download_chunk_load_end
         nlohmann::json content_id_arr = nlohmann::json::parse(payload["description"].get<std::string>());
         chunk.m_content_id.resize(content_id_arr.size());
         std::ranges::copy(content_id_arr, chunk.m_content_id.begin());
+        chunk.m_loaded = true;
     }
 
     //Update m_chunk_load_end_progress.
@@ -1038,20 +1042,17 @@ auto download_chunk_load_end
         while
         (
             file_i->m_chunk_load_end_progress < file_i->m_chunk_arr.size() &&
-            //Nonempty m_content_id means the ids were loaded.
-            !file_i->m_chunk_arr[file_i->m_chunk_load_end_progress].m_content_id.empty()
+            file_i->m_chunk_arr[file_i->m_chunk_load_end_progress].m_loaded
         )
         {
             ++file_i->m_chunk_load_end_progress;
         }
     }
 
-    //Update idle information.
-    file_i->m_idle = true;
-    if (file_i < file_i->m_task->m_idle_first)
-    {
-        file_i->m_task->m_idle_first = file_i;
-    }
+    // A later index batch may finish before the first pending batch. It does
+    // not make content runnable until the contiguous loaded prefix advances.
+    // Recompute from the earliest candidate so other runnable files stay visible.
+    download_idle_update(std::min(file_i, file_i->m_task->m_idle_first));
     return;
 }
 

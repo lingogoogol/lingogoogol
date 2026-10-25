@@ -80,6 +80,8 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(*self.patch(id,data))
     def do_POST(self):
         body=self.body().decode()
+        if 'files/chunk-reordered-0?' in body: time.sleep(.5)
+        if 'files/data-reordered-0?' in body: time.sleep(.2)
         boundary=self.headers['Content-Type'].split('boundary=')[1]
         parts=[]
         for part in body.split('--'+boundary)[1:-1]:

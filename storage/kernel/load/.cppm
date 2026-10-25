@@ -188,6 +188,7 @@ export
         std::string m_id{};
         std::vector<std::string> m_content_id{};
         std::vector<std::string> m_content{};
+        bool m_loaded{ false };
     };
 
     struct download_file_t

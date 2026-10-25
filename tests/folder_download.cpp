@@ -60,6 +60,7 @@ int main()
         auto empty{ add("folder-empty", "output/empty") };
         auto zeros{ add("folder-zeros", "output/zeros") };
         auto empty_file{ add("slow-empty", "output/single-empty.bin", false) };
+        auto reordered{ add("file-reordered", "output/reordered.bin", false) };
         // Browsing uses the GUI thread's connection while preparation uses worker-local connections.
         for (int i{}; i != 3; ++i) check(list_folder_content(google_easy_t::get(), &pos).empty(), "Browsing returned wrong data.");
         const auto deadline{ std::chrono::steady_clock::now() + 20s };
@@ -87,6 +88,10 @@ int main()
         check(std::filesystem::file_size("output/zeros/zero.bin") == 0, "Zero-only folder file missing.");
         check(std::filesystem::file_size("output/single-empty.bin") == 0, "Standalone empty file missing.");
         check(nested->m_progress == nested->m_size && nested->m_files_remaining == 0, "Task completion counters differ.");
+        auto reordered_bytes{ lgo::get_file_str("output/reordered.bin") };
+        check(reordered_bytes.size() == 201, "Reordered download size differs.");
+        for (std::size_t i{}; i < reordered_bytes.size(); ++i)
+            check(static_cast<unsigned char>(reordered_bytes[i]) == i, "Reordered download bytes differ.");
         std::println("PASS: concurrent recursive folders, pagination, empty files/directories, delayed metadata and empty blob reserve");
 
         auto bad{ add("folder-bad", "output/bad") };

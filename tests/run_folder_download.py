@@ -66,6 +66,16 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
     folder('folder-zeros', [('folder', 'folder-empty', 'child'), ('file', 'slow-empty', 'zero.bin')])
     blob('folder-bad', {'next': 'null'}, [[]])
     blob('slow-empty', {'size': 0, 'next': 'null'}, [])
+    # Two index batches can finish in reverse order. Keep the first pending
+    # until the scheduler has observed the second response.
+    blob('file-reordered', {'size': 201, 'next': 'file-reordered-next'},
+         [f'chunk-reordered-{i}' for i in range(100)])
+    blob('file-reordered-next', {'size': 201, 'next': 'file-reordered-tail'},
+         [f'chunk-reordered-{i}' for i in range(100, 200)])
+    blob('file-reordered-tail', {'size': 201, 'next': 'null'}, ['chunk-reordered-200'])
+    for i in range(201):
+        blob(f'chunk-reordered-{i}', {}, [f'data-reordered-{i}'])
+        fixture[f'data-reordered-{i}'] = {'name': '{}', 'description': base64.urlsafe_b64encode(bytes([i])).decode()}
     for id, text, next_page in [('main', 'ABC', 'file-main-next'), ('main-next', 'DEF', 'null'),
                                 ('child', 'nested', 'null'), ('page', 'page two', 'null')]:
         blob('file-' + id, {'size': 6 if id.startswith('main') else len(text), 'next': next_page}, ['chunk-' + id])
@@ -92,6 +102,9 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
             with urllib.request.urlopen(f'http://127.0.0.1:{port}/report', timeout=5) as response:
                 report = json.load(response)
             assert not any(event[0] == 'PATCH' for event in report['events']), 'Downloads modified mock cloud data.'
+            events = report['events']
+            assert events.index(['BATCH_GET', 'chunk-reordered-100']) < events.index(['BATCH_GET', 'chunk-reordered-0']), 'Index responses were not reordered.'
+            assert events.index(['BATCH_GET', 'data-reordered-1']) < events.index(['BATCH_GET', 'data-reordered-0']), 'Content responses were not reordered.'
         finally:
             server.terminate()
             server.wait(timeout=10)
