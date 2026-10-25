@@ -13,7 +13,7 @@ import urllib.request
 
 source = Path(__file__).resolve().parents[1]
 project = source.parent
-gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown', 'logging', 'logging-crash', 'gui-names', 'capabilities')
+gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown', 'logging', 'logging-crash', 'gui-names', 'capabilities', 'image-memory-properties')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=Path, default=project / 'build/x64-win32-pe-mingw_Release')
 parser.add_argument('--runtime', type=Path, default=project / 'install/x64-win32-pe-mingw_Release')

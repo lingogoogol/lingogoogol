@@ -239,6 +239,33 @@ auto test_capabilities() -> void
     std::println("PASS: Vulkan memory type bits and required properties");
 }
 
+auto test_image_memory_properties() -> void
+{
+    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Image memory properties" };
+    auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
+        decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
+    static decltype(instance->vkGetPhysicalDeviceMemoryProperties) original;
+    original = instance->vkGetPhysicalDeviceMemoryProperties;
+    instance->vkGetPhysicalDeviceMemoryProperties = [](auto physical, auto* properties)
+    {
+        original(physical, properties);
+        for (std::uint32_t i{}; i < properties->memoryTypeCount; ++i) properties->memoryTypes[i].propertyFlags = 0;
+    };
+    bool rejected{};
+    try
+    {
+        lgo::image_t image{ { .device_physical{ &engine.device_physical_get() }, .device{ &engine.device_get() },
+            .width{ 16 }, .height{ 16 }, .format{ vk::Format::eD32Sfloat },
+            .usage{ vk::ImageUsageFlagBits::eDepthStencilAttachment }, .property{ vk::MemoryPropertyFlagBits::eDeviceLocal } } };
+    }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    instance->vkGetPhysicalDeviceMemoryProperties = original;
+    check(rejected, "Image allocation ignored the requested memory properties.");
+    engine.message_loop();
+    check(engine.frame_rate() > 0, "Image allocation failure prevented subsequent rendering.");
+    std::println("PASS: image allocation forwards required memory properties");
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -371,6 +398,11 @@ int main(int argc, char** argv)
         if (mode == "capabilities")
         {
             test_capabilities();
+            return 0;
+        }
+        if (mode == "image-memory-properties")
+        {
+            test_image_memory_properties();
             return 0;
         }
         if (mode == "names")

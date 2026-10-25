@@ -84,7 +84,8 @@ namespace lgo
             .name{ m_name },
             .device_physical{ ctor_copy.device_physical },
             .device{ ctor_copy.device },
-            .image{ &m_interface }
+            .image{ &m_interface },
+            .property{ ctor_copy.property }
         });
         m_interface.bindMemory(*m_memory.interface_get(), 0);
 

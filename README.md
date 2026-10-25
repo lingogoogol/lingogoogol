@@ -190,6 +190,8 @@ cmake --build "$project_workspace/build/x64-win32-pe-mingw_Release" --parallel 4
 
 Vulkan 記憶體配置會同時檢查資源允許的類型位元遮罩與所需屬性；找不到合適類型時會回報明確錯誤。
 
+影像配置會傳遞呼叫端指定的記憶體屬性，再依資源需求選擇符合條件的記憶體類型。
+
 GPU 裝置遺失與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
 
 ```bash
