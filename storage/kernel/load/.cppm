@@ -79,6 +79,8 @@ export
         std::list<std::shared_ptr<load_task_t>> m_task_list{};
         std::map<CURL*, std::function<void(std::unique_ptr<curl_easy_t>&)>> m_end{};
         std::shared_ptr<lgo::divy_soft_t> m_progress_column{};
+        //Serialize read/modify/write publication to existing folders to avoid lost entries.
+        std::shared_future<void> m_upload_linked{};
     };
     
     struct load_task_t
@@ -162,6 +164,8 @@ export
         //The total size in bytes of chunks that has finished transferring to the cloud.
         std::uint64_t m_progress{ 0 };
         upload_folder_t m_pos{};
+        //Valid only after every entity has finished uploading successfully.
+        std::shared_future<void> m_linked{};
         //The root entity is at `m_entity.begin()`.
         std::vector<std::shared_ptr<upload_entity_t>> m_entity_arr{};
         //The first entity that need to send more requests.

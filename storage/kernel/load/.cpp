@@ -267,6 +267,18 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
         if (task_ptr->m_type == "upload")
         {
             auto upload_task_ptr{ std::dynamic_pointer_cast<upload_task_t>(task_ptr) };
+            if (upload_task_ptr->m_linked.valid())
+            {
+                if (upload_task_ptr->m_linked.wait_for(0s) == std::future_status::ready)
+                {
+                    //Keep the progress entry until publication succeeds, and propagate errors.
+                    upload_task_ptr->m_linked.get();
+                    state->m_progress_column->remove_object(upload_task_ptr->m_progress_div);
+                    state->m_task_list.erase(upload_task_ptr->m_self_i);
+                    return false;
+                }
+                continue;
+            }
             if (upload_task_ptr->m_prepared.valid())
             {
                 if (upload_task_ptr->m_prepared.wait_for(0s) != std::future_status::ready)
@@ -364,7 +376,7 @@ auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> vo
 	return;
 }
 
-//Check if the upload task is complete and remove the task from load state when appropriate.
+//Publish the root only after all content and metadata requests have succeeded.
 auto upload_complete(upload_entity_t* entity) -> void
 {
     upload_task_t* task{ entity->m_task };
@@ -414,11 +426,41 @@ auto upload_complete(upload_entity_t* entity) -> void
         }
     }
 
-    //Remove the task from load state if it is finished.
     if (task->m_end_progress == task->m_entity_arr.end())
     {
-        task->m_state->m_progress_column->remove_object(task->m_progress_div);
-        task->m_state->m_task_list.erase(task->m_self_i);
+        auto root{ task->m_entity_arr.front().get() };
+        nlohmann::json link
+        {
+            { "type", root->m_type },
+            { "name", root->m_name }
+        };
+        if (root->m_type == "file")
+        {
+            auto file{ dynamic_cast<upload_file_t*>(root) };
+            link["id"] = file->m_main_id;
+            link["size"] = file->m_size;
+        }
+        else
+        {
+            link["id"] = dynamic_cast<upload_folder_t*>(root)->m_main_id;
+        }
+        task->m_progress_text->set_text("連結到目錄：" + task->m_name, false);
+        //Each worker owns its easy handle. Waiting for the previous publication prevents
+        //concurrent folder_add read/modify/write operations from overwriting each other.
+        //Copy the inputs so the worker never accesses task or GUI state.
+        task->m_linked = std::async
+        (
+            std::launch::async,
+            [previous = task->m_state->m_upload_linked, pos = task->m_pos.m_main_id, link = std::move(link)]
+            {
+                if (previous.valid())
+                {
+                    previous.get();
+                }
+                folder_add(google_easy_t::get(), pos, link);
+            }
+        ).share();
+        task->m_state->m_upload_linked = task->m_linked;
     }
     return;
 }

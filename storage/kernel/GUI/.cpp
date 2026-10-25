@@ -173,7 +173,6 @@ auto file_upload_callback
 			std::launch::async,
 			[]
 			(
-				google_easy_t* easy,
 				blob_queue_t* blob_queue,
 				upload_task_t* task,
 				std::filesystem::path path_local,
@@ -182,24 +181,10 @@ auto file_upload_callback
 			-> void
 			{
 				file_upload(blob_queue, task, path_local, parent);
-				auto file{ std::dynamic_pointer_cast<upload_file_t>(task->m_entity_arr.front()) };
-				folder_add
-				(
-					*easy,
-					task->m_pos.m_main_id,
-					nlohmann::json
-					{
-						{ "id", file->m_main_id },
-						{ "type", "file" },
-						{ "name", std::filesystem::path{ file->m_path_local }.filename().string() },
-						{ "size", file->m_size }
-					}
-				);
 				task->m_begin_progress = task->m_entity_arr.begin();
 				task->m_end_progress = task->m_entity_arr.begin();
 				return;
 			},
-			&google_easy_t::get(),
 			blob_queue,
 			task.get(),
 			file,
@@ -259,7 +244,6 @@ auto folder_upload_callback
 			std::launch::async,
 			[]
 			(
-				google_easy_t* easy,
 				blob_queue_t* blob_queue,
 				upload_task_t* task,
 				std::filesystem::path path_local,
@@ -268,23 +252,10 @@ auto folder_upload_callback
 			-> void
 			{
 				folder_upload(blob_queue, task, path_local, parent);
-				auto folder{ std::dynamic_pointer_cast<upload_folder_t>(task->m_entity_arr.front()) };
-				folder_add
-				(
-					*easy,
-					task->m_pos.m_main_id,
-					nlohmann::json
-					{
-						{ "id", folder->m_main_id },
-						{ "type", "folder" },
-						{ "name", folder->m_name }
-					}
-				);
 				task->m_begin_progress = task->m_entity_arr.begin();
 				task->m_end_progress = task->m_entity_arr.begin();
 				return;
 			},
-			&google_easy_t::get(),
 			blob_queue,
 			task.get(),
 			folder,
@@ -837,6 +808,7 @@ auto home
 			lgo::alignment_2D{ lgo::alignment_x::left, lgo::alignment_y::top }
 		)
 	};
+
 
 	auto center_div
 	{
