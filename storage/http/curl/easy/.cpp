@@ -227,6 +227,9 @@ auto curl_easy_t::run() -> void
             "  response:\n" +
             m_write->m_payload
         );
+        //Rewind the request body before retrying a failed PATCH/POST. Otherwise
+        //folder publication retries send an empty body after the first attempt.
+        resume();
 	}
 	return;
 }
@@ -245,6 +248,8 @@ auto curl_easy_t::run_try() -> void
         catch (lgo::error_t error)
         {
             lgo::log_file(std::string{ error.what() } + "\n");
+            //A connection failure can also leave a partially consumed request body.
+            resume();
             continue;
         }
         break;
