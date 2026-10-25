@@ -252,107 +252,122 @@ namespace lgo {
     ):
     m_window_size{ window_size }, m_name{ vulkan_names_enabled ? name : std::string{} }
     {
-        //Create a window.
-        glfwInit();
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        // GLFW windows are resizable by default, including maximize and restore.
-        m_window = glfwCreateWindow
-        (
-            static_cast<int>(m_window_size.x),
-            static_cast<int>(m_window_size.y),
-            name.c_str(),
-            nullptr,
-            nullptr
-        );
-
-        int window_width{}, window_height{};
-        glfwGetWindowSize(m_window, &window_width, &window_height);
-        m_window_size = size_2D{ window_width, window_height };
-
-        //Create an instance.
-        vk::ApplicationInfo app_info
+        try
         {
-            .pApplicationName{ name.c_str() },
-            .applicationVersion{ Vulkan_version_encode(0, 0, 5, 0) },
-            .pEngineName{ "lgo" },
-            .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
-            .apiVersion{ Vulkan_version_encode(0, 1, 4, 0) }
-        };
-        std::vector<const char*> layer;
-        #ifdef _DEBUG
-        const auto available_layers{ m_context.enumerateInstanceLayerProperties() };
-        if (std::ranges::any_of(available_layers, [](const auto& value)
-            { return std::string_view{ value.layerName.data() } == "VK_LAYER_KHRONOS_validation"; }))
-            layer.push_back("VK_LAYER_KHRONOS_validation");
-        else log_file("Vulkan validation layer is unavailable; continuing without it.\n");
-        #endif
-        std::uint32_t glfw_extension_count{};
-        const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
-        std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
-        #if defined(DEBUG_VULKAN_NAME) || defined(_DEBUG)
-        // Object names do not require validation layers. Enable the optional
-        // instance extension only when requested and advertised by the loader.
-        const auto available_extensions{ m_context.enumerateInstanceExtensionProperties() };
-        const bool debug_utils_available{ std::ranges::any_of(available_extensions,
-            [](const auto& extension) { return std::string_view{ extension.extensionName.data() } == "VK_EXT_debug_utils"; }) };
-        if (debug_utils_available) extension_instance.push_back("VK_EXT_debug_utils");
-        #endif
-        extension_instance.push_back("VK_KHR_get_surface_capabilities2");
-        vk::InstanceCreateInfo instance_info
-        {
-            .pApplicationInfo{ &app_info },
-            .enabledLayerCount{ static_cast<std::uint32_t>(layer.size()) },
-            .ppEnabledLayerNames{ layer.data() },
-            .enabledExtensionCount{ static_cast<std::uint32_t>(extension_instance.size()) },
-            .ppEnabledExtensionNames{ extension_instance.data() }
-        };
-        m_instance = vk::raii::Instance{ m_context, instance_info };
+            //Create a window.
+            glfwInit();
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            // GLFW windows are resizable by default, including maximize and restore.
+            m_window = glfwCreateWindow
+            (
+                static_cast<int>(m_window_size.x),
+                static_cast<int>(m_window_size.y),
+                name.c_str(),
+                nullptr,
+                nullptr
+            );
 
-        //Create a debug messenger.
-        #ifdef _DEBUG
-        vk::DebugUtilsMessengerCreateInfoEXT messenger_info
-        {
-            .messageSeverity
+            int window_width{}, window_height{};
+            glfwGetWindowSize(m_window, &window_width, &window_height);
+            m_window_size = size_2D{ window_width, window_height };
+
+            //Create an instance.
+            vk::ApplicationInfo app_info
             {
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-                vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
-            },
-            .messageType
+                .pApplicationName{ name.c_str() },
+                .applicationVersion{ Vulkan_version_encode(0, 0, 5, 0) },
+                .pEngineName{ "lgo" },
+                .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
+                .apiVersion{ Vulkan_version_encode(0, 1, 4, 0) }
+            };
+            std::vector<const char*> layer;
+            #ifdef _DEBUG
+            const auto available_layers{ m_context.enumerateInstanceLayerProperties() };
+            if (std::ranges::any_of(available_layers, [](const auto& value)
+                { return std::string_view{ value.layerName.data() } == "VK_LAYER_KHRONOS_validation"; }))
+                layer.push_back("VK_LAYER_KHRONOS_validation");
+            else log_file("Vulkan validation layer is unavailable; continuing without it.\n");
+            #endif
+            std::uint32_t glfw_extension_count{};
+            const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
+            std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
+            #if defined(DEBUG_VULKAN_NAME) || defined(_DEBUG)
+            // Object names do not require validation layers. Enable the optional
+            // instance extension only when requested and advertised by the loader.
+            const auto available_extensions{ m_context.enumerateInstanceExtensionProperties() };
+            const bool debug_utils_available{ std::ranges::any_of(available_extensions,
+                [](const auto& extension) { return std::string_view{ extension.extensionName.data() } == "VK_EXT_debug_utils"; }) };
+            if (debug_utils_available) extension_instance.push_back("VK_EXT_debug_utils");
+            #endif
+            extension_instance.push_back("VK_KHR_get_surface_capabilities2");
+            vk::InstanceCreateInfo instance_info
             {
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
-                vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
-            },
-            .pfnUserCallback{ &debug_callback },
-            .pUserData{ this }
-        };
-        if (debug_utils_available) m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
-        #endif
+                .pApplicationInfo{ &app_info },
+                .enabledLayerCount{ static_cast<std::uint32_t>(layer.size()) },
+                .ppEnabledLayerNames{ layer.data() },
+                .enabledExtensionCount{ static_cast<std::uint32_t>(extension_instance.size()) },
+                .ppEnabledExtensionNames{ extension_instance.data() }
+            };
+            m_instance = vk::raii::Instance{ m_context, instance_info };
 
-        //Create a surface.
-        //The window surface needs to be created right after the instance creation,
-        //because it can actually influence the physical device selection.
-        VkSurfaceKHR surface_c{};
-        glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface_c);
-        m_surface = vk::raii::SurfaceKHR{ m_instance, surface_c };
+            //Create a debug messenger.
+            #ifdef _DEBUG
+            vk::DebugUtilsMessengerCreateInfoEXT messenger_info
+            {
+                .messageSeverity
+                {
+                    vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+                    vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+                    vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+                    vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+                },
+                .messageType
+                {
+                    vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+                    vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+                    vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
+                },
+                .pfnUserCallback{ &debug_callback },
+                .pUserData{ this }
+            };
+            if (debug_utils_available) m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+            #endif
 
-        create_device();
+            //Create a surface.
+            //The window surface needs to be created right after the instance creation,
+            //because it can actually influence the physical device selection.
+            VkSurfaceKHR surface_c{};
+            glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface_c);
+            m_surface = vk::raii::SurfaceKHR{ m_instance, surface_c };
 
-        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
-        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
-        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
-        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
-        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
-        glfwSetKeyCallback(m_window, GLFW_callback_key);
-        glfwSetCharCallback(m_window, GLFW_callback_char);
+            create_device();
 
-        rect_primitive_t::init(this);
-        m_device.waitIdle();
-        // Register only after the swapchain and rendering resources are ready.
-        glfwSetWindowRefreshCallback(m_window, GLFW_callback_window_refresh);
-        return;
+            glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
+            glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
+            glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
+            glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
+            glfwSetScrollCallback(m_window, GLFW_callback_wheel);
+            glfwSetKeyCallback(m_window, GLFW_callback_key);
+            glfwSetCharCallback(m_window, GLFW_callback_char);
+
+            rect_primitive_t::init(this);
+            m_device.waitIdle();
+            // Register only after the swapchain and rendering resources are ready.
+            glfwSetWindowRefreshCallback(m_window, GLFW_callback_window_refresh);
+        }
+        catch (...)
+        {
+            // A throwing constructor does not run ~engine_t. Release static GPU
+            // resources and native handles while the Vulkan members are alive.
+            rect_primitive_t::uninit();
+            release_device();
+            m_surface.clear();
+            m_debug_messenger.clear();
+            m_instance.clear();
+            if (m_window) glfwDestroyWindow(m_window);
+            glfwTerminate();
+            throw;
+        }
     }
 
     auto engine_t::create_device() -> void
@@ -795,6 +810,7 @@ namespace lgo {
 
     engine_t::~engine_t() noexcept
     {
+        m_recovering = true;
         glfwSetWindowRefreshCallback(m_window, nullptr);
         const char* cleanup_error{};
         try
@@ -822,7 +838,16 @@ namespace lgo {
                 //Logging failures must not interrupt cleanup or replace an active exception.
             }
         }
+        // Exception unwinding can destroy GUI owners without calling hide().
+        // The engine still owns their tracked primitives and must destroy them
+        // before the device, including partially built resources.
+        for (auto* rect : m_rect_primitive) delete rect;
+        m_rect_primitive.clear();
         rect_primitive_t::uninit();
+        release_device();
+        m_surface.clear();
+        m_debug_messenger.clear();
+        m_instance.clear();
         glfwDestroyWindow(m_window);
         glfwTerminate();
         return;
@@ -1188,17 +1213,18 @@ namespace lgo {
 
     auto engine_t::add_rect(const rect_t& rect) -> rect_primitive_t*
     {
-        rect_primitive_t* out{ new rect_primitive_t{ rect } };
+        auto out{ std::make_unique<rect_primitive_t>(rect) };
         std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.emplace(out);
-        return out;
+        m_rect_primitive.emplace(out.get());
+        return out.release();
     }
 
     auto engine_t::remove_rect(rect_primitive_t* in) -> void
     {
         std::unique_lock lock{ m_rect_mutex };
-        m_rect_primitive.erase(in);
+        // Keep ownership registered if the idle wait throws a fatal API error.
         flush();
+        m_rect_primitive.erase(in);
         delete in;
         return;
     }

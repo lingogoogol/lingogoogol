@@ -281,6 +281,50 @@ auto test_image_memory_properties() -> void
     std::println("PASS: image allocation forwards required memory properties");
 }
 
+auto test_fatal_cleanup(const std::string& mode) -> void
+{
+    static int destroyed_buffers;
+    static bool destroyed_before_device;
+    bool reported{};
+    try
+    {
+        lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Fatal Vulkan cleanup" };
+        engine.flush();
+        auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(engine.device_get().getDispatcher())>>*>(engine.device_get().getDispatcher());
+        static decltype(dispatch->vkDestroyBuffer) destroy_buffer;
+        static decltype(dispatch->vkDestroyDevice) destroy_device;
+        destroy_buffer = dispatch->vkDestroyBuffer;
+        destroy_device = dispatch->vkDestroyDevice;
+        dispatch->vkDestroyBuffer = [](auto... args) { ++destroyed_buffers; destroy_buffer(args...); };
+        dispatch->vkDestroyDevice = [](auto... args)
+        {
+            destroyed_before_device = destroyed_buffers > 0;
+            destroy_device(args...);
+        };
+        auto* rect = engine.add_rect({ .pos{ 10, 10 }, .size{ 100, 80 }, .depth{ 0.1f }, .color{ lgo::std_white } });
+        if (mode == "fatal-remove")
+        {
+            auto original = dispatch->vkQueueWaitIdle;
+            dispatch->vkQueueWaitIdle = [](auto... args) { return static_cast<decltype(original(args...))>(-2); };
+            engine.remove_rect(rect);
+        }
+        else
+        {
+            static int code;
+            code = mode == "fatal-unknown" ? -13 : -2;
+            auto original = dispatch->vkQueueSubmit;
+            dispatch->vkQueueSubmit = [](auto... args) { return static_cast<decltype(original(args...))>(code); };
+            engine.draw();
+        }
+    }
+    catch (const vk::SystemError& error)
+    {
+        reported = error.code().value() == (mode == "fatal-unknown" ? -13 : -2);
+    }
+    check(reported && destroyed_before_device, "Fatal Vulkan errors lost the cause or leaked children beyond device destruction.");
+    std::println("PASS: {} reports the API error and destroys tracked buffers before the GPU device", mode);
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -418,6 +462,11 @@ int main(int argc, char** argv)
         if (mode == "image-memory-properties")
         {
             test_image_memory_properties();
+            return 0;
+        }
+        if (mode == "fatal-submit" || mode == "fatal-remove" || mode == "fatal-unknown")
+        {
+            test_fatal_cleanup(mode);
             return 0;
         }
         if (mode == "names")
