@@ -149,7 +149,7 @@ export namespace lgo
         auto device_get() -> vk::raii::Device&;
         auto device_physical_get() -> vk::raii::PhysicalDevice&;
         auto command_queue_get() -> vk::raii::Queue&;
-        auto command_buffer_create() -> vk::raii::CommandBuffer;
+        auto command_buffer_create(std::string_view name = "upload.command-buffer") -> vk::raii::CommandBuffer;
         auto window_get() -> GLFWwindow*;
 
         using rect_t = rect_primitive_t::ctor_t;

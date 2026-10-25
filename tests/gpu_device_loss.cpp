@@ -16,6 +16,116 @@ auto check(bool condition, const char* message) -> void
     if (!condition) throw std::runtime_error{ message };
 }
 
+auto test_names() -> void
+{
+    lgo::FreeType_t freetype{};
+    lgo::font_face_t::freetype_set(&freetype);
+    lgo::font_face_t face{ "font/NotoSansTC-VariableFont_wght.ttf", 24 };
+    lgo::font_preference_t::default_get().push_back(&face);
+    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Vulkan names" };
+    engine.flush();
+    auto& device{ engine.device_get() };
+    auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(device.getDispatcher())>>*>(device.getDispatcher());
+    static decltype(dispatch->vkSetDebugUtilsObjectNameEXT) original_name{};
+    static std::vector<std::pair<vk::ObjectType, std::string>> names;
+    original_name = dispatch->vkSetDebugUtilsObjectNameEXT;
+    if constexpr (lgo::vulkan_names_enabled)
+        check(original_name != nullptr, "Mock driver must support VK_EXT_debug_utils for this test.");
+    static decltype(original_name) spy = [](auto device, auto info)
+    {
+        names.emplace_back(static_cast<vk::ObjectType>(info->objectType), info->pObjectName);
+        using result_t = decltype(original_name(device, info));
+        return original_name ? original_name(device, info) : static_cast<result_t>(0);
+    };
+    dispatch->vkSetDebugUtilsObjectNameEXT = spy;
+    bool built_name{};
+    const bool named{ lgo::vulkan_name(device, *device, [&] { built_name = true; return "probe.device"; }) };
+    check(named == lgo::vulkan_names_enabled && built_name == lgo::vulkan_names_enabled,
+        "Disabled naming built strings or enabled naming did not run.");
+    dispatch->vkSetDebugUtilsObjectNameEXT = nullptr;
+    built_name = false;
+    check(!lgo::vulkan_name(device, *device, [&] { built_name = true; return "unavailable"; }) && !built_name,
+        "Unavailable debug extension was called.");
+    dispatch->vkSetDebugUtilsObjectNameEXT = [](auto... args)
+    {
+        using result_t = decltype(original_name(args...));
+        return static_cast<result_t>(-1);
+    };
+    check(!lgo::vulkan_name(device, *device, "failed-name"), "Naming failure was not contained.");
+    dispatch->vkSetDebugUtilsObjectNameEXT = spy;
+
+    // New device dispatch tables obtain commands through the instance dispatcher.
+    // Intercept lookup so the test observes initial names on the replacement device.
+    auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
+        decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
+    static decltype(instance->vkGetDeviceProcAddr) original_get_proc{};
+    original_get_proc = instance->vkGetDeviceProcAddr;
+    static decltype(original_get_proc) get_proc_spy = [](auto device, auto name)
+    {
+        using result_t = decltype(original_get_proc(device, name));
+        // Vulkan-Hpp resolves vkGetDeviceProcAddr itself before other commands.
+        // Preserve interception through that lookup on replacement devices.
+        if (std::string_view{ name } == "vkGetDeviceProcAddr") return reinterpret_cast<result_t>(get_proc_spy);
+        if (std::string_view{ name } == "vkSetDebugUtilsObjectNameEXT") return reinterpret_cast<result_t>(spy);
+        return original_get_proc(device, name);
+    };
+    instance->vkGetDeviceProcAddr = get_proc_spy;
+    engine.device_lost();
+    const auto deadline{ std::chrono::steady_clock::now() + 10s };
+    do
+    {
+        check(!engine.message_loop(), "Naming prevented device recovery.");
+        check(std::chrono::steady_clock::now() < deadline, "Naming recovery timed out.");
+    } while (!engine.gpu_available());
+    instance->vkGetDeviceProcAddr = original_get_proc;
+    lgo::depth_tracker_t depth{};
+    lgo::state_t state{ &engine, &depth };
+    struct cleanup_t
+    {
+        lgo::state_t& state;
+        lgo::engine_t& engine;
+        ~cleanup_t()
+        {
+            try { engine.flush(); } catch (...) {}
+            state.clear_state();
+            lgo::text_line_t::free();
+        }
+    } cleanup{ state, engine };
+    state.add_object_shared<lgo::text_line_std_t>
+    (
+        lgo::depth_range_t{ 0, 0.5 }, lgo::pos_2D{ 20, 20 }, "Names 字型",
+        lgo::std_white, lgo::size_1D{ 600 }
+    );
+    const auto before_resize{ names.size() };
+    glfwSetWindowSize(engine.window_get(), 1100, 750);
+    for (int i{}; i < 5; ++i) engine.message_loop();
+    engine.flush();
+    if constexpr (lgo::vulkan_names_enabled)
+    {
+        for (const auto type : { vk::ObjectType::eDevice, vk::ObjectType::eQueue, vk::ObjectType::eCommandPool,
+            vk::ObjectType::eCommandBuffer, vk::ObjectType::eFence, vk::ObjectType::eSemaphore,
+            vk::ObjectType::eSwapchainKHR, vk::ObjectType::eImage, vk::ObjectType::eImageView,
+            vk::ObjectType::eDeviceMemory, vk::ObjectType::eBuffer, vk::ObjectType::eShaderModule,
+            vk::ObjectType::ePipelineLayout, vk::ObjectType::ePipeline, vk::ObjectType::eSampler,
+            vk::ObjectType::eDescriptorSetLayout, vk::ObjectType::eDescriptorPool, vk::ObjectType::eDescriptorSet })
+        {
+            if (!std::ranges::any_of(names, [type](const auto& entry) { return entry.first == type; }))
+            {
+                std::println("Missing Vulkan object type {}", std::to_underlying(type));
+                for (const auto& [named_type, name] : names)
+                    std::println("Named {}: {}", std::to_underlying(named_type), name);
+                throw std::runtime_error{ "A Vulkan object type was not named after recreation." };
+            }
+        }
+        check(names.size() > before_resize, "Resized swapchain objects were not named.");
+        check(std::ranges::all_of(names, [](const auto& entry) { return entry.second.find(" [0x") != std::string::npos; }),
+            "Resource names cannot distinguish repeated GUI objects.");
+    }
+    else check(names.empty(), "Disabled build still named Vulkan objects.");
+    std::println("PASS: Vulkan names {}, extension fallback, naming errors, resize and device recreation",
+        lgo::vulkan_names_enabled ? "enabled" : "disabled");
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -125,6 +235,11 @@ int main(int argc, char** argv)
     {
         const std::string mode{ argc > 1 ? argv[1] : "fence" };
         lgo::init_logfile("logfile/device-loss.txt");
+        if (mode == "names")
+        {
+            test_names();
+            return 0;
+        }
         if (mode == "transfer-shutdown")
         {
             test_transfer_shutdown();

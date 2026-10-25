@@ -17,8 +17,8 @@ import lgo.GUI.Vulkan;
 namespace lgo
 {
     engine_t* rect_primitive_t::m_engine{};
-    descriptor_set_layout_t rect_primitive_t::m_solid_descriptor_set_layout{};
-    descriptor_set_layout_t rect_primitive_t::m_texture_descriptor_set_layout{};
+    descriptor_set_layout_t rect_primitive_t::m_solid_descriptor_set_layout{ "rect.solid" };
+    descriptor_set_layout_t rect_primitive_t::m_texture_descriptor_set_layout{ "rect.texture" };
     pipeline_state_t rect_primitive_t::m_solid_pipeline_state{};
     pipeline_state_t rect_primitive_t::m_texture_pipeline_state{};
     vk::raii::Sampler rect_primitive_t::m_sampler{ nullptr };
@@ -36,6 +36,7 @@ namespace lgo
         
         m_vertex_buffer.init
         ({
+            .name{ m_name.empty() ? std::string_view{ "rect.vertex" } : std::string_view{ m_name } },
             .device_physical{ &m_engine->device_physical_get() },
             .device{ &m_engine->device_get() },
             .usage{ vk::BufferUsageFlagBits::eVertexBuffer },
@@ -167,6 +168,8 @@ namespace lgo
     {
         m_engine = engine;
 
+        m_solid_descriptor_set_layout = descriptor_set_layout_t{ "rect.solid" };
+        m_texture_descriptor_set_layout = descriptor_set_layout_t{ "rect.texture" };
         m_solid_descriptor_set_layout.serialize(m_engine->device_get());
         m_solid_pipeline_state.init
         ({
@@ -299,6 +302,7 @@ namespace lgo
             .unnormalizedCoordinates{ vk::False }
         };
         m_sampler = vk::raii::Sampler{ engine->device_get(), sampler_info };
+        vulkan_name(engine->device_get(), *m_sampler, "rect.glyph.sampler");
 
         return;
     }
@@ -397,6 +401,7 @@ namespace lgo
                 .pPoolSizes = &descriptor_pool_size
             };
             m_descriptor_pool = vk::raii::DescriptorPool{ m_engine->device_get(), descriptor_pool_info };
+            vulkan_name(m_engine->device_get(), *m_descriptor_pool, [&] { return m_name + ".descriptor-pool"; });
 
             std::vector<vk::DescriptorSetLayout> descriptor_set_layout( 1, *m_texture_descriptor_set_layout.interface_get() );
             vk::DescriptorSetAllocateInfo descriptor_set_info
@@ -406,6 +411,7 @@ namespace lgo
                 .pSetLayouts{ descriptor_set_layout.data() }
             };
             m_descriptor_set = std::move(m_engine->device_get().allocateDescriptorSets(descriptor_set_info)[0]);
+            vulkan_name(m_engine->device_get(), *m_descriptor_set, [&] { return m_name + ".descriptor-set"; });
 
             vk::DescriptorImageInfo descriptor_image_info
             {

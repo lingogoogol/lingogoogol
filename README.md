@@ -157,6 +157,14 @@ cmake --install "$project_workspace/build/x64-win32-pe-mingw_Release"
 
 完成後，依「使用說明」補上字型與帳戶設定。建置也會產生 `compare.exe` 與 `filegen.exe` 輔助工具；`compare.exe` 可逐位元組比對下載檔案與原始檔案。
 
+### Vulkan 物件名稱
+
+Debug 建置會自動定義 `DEBUG_VULKAN_NAME`，透過 `VK_EXT_debug_utils` 為 Vulkan 物件命名，方便在 RenderDoc、Nsight 及驗證訊息中辨認資源。名稱包含用途及 handle，涵蓋裝置、佇列、交換鏈及其影像、指令池與緩衝區、同步物件、pipeline、descriptor、GUI 頂點緩衝區及字型影像與記憶體；縮放視窗或重建 GPU 後也會重新命名。
+
+Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan 物件時組裝名稱並呼叫命名 API，增加字串配置及驅動呼叫成本；名稱不會改變 shader 或繪圖命令的運作。不需要命名時可用 `-DDEBUG_VULKAN_NAME=OFF` 重新設定 CMake 並編譯，便不再組裝命名字串或呼叫命名 API。既有建置目錄會保留 CMake cache，更新預設值後應明確指定 `ON`。
+
+此選項只啟用物件命名，不會額外啟用 validation layers。若 loader 不支援 `VK_EXT_debug_utils`，會跳過命名；命名 API 失敗也不會中止程式。Wine 10 的 Vulkan 橋接層在命名 debug messenger 時會直接 abort，因此 Wine 下略過這一種診斷物件；其他物件及原生 Windows 仍照常命名。
+
 GPU 裝置遺失與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
 
 ```bash
@@ -165,6 +173,8 @@ python3 tests/run_folder_download.py
 ```
 
 測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
+
+GPU 測試也會檢查物件命名的 macro 開關、extension 不可用或命名失敗時的處理，以及視窗縮放和 GPU 重建後的物件命名。可分別在 Release 預設設定與 `DEBUG_VULKAN_NAME=OFF` 編譯後執行。
 
 資料夾下載測試另涵蓋 201 個分塊跨頁索引與內容亂序、空檔案及目錄、工作最後一次回呼的生命週期，以及準備、索引、內容、解碼、大小與本機輸出錯誤。測試確認失敗原因保留在畫面、失敗後的在途回應不再寫檔，其他下載仍可完成；也會注入八種異常或部分失敗的批次回應，檢查安全重試及已成功子請求的保留。
 

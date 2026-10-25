@@ -9,6 +9,7 @@ export namespace lgo
     public:
         struct ctor_t
         {
+            std::string_view name{};
             vk::raii::PhysicalDevice* device_physical{};
             vk::raii::Device* device{};
             vk::raii::Buffer* buffer{};

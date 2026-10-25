@@ -13,9 +13,11 @@ import urllib.request
 
 source = Path(__file__).resolve().parents[1]
 project = source.parent
+gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=Path, default=project / 'build/x64-win32-pe-mingw_Release')
 parser.add_argument('--runtime', type=Path, default=project / 'install/x64-win32-pe-mingw_Release')
+parser.add_argument('--mode', action='append', choices=(*gpu_modes, 'transfer'), help='Run only the selected mode; use transfer for the mock Drive test.')
 args = parser.parse_args()
 build = args.build.resolve()
 entries = json.loads((build / 'compile_commands.json').read_text())
@@ -41,12 +43,12 @@ def link_test(test, main, executable, mock=None):
     subprocess.run(command, cwd=build, check=True)
 
 
-def run_test(executable, test, env, *arguments):
+def run_test(executable, test, env, *arguments, expected_code=0):
     result = subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
                              'wine64', str(executable), *arguments], cwd=test, env=env,
                             capture_output=True, text=True, timeout=60)
     print(result.stdout, end='', flush=True)
-    if result.returncode:
+    if result.returncode != expected_code:
         raise RuntimeError(f'{executable.name} {arguments} failed ({result.returncode}): {result.stderr}')
 
 
@@ -65,9 +67,12 @@ with tempfile.TemporaryDirectory(prefix='storage-gpu-test-') as directory:
     env = {**os.environ, 'WINEDEBUG': '-all'}
     if env.get('WINEPREFIX'):
         Path(env['WINEPREFIX']).mkdir(parents=True, exist_ok=True)
-    for mode in ('flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native',
-                 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown'):
-        run_test(test / 'test.exe', test, env, mode)
+    for mode in gpu_modes:
+        if not args.mode or mode in args.mode:
+            run_test(test / 'test.exe', test, env, mode)
+
+    if args.mode and 'transfer' not in args.mode:
+        raise SystemExit(0)
 
     inputs = test / 'input'
     (inputs / 'tree/sub').mkdir(parents=True)

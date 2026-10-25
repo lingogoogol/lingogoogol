@@ -29,6 +29,7 @@ namespace lgo
             }
         };
         m_interface = vk::raii::ImageView{ *ctor.device, info };
+        vulkan_name(*ctor.device, *m_interface, [&] { return std::string{ ctor.name } + ".image-view"; });
         return;
     }
 

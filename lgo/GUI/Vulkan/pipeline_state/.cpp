@@ -144,6 +144,7 @@ namespace lgo
             .pushConstantRangeCount{ 0 }
         };
         m_pipeline_layout = vk::raii::PipelineLayout{ device, pipeline_layout_info };
+        vulkan_name(device, *m_pipeline_layout, [&] { return m_name + ".pipeline-layout"; });
         std::vector<vk::PipelineShaderStageCreateInfo> shader_info{};
         for (std::size_t i{ 0 }; i < m_shader.size(); ++i)
         {
@@ -199,6 +200,7 @@ namespace lgo
             nullptr,
             pipeline_info.get<vk::GraphicsPipelineCreateInfo>()
         };
+        vulkan_name(device, *m_interface, [&] { return m_name + ".pipeline"; });
         return;
     }
 

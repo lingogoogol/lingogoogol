@@ -318,7 +318,7 @@ namespace lgo {
         size_2D window_size,
         std::string name
     ):
-    m_window_size{ window_size }
+    m_window_size{ window_size }, m_name{ vulkan_names_enabled ? name : std::string{} }
     {
         //Create a window.
         glfwInit();
@@ -355,8 +355,13 @@ namespace lgo {
         std::uint32_t glfw_extension_count{};
         const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
         std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
-        #ifdef _DEBUG
-        extension_instance.push_back("VK_EXT_debug_utils");
+        #if defined(DEBUG_VULKAN_NAME) || defined(_DEBUG)
+        // Object names do not require validation layers. Enable the optional
+        // instance extension only when requested and advertised by the loader.
+        const auto available_extensions{ m_context.enumerateInstanceExtensionProperties() };
+        const bool debug_utils_available{ std::ranges::any_of(available_extensions,
+            [](const auto& extension) { return std::string_view{ extension.extensionName.data() } == "VK_EXT_debug_utils"; }) };
+        if (debug_utils_available) extension_instance.push_back("VK_EXT_debug_utils");
         #endif
         extension_instance.push_back("VK_KHR_get_surface_capabilities2");
         vk::InstanceCreateInfo instance_info
@@ -389,7 +394,7 @@ namespace lgo {
             .pfnUserCallback{ &debug_callback },
             .pUserData{ this }
         };
-        m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+        if (debug_utils_available) m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
         #endif
 
         //Create a surface.
@@ -555,9 +560,15 @@ namespace lgo {
             .ppEnabledExtensionNames{ extension_device_cstr_arr.data() }
         };
         m_device = vk::raii::Device{ m_device_physical, device_info };
+        vulkan_name(m_device, *m_device, [&] { return m_name + "/device"; });
+        vulkan_name(m_device, *m_instance, [&] { return m_name + "/instance"; });
+        vulkan_name(m_device, *m_device_physical, [&] { return m_name + "/physical-device"; });
+        vulkan_name(m_device, *m_surface, [&] { return m_name + "/window.surface"; });
+        vulkan_name(m_device, *m_debug_messenger, [&] { return m_name + "/validation.messenger"; });
 
         //Create a queue.
         m_command_queue = vk::raii::Queue{ m_device, queue_family_index, 0 };
+        vulkan_name(m_device, *m_command_queue, [&] { return m_name + "/graphics-present.queue"; });
 
         //Create a swapchain.
         vk::PhysicalDeviceSurfaceInfo2KHR surface_info
@@ -589,9 +600,10 @@ namespace lgo {
             .queueFamilyIndex = queue_family_index
         };
         m_command_pool = vk::raii::CommandPool{ m_device, command_pool_info };
+        vulkan_name(m_device, *m_command_pool, [&] { return m_name + "/graphics.command-pool"; });
 
         //Create a command buffer.
-        m_command_buffer = command_buffer_create();
+        m_command_buffer = command_buffer_create("frame.command-buffer");
         m_command_buffer.end();
 
         //Create semaphores and a fence.
@@ -604,6 +616,7 @@ namespace lgo {
                 }
             };
 
+        vulkan_name(m_device, *m_fence, [&] { return m_name + "/frame.complete.fence"; });
         recreate_swap_chain();
 
     }
@@ -765,6 +778,7 @@ namespace lgo {
         m_semaphore_image.clear();
         m_semaphore_draw.clear();
         m_swap_chain = std::move(swap_chain);
+        vulkan_name(m_device, *m_swap_chain, [&] { return m_name + "/presentation.swapchain"; });
         m_swap_chain_image = m_swap_chain.getImages();
 
         //Create image views.
@@ -785,11 +799,15 @@ namespace lgo {
         {
             image_view_info.image = image;
             m_swap_chain_image_view.emplace_back(m_device, image_view_info);
+            const auto index{ &image - m_swap_chain_image.data() };
+            vulkan_name(m_device, image, [&] { return m_name + "/swapchain.image[" + std::to_string(index) + "]"; });
+            vulkan_name(m_device, *m_swap_chain_image_view.back(), [&] { return m_name + "/swapchain.image-view[" + std::to_string(index) + "]"; });
         }
 
         //Create a depth buffer.
         m_depth_image.init
         ({
+            .name{ "frame.depth" },
             .device_physical{ &m_device_physical },
             .device{ &m_device },
             .width{ m_swap_chain_extent.width },
@@ -800,6 +818,7 @@ namespace lgo {
         });
         m_depth_image_view.init
         ({
+            .name{ "frame.depth" },
             .device{ &m_device },
             .image{ &m_depth_image.interface_get() },
             .format{ vk::Format::eD32Sfloat },
@@ -810,6 +829,8 @@ namespace lgo {
         {
             m_semaphore_image.emplace_back(m_device, vk::SemaphoreCreateInfo{});
             m_semaphore_draw.emplace_back(m_device, vk::SemaphoreCreateInfo{});
+            vulkan_name(m_device, *m_semaphore_image.back(), [&] { return m_name + "/image-available.semaphore[" + std::to_string(i) + "]"; });
+            vulkan_name(m_device, *m_semaphore_draw.back(), [&] { return m_name + "/render-finished.semaphore[" + std::to_string(i) + "]"; });
         }
         m_framebuffer_size = size_2D{ width, height };
         m_swap_chain_dirty = false;
@@ -1210,7 +1231,7 @@ namespace lgo {
         return m_command_queue;
     }
 
-    auto engine_t::command_buffer_create() -> vk::raii::CommandBuffer
+    auto engine_t::command_buffer_create(std::string_view name) -> vk::raii::CommandBuffer
     {
         vk::CommandBufferAllocateInfo command_buffer_info
         {
@@ -1222,6 +1243,7 @@ namespace lgo {
         {
             std::move(vk::raii::CommandBuffers{ m_device, command_buffer_info }.front())
         };
+        vulkan_name(m_device, *buffer, [&] { return m_name + "/" + std::string{ name }; });
         vk::CommandBufferBeginInfo begin_info
         {
             .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit

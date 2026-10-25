@@ -35,6 +35,8 @@ export
     using ::MultiByteToWideChar;
     using ::WideCharToMultiByte;
     using ::OutputDebugStringW;
+    using ::GetModuleHandleW;
+    using ::GetProcAddress;
     using ::FileTimeToSystemTime;
     
     constexpr auto S_OK{ S_OK_export };

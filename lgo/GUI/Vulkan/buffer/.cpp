@@ -49,8 +49,13 @@ namespace lgo
             .sharingMode{ vk::SharingMode::eExclusive }
         };
         m_interface = vk::raii::Buffer{ *ctor_copy.device, vertex_buffer_info };
+        vulkan_name(*ctor_copy.device, *m_interface, [&]
+        {
+            return std::string{ ctor_copy.name } + (ctor_copy.pixmap ? ".staging.buffer" : ".buffer");
+        });
         m_memory.init
         ({
+            .name{ ctor_copy.name },
             .device_physical{ ctor_copy.device_physical },
             .device{ ctor_copy.device },
             .buffer{ &m_interface },

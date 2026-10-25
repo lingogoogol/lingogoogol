@@ -50,6 +50,7 @@ namespace lgo
             m_pixmap = ctor_copy.pixmap;
             m_buffer.init
             ({
+                .name{ ctor_copy.name },
                 .device_physical{ ctor_copy.device_physical },
                 .device{ ctor_copy.device },
                 .pixmap{ ctor_copy.pixmap }
@@ -76,9 +77,11 @@ namespace lgo
             .sharingMode{ vk::SharingMode::eExclusive }
         };
         m_interface = vk::raii::Image{ *ctor_copy.device, image_info };
+        vulkan_name(*ctor_copy.device, *m_interface, [&] { return m_name + ".image"; });
 
         m_memory.init
         ({
+            .name{ m_name },
             .device_physical{ ctor_copy.device_physical },
             .device{ ctor_copy.device },
             .image{ &m_interface }

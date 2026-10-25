@@ -51,6 +51,10 @@ namespace lgo
             .memoryTypeIndex = memory_type_index
         };
         m_interface = vk::raii::DeviceMemory{ *ctor.device, memory_info };
+        vulkan_name(*ctor.device, *m_interface, [&]
+        {
+            return std::string{ ctor.name } + (ctor.buffer ? ".buffer.memory" : ".image.memory");
+        });
         return;
     }
 

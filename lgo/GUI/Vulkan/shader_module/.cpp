@@ -18,6 +18,7 @@ namespace lgo
             .pCode{ reinterpret_cast<const std::uint32_t*>(shader_code.data()) }
         };
         m_interface = vk::raii::ShaderModule{ device, shader_module_info };
+        vulkan_name(device, *m_interface, [&] { return path + ".shader-module"; });
         return;
     }
 

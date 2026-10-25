@@ -13,6 +13,7 @@ export namespace lgo
     public:
         struct ctor_t
         {
+            std::string_view name{};
             vk::raii::Device* device{};
             vk::raii::Image* image{};
             vk::Format format{};

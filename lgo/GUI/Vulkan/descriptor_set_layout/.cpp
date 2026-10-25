@@ -36,6 +36,7 @@ namespace lgo
             .pBindings{ m_binding_arr.data() }
         };
         m_interface = vk::raii::DescriptorSetLayout{ device, descriptor_layout_info };
+        vulkan_name(device, *m_interface, [&] { return m_name + ".descriptor-set-layout"; });
         return;
     }
 

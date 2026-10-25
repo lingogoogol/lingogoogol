@@ -45,6 +45,7 @@ export
     using ::glfwCreateWindowSurface;
     using ::glfwGetFramebufferSize;
     using ::glfwGetWindowSize;
+    using ::glfwSetWindowSize;
     using ::glfwGetWindowAttrib;
     using ::glfwSetWindowSizeLimits;
     using ::glfwSetWindowRefreshCallback;

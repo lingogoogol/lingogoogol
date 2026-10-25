@@ -298,6 +298,7 @@ namespace lgo
         });
         glyph.m_image_view = image_view_t
         {{
+            .name{ "font glyph" },
             .device{ &engine->device_get() },
             .image{ &glyph.m_image.interface_get() },
             .format{ vk::Format::eR8Unorm },

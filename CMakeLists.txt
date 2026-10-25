@@ -41,6 +41,11 @@ list(
 )
 
 add_library(common INTERFACE)
+
+option(DEBUG_VULKAN_NAME "Name Vulkan objects outside Debug builds." ON)
+target_compile_definitions(common INTERFACE
+    $<$<OR:$<CONFIG:Debug>,$<BOOL:${DEBUG_VULKAN_NAME}>>:DEBUG_VULKAN_NAME>
+)
 set(
     COMMON_COMPILE_OPT_MSVC
     /permissive-
