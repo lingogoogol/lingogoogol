@@ -643,12 +643,14 @@ namespace lgo {
 
     auto engine_t::texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void
     {
+        auto gpu_guard{ gpu_lock() };
         m_release_textures = std::move(release);
         m_restore_textures = std::move(restore);
     }
 
     auto engine_t::recover_device() -> void
     {
+        auto gpu_guard{ gpu_lock() };
         const auto now{ std::chrono::steady_clock::now() };
         if (now < m_next_recovery)
         {
@@ -668,7 +670,6 @@ namespace lgo {
             m_exit = true;
             return;
         }
-        std::unique_lock lock{ m_rect_mutex };
         m_recovering = true;
         try
         {
@@ -858,6 +859,7 @@ namespace lgo {
 
     auto engine_t::update_window_size() -> void
     {
+        auto gpu_guard{ gpu_lock() };
         int width{}, height{};
         glfwGetWindowSize(m_window, &width, &height);
         if (width <= 0 || height <= 0 || (width == m_window_size.x && height == m_window_size.y))
@@ -871,7 +873,6 @@ namespace lgo {
             m_callback_window_resize(m_window_size);
         }
         // Even unchanged rectangles need new normalized coordinates; keep text in logical pixels.
-        std::unique_lock lock{ m_rect_mutex };
         for (auto* rect : m_rect_primitive)
         {
             rect->upload_vertex_data();
@@ -979,6 +980,7 @@ namespace lgo {
     auto engine_t::draw() -> void
     try
     {
+        auto gpu_guard{ gpu_lock() };
         if (m_device_lost || m_recovering) return;
         int width{}, height{};
         glfwGetFramebufferSize(m_window, &width, &height);
@@ -1082,9 +1084,7 @@ namespace lgo {
                 1.0f
             }
         );
-        std::unique_lock rect_lock{ m_rect_mutex };
         rect_primitive_t::render(m_rect_primitive, m_command_buffer);
-        rect_lock.unlock();
         m_command_buffer.endRendering();
         transition_image_layout
         (
@@ -1159,8 +1159,14 @@ namespace lgo {
         m_swap_chain_dirty = true;
     }
 
+    auto engine_t::gpu_lock() const -> std::unique_lock<std::recursive_mutex>
+    {
+        return std::unique_lock{ m_gpu_mutex };
+    }
+
     auto engine_t::flush() -> void
     {
+        auto gpu_guard{ gpu_lock() };
         if (m_device_lost) return;
         try { m_command_queue.waitIdle(); }
         catch (const vk::DeviceLostError&) { device_lost(); }
@@ -1169,6 +1175,7 @@ namespace lgo {
 
     auto engine_t::log(std::uint32_t tab_count) const -> void
     {
+        auto gpu_guard{ gpu_lock() };
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: engine_t\n");
         log_file(tab(tab_count + 1) + "name: " + m_name + "\n");
@@ -1286,15 +1293,15 @@ namespace lgo {
 
     auto engine_t::add_rect(const rect_t& rect) -> rect_primitive_t*
     {
+        auto gpu_guard{ gpu_lock() };
         auto out{ std::make_unique<rect_primitive_t>(rect) };
-        std::unique_lock lock{ m_rect_mutex };
         m_rect_primitive.emplace(out.get());
         return out.release();
     }
 
     auto engine_t::remove_rect(rect_primitive_t* in) -> void
     {
-        std::unique_lock lock{ m_rect_mutex };
+        std::unique_lock lock{ m_gpu_mutex };
         // Keep ownership registered if the idle wait throws a fatal API error.
         flush();
         m_rect_primitive.erase(in);

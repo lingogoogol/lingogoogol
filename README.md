@@ -168,9 +168,15 @@ Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan
 
 此選項只啟用物件命名，不會額外啟用 validation layers。若 loader 不支援 `VK_EXT_debug_utils`，會跳過命名；命名 API 失敗也不會中止程式。Wine 10 的 Vulkan 橋接層在命名 debug messenger 時會直接 abort，因此 Wine 下略過這一種診斷物件；其他物件及原生 Windows 仍照常命名。
 
-### 矩形 primitive 的資源更新
+### 矩形 primitive 的執行緒同步
 
-`rect_primitive_t::set_image_view()` 會等待 GPU 完成工作，再重建 descriptor，使後續繪圖使用新指定的 image view。`color_enable()` 與 `texture_enable()` 切換模式時也會等待 GPU 閒置，並重建符合頂點格式的緩衝區與 descriptor；貼圖模式須先提供有效的 image view。
+`rect_primitive_t` 的 `set_pos()`、`set_size()`、`set_color()`、`set_image_view()`、`color_enable()`、`texture_enable()`、`inside()` 與 `log()` 可在不同執行緒呼叫，也支援多個執行緒更新同一個 primitive。更新會與繪圖、字型上傳、視窗尺寸更新及 GPU 重建同步；等待 GPU 閒置後，會持續持有引擎鎖直到頂點或 descriptor 更新完成，避免其他執行緒同時使用 `VkQueue`，或在 CPU 寫入頂點時提交繪圖。切換顏色／貼圖模式時會重建對應頂點格式，替換 image view 時會更新 descriptor。
+
+呼叫端仍須保證 primitive、引擎、image view 及裁切座標的生命週期；移除 primitive 或銷毀引擎前，先停止並等待使用它們的執行緒。貼圖模式須先提供有效的 image view；裁切座標透過外部指標引用，外部修改也須自行同步。這項保證限於 primitive，上層 GUI 物件、GLFW 事件處理與視窗操作仍應在 GUI 執行緒進行。
+
+直接透過 `device_get()`、`command_queue_get()` 或 `command_buffer_create()` 操作 Vulkan 資源時，須先取得 `auto guard = engine.gpu_lock();`，並持有至錄製、提交、等待和 command buffer 釋放全部完成。僅鎖住 `flush()` 無法保護後續資源寫入。
+
+可用 `python3 tests/run_gpu_device_loss.py --mode rect-threads` 執行跨執行緒回歸測試；測試會同時更新相同與不同矩形，執行貼圖／顏色切換、字型上傳及視窗縮放，並檢查 Vulkan 呼叫與頂點記憶體寫入沒有交錯，以及更新持續進行時的 GPU 重建。
 
 ### GUI 物件名稱與日誌
 

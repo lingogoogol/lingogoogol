@@ -16,6 +16,258 @@ auto check(bool condition, const char* message) -> void
     if (!condition) throw std::runtime_error{ message };
 }
 
+// Widen the Vulkan calls and mapped-memory interval so missing synchronization
+// reliably overlaps even without an installed Windows Vulkan validation layer.
+struct gpu_concurrency_probe_t
+{
+    inline static std::atomic<int> active{};
+    inline static std::atomic<int> mapped{};
+    inline static std::atomic<int> overlaps{};
+    inline static std::atomic<int> presents{};
+
+    gpu_concurrency_probe_t()
+    {
+        if (active.fetch_add(1) != 0 || mapped.load() != 0) ++overlaps;
+        std::this_thread::sleep_for(1ms);
+    }
+    ~gpu_concurrency_probe_t() { --active; }
+};
+
+auto test_rect_threads() -> void
+{
+    lgo::FreeType_t freetype{};
+    lgo::font_face_t::freetype_set(&freetype);
+    lgo::font_face_t face{ "font/NotoSansTC-VariableFont_wght.ttf", 24 };
+    lgo::font_preference_t::default_get().push_back(&face);
+    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Concurrent rectangles" };
+    engine.flush();
+    auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(engine.device_get().getDispatcher())>>*>(engine.device_get().getDispatcher());
+    static auto submit{ dispatch->vkQueueSubmit };
+    static auto present{ dispatch->vkQueuePresentKHR };
+    static auto wait{ dispatch->vkQueueWaitIdle };
+    static auto device_wait{ dispatch->vkDeviceWaitIdle };
+    static auto map{ dispatch->vkMapMemory };
+    static auto unmap{ dispatch->vkUnmapMemory };
+    static auto update_descriptors{ dispatch->vkUpdateDescriptorSets };
+    static std::atomic<std::uint64_t> mapped_size{};
+    static std::atomic<std::uintptr_t> descriptor_view{};
+    dispatch->vkUpdateDescriptorSets = [](auto device, auto count, auto writes, auto copy_count, auto copies)
+    {
+        if (count && writes[0].pImageInfo)
+            descriptor_view = std::bit_cast<std::uintptr_t>(writes[0].pImageInfo[0].imageView);
+        update_descriptors(device, count, writes, copy_count, copies);
+    };
+    dispatch->vkQueueSubmit = [](auto... args)
+    {
+        gpu_concurrency_probe_t probe;
+        return submit(args...);
+    };
+    dispatch->vkQueuePresentKHR = [](auto... args)
+    {
+        gpu_concurrency_probe_t probe;
+        ++gpu_concurrency_probe_t::presents;
+        return present(args...);
+    };
+    dispatch->vkQueueWaitIdle = [](auto... args)
+    {
+        gpu_concurrency_probe_t probe;
+        return wait(args...);
+    };
+    dispatch->vkDeviceWaitIdle = [](auto... args)
+    {
+        gpu_concurrency_probe_t probe;
+        return device_wait(args...);
+    };
+    dispatch->vkMapMemory = [](auto device, auto memory, auto offset, auto size, auto flags, auto data)
+    {
+        gpu_concurrency_probe_t probe;
+        const auto result{ map(device, memory, offset, size, flags, data) };
+        if (static_cast<int>(result) == 0)
+        {
+            ++gpu_concurrency_probe_t::mapped;
+            mapped_size = size;
+        }
+        return result;
+    };
+    dispatch->vkUnmapMemory = [](auto... args)
+    {
+        // Include CPU writes between map and unmap, not only the API calls.
+        std::this_thread::sleep_for(1ms);
+        unmap(args...);
+        --gpu_concurrency_probe_t::mapped;
+    };
+
+    std::array<lgo::image_t, 2> images;
+    std::array<lgo::image_view_t, 2> views;
+    {
+        auto guard{ engine.gpu_lock() };
+        auto commands{ engine.command_buffer_create() };
+        for (std::size_t i{}; i < images.size(); ++i)
+        {
+            lgo::pixmap_t pixels;
+            pixels.dim_set({ 1, 1 });
+            pixels[0, 0] = i == 0 ? std::byte{ 0 } : std::byte{ 255 };
+            images[i].init({ .name{ "thread test texture" },
+                .device_physical{ &engine.device_physical_get() }, .device{ &engine.device_get() },
+                .command_buffer{ &commands }, .pixmap{ &pixels } });
+            views[i].init({ .name{ "thread test texture" }, .device{ &engine.device_get() },
+                .image{ &images[i].interface_get() }, .format{ vk::Format::eR8Unorm },
+                .aspect{ vk::ImageAspectFlagBits::eColor } });
+        }
+        commands.end();
+        engine.command_queue_get().submit(vk::SubmitInfo{ .commandBufferCount{ 1 }, .pCommandBuffers{ &*commands } }, nullptr);
+        engine.flush();
+    }
+    auto* shared{ engine.add_rect({ .pos{ 20, 20 }, .size{ 100, 100 }, .depth{ 0.5f }, .color{ lgo::std_white },
+        .image_view{ &views[0] }, .texture_axis_x{ 100, 0 }, .texture_axis_y{ 0, 100 } }) };
+    auto* separate{ engine.add_rect({ .pos{ 200, 20 }, .size{ 100, 100 }, .depth{ 0.5f }, .color{ lgo::std_white } }) };
+    lgo::depth_tracker_t depth;
+    lgo::state_t state{ &engine, &depth };
+    struct cleanup_t
+    {
+        lgo::engine_t& engine;
+        lgo::state_t& state;
+        lgo::rect_primitive_t* shared;
+        lgo::rect_primitive_t* separate;
+        ~cleanup_t()
+        {
+            engine.flush();
+            state.clear_state();
+            lgo::text_line_t::free();
+            engine.remove_rect(shared);
+            engine.remove_rect(separate);
+        }
+    } cleanup{ engine, state, shared, separate };
+    auto label{ state.add_object_shared<lgo::text_line_std_t>(lgo::depth_range_t{ 0, 0.4 },
+        lgo::pos_2D{ 20, 300 }, "Uploads", lgo::std_white, lgo::size_1D{ 600 }) };
+    std::atomic<int> ready{}, done{};
+    std::atomic<bool> start{};
+    std::array<std::exception_ptr, 3> errors{};
+    std::vector<std::jthread> workers;
+    for (int worker{}; worker < 3; ++worker)
+        workers.emplace_back([&, worker]
+        {
+            ++ready;
+            while (!start.load()) std::this_thread::yield();
+            try
+            {
+                for (int i{}; i < 60; ++i)
+                {
+                    auto* rect{ worker == 2 ? separate : shared };
+                    if (worker == 0)
+                    {
+                        rect->set_pos({ 20 + i, 20 + i });
+                        rect->set_size({ 100 + i, 100 + i });
+                    }
+                    else if (worker == 1)
+                    {
+                        rect->set_color(i % 2 ? lgo::std_white : lgo::std_green_light);
+                        rect->set_image_view(views[i % 2]);
+                        rect->color_enable();
+                        rect->texture_enable();
+                    }
+                    else
+                    {
+                        rect->set_pos({ 250 + i, 20 });
+                        rect->set_color(lgo::std_green_light);
+                        engine.flush();
+                        rect->log(0);
+                    }
+                    rect->inside({ 50, 50 });
+                    std::this_thread::sleep_for(1ms);
+                }
+            }
+            catch (...) { errors[worker] = std::current_exception(); }
+            ++done;
+        });
+    while (ready.load() != 3) std::this_thread::yield();
+    start = true;
+    int frames{};
+    const auto deadline{ std::chrono::steady_clock::now() + 30s };
+    while (done.load() != 3 || frames < 30)
+    {
+        check(std::chrono::steady_clock::now() < deadline, "Concurrent rectangle updates deadlocked.");
+        if (frames == 5) glfwSetWindowSize(engine.window_get(), 1100, 750);
+        if (frames == 10) label->set_text("Glyph upload while rectangles change 字型");
+        check(!engine.message_loop(), "Concurrent updates closed the GUI.");
+        ++frames;
+    }
+    workers.clear();
+    for (auto error : errors) if (error) std::rethrow_exception(error);
+    engine.flush();
+    shared->set_image_view(views[0]);
+    const auto first_view{ descriptor_view.load() };
+    shared->set_image_view(views[1]);
+    check(descriptor_view != first_view, "Replacing the image view did not change its descriptor.");
+    const auto textured_size{ mapped_size.load() };
+    shared->color_enable();
+    check(mapped_size != textured_size, "Switching to color kept the textured vertex layout.");
+    check(!engine.message_loop(), "Rendering the solid vertex layout failed.");
+    shared->texture_enable();
+    check(mapped_size == textured_size, "Switching to texture did not restore the textured vertex layout.");
+    check(!engine.message_loop(), "Rendering the textured vertex layout failed.");
+    check(gpu_concurrency_probe_t::overlaps == 0, "Queue operations or GPU submissions overlapped CPU vertex writes.");
+    check(gpu_concurrency_probe_t::mapped == 0, "Vertex memory remained mapped.");
+    check(gpu_concurrency_probe_t::presents >= 30, "Concurrent updates prevented presentation.");
+    check(shared->inside({ 80, 80 }) && !shared->inside({ 78, 78 }), "Final shared rectangle position was lost.");
+    check(separate->inside({ 310, 21 }) && !separate->inside({ 308, 21 }), "Final separate rectangle position was lost.");
+    check(engine.gpu_available(), "Concurrent updates lost the GPU.");
+    engine.set_exit();
+    check(engine.message_loop(), "The GUI could not close after concurrent updates.");
+    check(!lgo::get_file_str(lgo::get_logfile_path()).contains("uncaught exception:"), "Concurrent updates logged an exception.");
+    lgo::log_file("finished_all!\n");
+    std::println("PASS: concurrent setters on shared/separate rectangles, queue waits, mode/view changes, glyph uploads, resize and clean shutdown");
+}
+
+auto test_rect_threads_recovery() -> void
+{
+    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Concurrent rectangle recovery" };
+    auto* rect{ engine.add_rect({ .pos{ 20, 20 }, .size{ 100, 100 }, .depth{ 0.5f }, .color{ lgo::std_white } }) };
+    std::atomic<int> updates{};
+    std::atomic<bool> stopped{};
+    std::array<std::exception_ptr, 2> errors{};
+    std::vector<std::jthread> workers;
+    for (int worker{}; worker < 2; ++worker)
+        workers.emplace_back([&, worker](std::stop_token stop)
+        {
+            try
+            {
+                while (!stop.stop_requested())
+                {
+                    if (worker == 0) rect->set_pos({ 20 + updates.load() % 100, 20 });
+                    else rect->set_color(lgo::std_green_light);
+                    ++updates;
+                    std::this_thread::sleep_for(1ms);
+                }
+            }
+            catch (...) { errors[worker] = std::current_exception(); stopped = true; }
+        });
+    const auto deadline{ std::chrono::steady_clock::now() + 20s };
+    for (int recovery{}; recovery < 2; ++recovery)
+    {
+        const auto target{ updates.load() + 20 };
+        while (updates.load() < target)
+        {
+            check(!stopped && std::chrono::steady_clock::now() < deadline, "Rectangle workers stopped during GPU recovery.");
+            check(!engine.message_loop(), "The GUI closed during concurrent recovery.");
+        }
+        engine.device_lost();
+        // Logical edits made while the device is unavailable must survive rebuild.
+        rect->set_size({ 150 + recovery, 150 + recovery });
+        check(!engine.message_loop() && engine.gpu_available(), "Concurrent rectangle updates prevented device recovery.");
+    }
+    for (auto& worker : workers) worker.request_stop();
+    workers.clear();
+    for (auto error : errors) if (error) std::rethrow_exception(error);
+    rect->set_pos({ 50, 50 });
+    check(rect->inside({ 200, 200 }) && !rect->inside({ 201, 201 }), "Device recovery lost logical rectangle edits.");
+    for (int i{}; i < 5; ++i) check(!engine.message_loop(), "Recovered rectangles could not render.");
+    engine.remove_rect(rect);
+    engine.set_exit();
+    check(engine.message_loop(), "Concurrent recovery prevented clean shutdown.");
+    std::println("PASS: active rectangle workers survive two GPU rebuilds and preserve logical edits");
+}
+
 auto test_names() -> void
 {
     lgo::FreeType_t freetype{};
@@ -630,6 +882,12 @@ int main(int argc, char** argv)
     {
         const std::string mode{ argc > 1 ? argv[1] : "fence" };
         lgo::init_logfile("logfile/device-loss.txt");
+        if (mode == "rect-threads")
+        {
+            test_rect_threads();
+            test_rect_threads_recovery();
+            return 0;
+        }
         if (mode == "fatal-submit" || mode == "fatal-remove" || mode == "fatal-unknown")
         {
             test_fatal_cleanup(mode);

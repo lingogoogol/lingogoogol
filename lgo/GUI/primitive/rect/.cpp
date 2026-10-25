@@ -49,6 +49,7 @@ namespace lgo
     auto rect_primitive_t::upload_vertex_data() -> void
     try
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         if (!m_engine->gpu_available()) return;
         std::unique_lock lock{ m_mutex };
         float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_engine->get_window_size().x) * 2.0f - 1.0f };
@@ -383,6 +384,7 @@ namespace lgo
     auto rect_primitive_t::create_gpu() -> void
     try
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         if (!m_engine->gpu_available()) return;
         create_vertex_buffer();
         upload_vertex_data();
@@ -443,6 +445,7 @@ namespace lgo
 
     auto rect_primitive_t::set_pos(pos_2D pos) -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         m_texture_pos = m_texture_pos + (pos - m_pos);
         m_pos = pos;
@@ -453,6 +456,7 @@ namespace lgo
 
     auto rect_primitive_t::set_size(size_2D size) -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         m_size = size;
         m_engine->flush();
@@ -462,6 +466,7 @@ namespace lgo
 
     auto rect_primitive_t::set_color(color_t color) -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         m_color = color;
         m_engine->flush();
@@ -471,6 +476,7 @@ namespace lgo
 
     auto rect_primitive_t::set_image_view(image_view_t& image_view) -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         m_engine->flush();
         m_image_view = &image_view;
@@ -482,6 +488,7 @@ namespace lgo
 
     auto rect_primitive_t::color_enable() -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         if (!m_texture_enable) return;
         m_engine->flush();
@@ -494,6 +501,7 @@ namespace lgo
 
     auto rect_primitive_t::texture_enable() -> void
     {
+        auto gpu_guard{ m_engine->gpu_lock() };
         std::unique_lock lock{ m_mutex };
         if (m_texture_enable) return;
         m_engine->flush();
@@ -511,6 +519,7 @@ namespace lgo
 
     auto rect_primitive_t::log(std::uint32_t tab_count) const -> void
     {
+        std::unique_lock lock{ m_mutex };
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: rect_primitive_t\n");
         log_file(tab(tab_count + 1) + "m_name: " + m_name + "\n");

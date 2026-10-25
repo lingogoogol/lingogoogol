@@ -13,7 +13,7 @@ import urllib.request
 
 source = Path(__file__).resolve().parents[1]
 project = source.parent
-gpu_modes = ('no-depth-format', 'no-present-modes', 'no-device-features', 'image-memory-properties',
+gpu_modes = ('rect-threads', 'no-depth-format', 'no-present-modes', 'no-device-features', 'image-memory-properties',
              'acquire-suboptimal', 'present-suboptimal', 'fatal-submit', 'fatal-remove', 'fatal-unknown', 'invalid-shader', 'device-fallback', 'capabilities', 'fence-timeout', 'acquire-timeout', 'acquire-not-ready', 'acquire-outdated',
                  'surface-lost', 'present-outdated', 'present-surface-lost', 'depth-fallback', 'no-surface-formats',
                  'out-of-memory', 'logging', 'logging-crash', 'gui-names', 'names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native',

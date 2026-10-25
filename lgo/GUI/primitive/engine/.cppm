@@ -53,7 +53,7 @@ export namespace lgo
         vk::raii::Fence m_fence{ nullptr };
         std::uint64_t m_frame_number{ 0 };
         bool m_exit{ false };
-        bool m_device_lost{};
+        std::atomic_bool m_device_lost{};
         bool m_surface_lost{};
         bool m_recovering{};
         std::string m_last_gpu_error{};
@@ -64,7 +64,9 @@ export namespace lgo
         std::function<void()> m_release_textures{};
         std::function<void()> m_restore_textures{};
         bool m_tearing_supported{};
-        std::recursive_mutex m_rect_mutex{};
+        // Shared by rendering, primitive updates, uploads and GPU recovery. Lock this
+        // before a primitive's mutex and hold it through idle waits AND CPU writes.
+        mutable std::recursive_mutex m_gpu_mutex{};
         std::set<rect_primitive_t*> m_rect_primitive{};
         std::string m_name{};
         std::deque<std::chrono::steady_clock::time_point> m_frame_time{};
@@ -138,6 +140,9 @@ export namespace lgo
         auto message_loop() -> bool;
         auto draw() -> void;
         auto flush() -> void;
+        // Raw device/queue/command-pool operations must retain this guard until
+        // their command buffers are freed. Recursive for nested primitive updates.
+        [[nodiscard]] auto gpu_lock() const -> std::unique_lock<std::recursive_mutex>;
         auto device_lost() noexcept -> void;
         auto gpu_available() const noexcept -> bool;
         auto gpu_failure_reason() const noexcept -> std::string_view;

@@ -309,6 +309,7 @@ namespace lgo
 
     auto text_line_t::restore_gpu(engine_t* engine) -> void
     {
+        auto gpu_guard{ engine->gpu_lock() };
         auto commands{ engine->command_buffer_create() };
         for (auto& [face, glyphs] : m_font)
         {
@@ -351,6 +352,9 @@ namespace lgo
         m_div.clear_state();
         m_rect_id.clear();
         std::wstring text_w{ to_wstring(m_text) };
+        // The pool, queue and uploaded resources are shared with frame rendering
+        // and device recovery; keep the guard until this command buffer is freed.
+        auto gpu_guard{ m_engine->gpu_lock() };
         vk::raii::CommandBuffer command_buffer{ m_engine->command_buffer_create() };
         m_glyph.resize(text_w.size());
         std::vector<font_face_t*> face_arr(text_w.size());

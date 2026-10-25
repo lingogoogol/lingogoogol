@@ -55,7 +55,7 @@ export namespace lgo
         pos_2D m_texture_pos{};
         size_2D m_texture_axis_x{};
         size_2D m_texture_axis_y{};
-        std::recursive_mutex m_mutex{};
+        mutable std::recursive_mutex m_mutex{};
         bool m_texture_enable{};
         const pos_2D* m_clip_pos{};
         const size_2D* m_clip_size{};
