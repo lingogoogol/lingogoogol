@@ -18,26 +18,31 @@ namespace lgo {
     template<typename t_callback_set, typename... t_in>
     auto engine_t::call_callback(t_callback_set& callback, t_in... in) -> void
     {
-        callback.m_calling_callback = true;
-        static std::uint64_t depth{ 0 };
-        ++depth;
-        typename decltype(callback.m_effective)::key_type current{};
-        for
-        (
-            auto i{ callback.m_effective.begin() };
-            i != callback.m_effective.end();
-            i = callback.m_effective.upper_bound(current)
-        ) {
-            current = *i;
-            (*current)(in...);
-        }
-        --depth;
-        if (!depth)
+        const bool was_calling{ std::exchange(callback.m_calling_callback, true) };
+        auto finish = [&]
         {
-            callback.m_effective.insert(callback.m_pending.begin(), callback.m_pending.end());
-            callback.m_pending.clear();
+            callback.m_calling_callback = was_calling;
+            if (!was_calling)
+            {
+                callback.m_effective.merge(callback.m_pending);
+            }
+        };
+        try
+        {
+            typename decltype(callback.m_effective)::key_type current{};
+            for (auto i{ callback.m_effective.begin() }; i != callback.m_effective.end();
+                i = callback.m_effective.upper_bound(current))
+            {
+                current = *i;
+                (*current)(in...);
+            }
         }
-        callback.m_calling_callback = false;
+        catch (...)
+        {
+            finish();
+            throw;
+        }
+        finish();
         return;
     }
 
@@ -59,57 +64,81 @@ namespace lgo {
     auto engine_t::GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback(ptr->m_callback_mouse_enter, entered);
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback(ptr->m_callback_mouse_enter, entered);
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
     
     auto engine_t::GLFW_callback_cursor_move(GLFWwindow* window, double x, double y) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback
-        (
-            ptr->m_callback_mouse_move,
-            pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
-        );
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback
+            (
+                ptr->m_callback_mouse_move,
+                pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
+            );
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback
-        (
-            ptr->m_callback_mouse_button,
-            button,
-            action,
-            mods
-        );
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback
+            (
+                ptr->m_callback_mouse_button,
+                button,
+                action,
+                mods
+            );
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback
-        (
-            ptr->m_callback_mouse_scroll,
-            size_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
-        );
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback
+            (
+                ptr->m_callback_mouse_scroll,
+                size_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
+            );
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mod) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback(ptr->m_callback_key, key, action, mod);
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback(ptr->m_callback_key, key, action, mod);
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        call_callback(ptr->m_callback_cha, static_cast<char32_t>(codepoint));
-        return;
+        if (ptr->m_refresh_error) return;
+        try
+        {
+            call_callback(ptr->m_callback_cha, static_cast<char32_t>(codepoint));
+        }
+        catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     VKAPI_ATTR auto VKAPI_CALL engine_t::debug_callback
