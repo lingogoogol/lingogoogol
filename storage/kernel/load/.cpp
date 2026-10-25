@@ -119,7 +119,8 @@ auto folder_download
 )
 -> void
 {
-	auto obj_list{ list_folder_content(*easy, &pos) };
+    // json's initializer_list constructor would wrap the returned array in another array.
+    nlohmann::json obj_list = list_folder_content(*easy, &pos);
 	std::filesystem::create_directories(path_local);
 	for (auto i : obj_list)
 	{

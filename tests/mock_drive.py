@@ -3,6 +3,8 @@ from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 base=pathlib.Path.cwd()
 lock=threading.RLock()
 blobs={k:{'name':json.dumps({'name':k,'parent':'null','next':'null'}),'description':'[]'} for k in ('root','other')}
+fixture=base/'download-fixture.json'
+if fixture.exists(): blobs.update(json.loads(fixture.read_text()))
 fail_content=True
 fail_publish=True
 fail_transport=True
@@ -46,6 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data,bytes): data=json.dumps(data).encode()
         self.send_response(code);self.send_header('Content-Type',ctype);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
     def do_GET(self):
+        if urllib.parse.urlparse(self.path).path.rsplit('/',1)[-1].startswith('slow-'): time.sleep(.15)
         with lock:
             if self.path=='/report':
                 return self.respond(200,{'violations':violations,'events':events,'root':json.loads(blobs['root']['description']),'fail_content_consumed':not fail_content,'fail_publish_consumed':not fail_publish})
