@@ -21,6 +21,8 @@ target_link_libraries(
     PRIVATE
         common
         external.Windows
+        external.Vulkan
+        lgo.container.str
         external.processenv
         external.shellapi
         lgo.math

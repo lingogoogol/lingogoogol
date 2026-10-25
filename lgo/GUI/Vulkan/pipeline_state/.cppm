@@ -16,6 +16,7 @@ export namespace lgo
             descriptor_set_layout_t* descriptor_set_layout{};
             vk::PrimitiveTopology topology{};
             vk::Format surface_format{};
+            vk::Format depth_format{ vk::Format::eD32Sfloat };
         };
         
         pipeline_state_t() = default;
@@ -50,6 +51,7 @@ export namespace lgo
         std::vector<vk::VertexInputBindingDescription> m_vertex_binding{};
         std::vector<vk::VertexInputAttributeDescription> m_vertex_attribute{};
         vk::Format m_surface_format{};
+        vk::Format m_depth_format{ vk::Format::eD32Sfloat };
         vk::raii::PipelineLayout m_pipeline_layout{ nullptr };
         vk::raii::Pipeline m_interface{ nullptr };
     };

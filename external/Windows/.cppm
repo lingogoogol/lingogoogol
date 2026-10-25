@@ -17,6 +17,11 @@ constexpr auto MB_ERR_INVALID_CHARS_export{ MB_ERR_INVALID_CHARS };
 constexpr auto WC_ERR_INVALID_CHARS_export{ WC_ERR_INVALID_CHARS };
 #undef WC_ERR_INVALID_CHARS
 
+constexpr auto MB_OK_export{ MB_OK };
+#undef MB_OK
+constexpr auto MB_ICONERROR_export{ MB_ICONERROR };
+#undef MB_ICONERROR
+
 export
 {
     using ::BYTE;
@@ -35,10 +40,13 @@ export
     using ::MultiByteToWideChar;
     using ::WideCharToMultiByte;
     using ::OutputDebugStringW;
+    using ::MessageBoxW;
     using ::GetModuleHandleW;
     using ::GetProcAddress;
     using ::FileTimeToSystemTime;
     
+    constexpr auto MB_OK{ MB_OK_export };
+    constexpr auto MB_ICONERROR{ MB_ICONERROR_export };
     constexpr auto S_OK{ S_OK_export };
     constexpr auto CP_UTF8{ CP_UTF8_export };
     constexpr auto MB_ERR_INVALID_CHARS{ MB_ERR_INVALID_CHARS_export };

@@ -39,6 +39,10 @@ namespace lgo
     auto image_t::init(const ctor_t& ctor) -> void
     {
         clear();
+        if (!ctor.device || !ctor.device_physical || !*(*ctor.device) || !*(*ctor.device_physical))
+            throw std::invalid_argument{ "Vulkan image creation requires a physical and logical device." };
+        if ((ctor.buffer || ctor.pixmap) && (!ctor.command_buffer || !*(*ctor.command_buffer)))
+            throw std::invalid_argument{ "Vulkan image uploads require a recording command buffer." };
         ctor_t ctor_copy{ ctor };
         vk::raii::Buffer* buffer{};
         if (ctor_copy.buffer)
@@ -63,6 +67,9 @@ namespace lgo
             buffer = &m_buffer.interface_get();
         }
 
+        const auto limit{ ctor_copy.device_physical->getProperties().limits.maxImageDimension2D };
+        if (!ctor_copy.width || !ctor_copy.height || ctor_copy.width > limit || ctor_copy.height > limit || !ctor_copy.usage)
+            throw vulkan_unsupported_t{ "Vulkan image dimensions or usage exceed the device capabilities." };
         m_name = ctor_copy.name;
         vk::ImageCreateInfo image_info
         {

@@ -3,6 +3,8 @@
 import std;
 
 import external.Windows;
+import external.Vulkan;
+import lgo.container.str;
 import external.processenv;
 import external.shellapi;
 
@@ -199,19 +201,46 @@ auto app() -> void
 		engine.flush();
 	}
     state.clear_state();
+    if (!engine.gpu_failure_reason().empty())
+        throw lgo::vulkan_unsupported_t{ std::string{ engine.gpu_failure_reason() } };
 	return;
+}
+
+// Report fatal graphics failures after stack unwinding has stopped transfers,
+// saved the unused blob queue and destroyed the window/GPU resources.
+auto report_error(std::string_view title, const std::exception& error) noexcept -> void
+{
+    try
+    {
+        const std::string message{ std::string{ title } + ": " + error.what() + "\nSee logfile/ for details." };
+        lgo::log_file(message + "\n");
+        MessageBoxW(nullptr, lgo::to_wstring(message).c_str(), L"Storage", MB_OK | MB_ICONERROR);
+    }
+    catch (...) {}
 }
 
 auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
 {
-	try
-	{
-		app();
-	}
-	catch (const std::exception& e)
-	{
-		lgo::log_file(std::string{ "uncaught exception:\n" } + e.what());
-	}
+    int result{};
+    try
+    {
+        app();
+    }
+    catch (const vk::SystemError& error)
+    {
+        report_error("Vulkan error", error);
+        result = 1;
+    }
+    catch (const lgo::vulkan_unsupported_t& error)
+    {
+        report_error("Unsupported Vulkan configuration or unrecoverable GPU failure", error);
+        result = 1;
+    }
+    catch (const std::exception& error)
+    {
+        report_error("Application error", error);
+        result = 1;
+    }
     lgo::log_file("finished_all!\n");
-    return 0;
+    return result;
 }

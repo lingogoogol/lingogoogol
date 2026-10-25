@@ -233,7 +233,8 @@ namespace lgo {
             bool queue_family_support{ true };
             queue_family_support =
                 queue_family_support &&
-                (queue_family_arr[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics);
+                (queue_family_arr[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) &&
+                queue_family_arr[i].queueFamilyProperties.queueCount > 0;
             queue_family_support =
                 queue_family_support &&
                 device_physical.getSurfaceSupportKHR(static_cast<std::uint32_t>(i), *m_surface);
@@ -254,8 +255,12 @@ namespace lgo {
     {
         try
         {
-            //Create a window.
-            glfwInit();
+            // Check native initialization before dereferencing a GLFW window.
+            if (!glfwInit()) throw vulkan_unsupported_t{ "GLFW initialization failed; no windowing environment is available." };
+            if (!glfwVulkanSupported()) throw vulkan_unsupported_t{ "No usable Vulkan loader or driver is installed." };
+            if (!m_context.getDispatcher()->vkEnumerateInstanceVersion ||
+                m_context.enumerateInstanceVersion() < Vulkan_version_encode(0, 1, 3, 0))
+                throw vulkan_unsupported_t{ "The Vulkan loader must support Vulkan 1.3 or later." };
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
             // GLFW windows are resizable by default, including maximize and restore.
             m_window = glfwCreateWindow
@@ -267,6 +272,12 @@ namespace lgo {
                 nullptr
             );
 
+            if (!m_window)
+            {
+                const char* reason{};
+                glfwGetError(&reason);
+                throw vulkan_unsupported_t{ std::string{ "Cannot create the Vulkan window: " } + (reason ? reason : "unknown GLFW error") };
+            }
             int window_width{}, window_height{};
             glfwGetWindowSize(m_window, &window_width, &window_height);
             m_window_size = size_2D{ window_width, window_height };
@@ -278,7 +289,7 @@ namespace lgo {
                 .applicationVersion{ Vulkan_version_encode(0, 0, 5, 0) },
                 .pEngineName{ "lgo" },
                 .engineVersion{ Vulkan_version_encode(0, 0, 5, 0) },
-                .apiVersion{ Vulkan_version_encode(0, 1, 4, 0) }
+                .apiVersion{ Vulkan_version_encode(0, 1, 3, 0) }
             };
             std::vector<const char*> layer;
             #ifdef _DEBUG
@@ -290,16 +301,21 @@ namespace lgo {
             #endif
             std::uint32_t glfw_extension_count{};
             const char** glfw_extension_cstr{ glfwGetRequiredInstanceExtensions(&glfw_extension_count) };
-            std::vector<const char*> extension_instance( glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count );
-            #if defined(DEBUG_VULKAN_NAME) || defined(_DEBUG)
-            // Object names do not require validation layers. Enable the optional
-            // instance extension only when requested and advertised by the loader.
+            if (!glfw_extension_cstr || !glfw_extension_count)
+                throw vulkan_unsupported_t{ "GLFW cannot provide the Vulkan surface extensions." };
             const auto available_extensions{ m_context.enumerateInstanceExtensionProperties() };
-            const bool debug_utils_available{ std::ranges::any_of(available_extensions,
-                [](const auto& extension) { return std::string_view{ extension.extensionName.data() } == "VK_EXT_debug_utils"; }) };
+            const auto has_extension = [&](std::string_view name)
+            {
+                return std::ranges::any_of(available_extensions,
+                    [&](const auto& extension) { return std::string_view{ extension.extensionName.data() } == name; });
+            };
+            std::vector<const char*> extension_instance(glfw_extension_cstr, glfw_extension_cstr + glfw_extension_count);
+            for (const auto* extension : extension_instance)
+                if (!has_extension(extension)) throw vulkan_unsupported_t{ std::string{ "Missing Vulkan instance extension: " } + extension };
+            #if defined(DEBUG_VULKAN_NAME) || defined(_DEBUG)
+            const bool debug_utils_available{ has_extension("VK_EXT_debug_utils") };
             if (debug_utils_available) extension_instance.push_back("VK_EXT_debug_utils");
             #endif
-            extension_instance.push_back("VK_KHR_get_surface_capabilities2");
             vk::InstanceCreateInfo instance_info
             {
                 .pApplicationInfo{ &app_info },
@@ -330,15 +346,18 @@ namespace lgo {
                 .pfnUserCallback{ &debug_callback },
                 .pUserData{ this }
             };
-            if (debug_utils_available) m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info);
+            if (debug_utils_available)
+            {
+                try { m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(messenger_info); }
+                catch (const vk::SystemError& error)
+                { log_file(std::string{ "Vulkan debug messenger unavailable: " } + error.what() + "\n"); }
+            }
             #endif
 
             //Create a surface.
             //The window surface needs to be created right after the instance creation,
             //because it can actually influence the physical device selection.
-            VkSurfaceKHR surface_c{};
-            glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface_c);
-            m_surface = vk::raii::SurfaceKHR{ m_instance, surface_c };
+            create_surface();
 
             create_device();
 
@@ -370,76 +389,122 @@ namespace lgo {
         }
     }
 
+    auto engine_t::create_surface() -> void
+    {
+        VkSurfaceKHR surface{};
+        const auto result{ static_cast<vk::Result>(glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface)) };
+        if (result != vk::Result::eSuccess)
+            throw std::runtime_error{ "Cannot create the Vulkan window surface: " + vk::to_string(result) };
+        m_surface = vk::raii::SurfaceKHR{ m_instance, surface };
+    }
+
     auto engine_t::create_device() -> void
     {
         //Create a physical device.
         std::vector<vk::raii::PhysicalDevice> device_available{ m_instance.enumeratePhysicalDevices() };
         std::multimap<int, vk::raii::PhysicalDevice> device_score{};
-        std::vector<std::string> extension_device{ "VK_KHR_swapchain" };
         for (vk::raii::PhysicalDevice device : device_available)
         {
             vk::PhysicalDeviceProperties device_property{ device.getProperties() };
-            std::vector<vk::QueueFamilyProperties2> device_queue_family{ device.getQueueFamilyProperties2() };
-            std::vector<vk::ExtensionProperties> device_extension{ device.enumerateDeviceExtensionProperties() };
-            auto device_feature
+            if (device_property.apiVersion < Vulkan_version_encode(0, 1, 3, 0))
             {
-                device.getFeatures2
-                <
-                    vk::PhysicalDeviceFeatures2,
-                    vk::PhysicalDeviceVulkan11Features,
-                    vk::PhysicalDeviceVulkan12Features,
-                    vk::PhysicalDeviceVulkan13Features,
-                    vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-                >()
-            };
-            //This variable tracks whether "device" supports a queue family with graphics capability.
-            if
-            (
-                device_property.apiVersion < Vulkan_version_encode(0, 1, 3, 0) ||
-                find_eligible_queue_family
-                (
-                    device_queue_family,
-                    device
-                ) == device_queue_family.end() ||
-                std::ranges::any_of
-                (
-                    extension_device,
-                    [device_extension] (const std::string& extension) -> bool
-                    {
-                        return std::ranges::all_of
-                        (
-                            device_extension,
-                            [extension] (const vk::ExtensionProperties& device_extension) -> bool
-                            {
-                                return device_extension.extensionName != extension;
-                            }
-                        );
-                    }
-                ) ||
-                !device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters ||
-                !device_feature.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray ||
-                !device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
-                !device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
-                !device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState
-            ) {
+                log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": Vulkan 1.3 is required\n");
                 continue;
             }
-            int score{ 0 };
-            if (device_property.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+            try
             {
-                score += 1;
+                std::vector<vk::QueueFamilyProperties2> device_queue_family{ device.getQueueFamilyProperties2() };
+                std::vector<vk::ExtensionProperties> device_extension{ device.enumerateDeviceExtensionProperties() };
+                auto device_feature
+                {
+                    device.getFeatures2
+                    <
+                        vk::PhysicalDeviceFeatures2,
+                        vk::PhysicalDeviceVulkan11Features,
+                        vk::PhysicalDeviceVulkan12Features,
+                        vk::PhysicalDeviceVulkan13Features,
+                        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                    >()
+                };
+                std::string reason;
+                if (find_eligible_queue_family(device_queue_family, device) == device_queue_family.end())
+                    reason = "no queue supports both graphics and presentation";
+                else if (!std::ranges::any_of(device_extension, [](const auto& extension)
+                    { return std::string_view{ extension.extensionName.data() } == "VK_KHR_swapchain"; }))
+                    reason = "VK_KHR_swapchain is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters) reason = "shaderDrawParameters is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray) reason = "runtimeDescriptorArray is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering) reason = "dynamicRendering is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2) reason = "synchronization2 is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) reason = "extendedDynamicState is missing";
+                if (reason.empty())
+                {
+                    try
+                    {
+                        const auto format{ vulkan_surface_format(device.getSurfaceFormatsKHR(*m_surface)) };
+                        const auto required{ vk::FormatFeatureFlagBits::eColorAttachment | vk::FormatFeatureFlagBits::eColorAttachmentBlend };
+                        if ((~device.getFormatProperties(format.format).optimalTilingFeatures & required))
+                            reason = "surface format does not support color attachment blending";
+                        if (device.getSurfacePresentModesKHR(*m_surface).empty()) reason = "surface has no presentation modes";
+                        const auto glyph_required{ vk::FormatFeatureFlagBits::eSampledImage | vk::FormatFeatureFlagBits::eSampledImageFilterLinear | vk::FormatFeatureFlagBits::eTransferDst };
+                        if ((~device.getFormatProperties(vk::Format::eR8Unorm).optimalTilingFeatures & glyph_required))
+                            reason = "R8 glyph textures do not support linear filtering and transfer";
+                        if (!std::ranges::any_of(std::array{ vk::Format::eD32Sfloat, vk::Format::eD16Unorm }, [&](auto depth)
+                            { return bool(device.getFormatProperties(depth).optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment); }))
+                            reason = "no supported depth attachment format";
+                    }
+                    catch (const vulkan_unsupported_t& error) { reason = error.what(); }
+                }
+                if (!reason.empty())
+                {
+                    log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": " + reason + "\n");
+                    continue;
+                }
+                int score{ 0 };
+                if (device_property.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+                {
+                    score += 1;
+                }
+                device_score.emplace(score, device);
             }
-            device_score.emplace(score, device);
+            catch (const vk::SurfaceLostKHRError&) { throw; }
+            catch (const vk::SystemError& error)
+            {
+                log_file(std::string{ "Cannot query Vulkan GPU " } + device_property.deviceName.data() + ": " + error.what() + "\n");
+            }
         }
         if (device_score.empty())
         {
-            throw std::runtime_error{ "No compatible Vulkan GPU is available." };
+            throw vulkan_unsupported_t{ "No compatible Vulkan GPU is available. See the per-GPU capability checks in logfile/." };
         }
-        else
+        std::exception_ptr last_error;
+        for (const auto& [score, candidate] : device_score | std::views::reverse)
         {
-            m_device_physical = device_score.rbegin()->second;
+            m_device_physical = candidate;
+            try
+            {
+                initialize_device();
+                return;
+            }
+            catch (const vk::SurfaceLostKHRError&) { throw; }
+            catch (const vk::SystemError& error)
+            {
+                log_file(std::string{ "Vulkan GPU initialization failed for " } + candidate.getProperties().deviceName.data() + ": " + error.what() + "\n");
+                last_error = std::current_exception();
+                release_device();
+            }
+            catch (const vulkan_unsupported_t& error)
+            {
+                log_file(std::string{ "Vulkan GPU configuration unsupported: " } + error.what() + "\n");
+                last_error = std::current_exception();
+                release_device();
+            }
         }
+        std::rethrow_exception(last_error);
+    }
 
+    auto engine_t::initialize_device() -> void
+    {
         //Create a logical device.
         std::vector<vk::QueueFamilyProperties2> queue_family_arr{ m_device_physical.getQueueFamilyProperties2() };
         auto queue_family_iter
@@ -488,18 +553,7 @@ namespace lgo {
                 .extendedDynamicState{ true }
             }
         };
-        std::vector<const char*> extension_device_cstr_arr
-        {
-            std::from_range_t{},
-            extension_device |
-            std::ranges::views::transform
-            (
-                [] (const std::string& str) -> const char*
-                {
-                    return str.c_str();
-                }
-            )
-        };
+        const std::array<const char*, 1> extension_device_cstr_arr{ "VK_KHR_swapchain" };
         vk::DeviceCreateInfo device_info
         {
             .pNext{ &feature.get<vk::PhysicalDeviceFeatures2>() },
@@ -520,28 +574,10 @@ namespace lgo {
         vulkan_name(m_device, *m_command_queue, [&] { return m_name + "/graphics-present.queue"; });
 
         //Create a swapchain.
-        vk::PhysicalDeviceSurfaceInfo2KHR surface_info
-        {
-            .surface{ *m_surface }
-        };
-        std::vector<vk::SurfaceFormat2KHR> surface_format_arr
-        {
-            m_device_physical.getSurfaceFormats2KHR(surface_info)
-        };
-        auto surface_format_it
-        {
-            std::ranges::find_if
-            (
-                surface_format_arr,
-                [] (vk::SurfaceFormat2KHR format) -> bool
-                {
-                    return format.surfaceFormat.format == vk::Format::eB8G8R8A8Srgb &&
-                        format.surfaceFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear;
-                }
-            )
-        };
-        m_surface_format = surface_format_it != surface_format_arr.end() ?
-            *surface_format_it : surface_format_arr.front();
+        m_surface_format.surfaceFormat = vulkan_surface_format(m_device_physical.getSurfaceFormatsKHR(*m_surface));
+        m_depth_format = vk::Format::eD32Sfloat;
+        if (!(m_device_physical.getFormatProperties(m_depth_format).optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment))
+            m_depth_format = vk::Format::eD16Unorm;
         //Create a command pool.
         vk::CommandPoolCreateInfo command_pool_info
         {
@@ -566,8 +602,8 @@ namespace lgo {
             };
 
         vulkan_name(m_device, *m_fence, [&] { return m_name + "/frame.complete.fence"; });
-        recreate_swap_chain();
-
+        try { recreate_swap_chain(); }
+        catch (const vk::OutOfDateKHRError&) { m_swap_chain_dirty = true; }
     }
 
     auto engine_t::release_device() noexcept -> void
@@ -600,6 +636,11 @@ namespace lgo {
         return !m_device_lost;
     }
 
+    auto engine_t::gpu_failure_reason() const noexcept -> std::string_view
+    {
+        return m_gpu_failure;
+    }
+
     auto engine_t::texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void
     {
         m_release_textures = std::move(release);
@@ -621,7 +662,9 @@ namespace lgo {
         // Bound repeated driver failures, including devices lost immediately after recreation.
         if (++m_recovery_attempts > 3)
         {
-            log_file("GPU recovery failed repeatedly; closing and saving the blob queue.\n");
+            m_gpu_failure = "GPU recovery failed repeatedly: " +
+                (m_last_gpu_error.empty() ? "the rebuilt GPU became unavailable again." : m_last_gpu_error);
+            log_file(m_gpu_failure + "; closing and saving the blob queue.\n");
             m_exit = true;
             return;
         }
@@ -629,7 +672,15 @@ namespace lgo {
         m_recovering = true;
         try
         {
-            log_file("VK_ERROR_DEVICE_LOST: rebuilding GPU resources.\n");
+            log_file(m_surface_lost ? "VK_ERROR_SURFACE_LOST_KHR: rebuilding the window surface and GPU resources.\n" :
+                "GPU resources unavailable (device loss or surface configuration change): rebuilding GPU resources.\n");
+            // Surface loss can leave the logical device healthy. Retire its work
+            // before releasing resources; a truly lost device cannot wait.
+            if (*m_device)
+            {
+                try { m_device.waitIdle(); }
+                catch (const vk::DeviceLostError&) {}
+            }
             for (auto* rect : m_rect_primitive)
             {
                 rect->release_gpu();
@@ -637,6 +688,12 @@ namespace lgo {
             if (m_release_textures) m_release_textures();
             rect_primitive_t::uninit();
             release_device();
+            if (m_surface_lost)
+            {
+                m_surface.clear();
+                create_surface();
+                m_surface_lost = false;
+            }
             create_device();
             m_device_lost = false;
             rect_primitive_t::init(this);
@@ -648,10 +705,13 @@ namespace lgo {
             m_device.waitIdle();
             if (m_device_lost) throw std::runtime_error{ "The rebuilt GPU was lost." };
             m_frame_time.clear();
+            m_last_gpu_error.clear();
             log_file("GPU recovery completed; transfer tasks were preserved.\n");
         }
         catch (const std::exception& error)
         {
+            m_last_gpu_error = error.what();
+            if (dynamic_cast<const vk::SurfaceLostKHRError*>(&error)) m_surface_lost = true;
             m_device_lost = true;
             m_next_recovery = now + std::chrono::seconds{ 1 };
             log_file(std::string{ "GPU recovery attempt failed: " } + error.what() + "\n");
@@ -667,13 +727,19 @@ namespace lgo {
         {
             return false;
         }
+        const auto format{ vulkan_surface_format(m_device_physical.getSurfaceFormatsKHR(*m_surface)) };
+        if (format.format != m_surface_format.surfaceFormat.format || format.colorSpace != m_surface_format.surfaceFormat.colorSpace)
+        {
+            log_file("Vulkan surface format changed; rebuilding pipelines and attachments.\n");
+            device_lost();
+            return false;
+        }
         // Retire GPU work before replacing attachments, command-buffer references, or semaphores.
         m_device.waitIdle();
         m_command_buffer.reset();
-        vk::PhysicalDeviceSurfaceInfo2KHR surface_info{ .surface{ *m_surface } };
         vk::SurfaceCapabilities2KHR surface_capability
         {
-            m_device_physical.getSurfaceCapabilities2KHR(surface_info)
+            .surfaceCapabilities{ m_device_physical.getSurfaceCapabilitiesKHR(*m_surface) }
         };
         if (surface_capability.surfaceCapabilities.currentExtent.width == std::numeric_limits<std::uint32_t>::max())
         {
@@ -694,6 +760,9 @@ namespace lgo {
         {
             m_swap_chain_extent = surface_capability.surfaceCapabilities.currentExtent;
         }
+        if (!m_swap_chain_extent.width || !m_swap_chain_extent.height) return false;
+        if (!(surface_capability.surfaceCapabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eColorAttachment))
+            throw vulkan_unsupported_t{ "The Vulkan surface cannot be used as a color attachment." };
         std::uint32_t image_count_min{ surface_capability.surfaceCapabilities.minImageCount + 1 };
         if
         (
@@ -714,7 +783,7 @@ namespace lgo {
             .imageUsage{ vk::ImageUsageFlagBits::eColorAttachment },
             .imageSharingMode{ vk::SharingMode::eExclusive },
             .preTransform{ surface_capability.surfaceCapabilities.currentTransform },
-            .compositeAlpha{ vk::CompositeAlphaFlagBitsKHR::eOpaque },
+            .compositeAlpha{ vulkan_composite_alpha(surface_capability.surfaceCapabilities.supportedCompositeAlpha) },
             .presentMode{ vk::PresentModeKHR::eFifo },
             .clipped{ true },
             .oldSwapchain{ *m_swap_chain }
@@ -729,6 +798,7 @@ namespace lgo {
         m_swap_chain = std::move(swap_chain);
         vulkan_name(m_device, *m_swap_chain, [&] { return m_name + "/presentation.swapchain"; });
         m_swap_chain_image = m_swap_chain.getImages();
+        if (m_swap_chain_image.empty()) throw std::runtime_error{ "The Vulkan swapchain returned no images." };
 
         //Create image views.
         vk::ImageViewCreateInfo image_view_info
@@ -761,7 +831,7 @@ namespace lgo {
             .device{ &m_device },
             .width{ m_swap_chain_extent.width },
             .height{ m_swap_chain_extent.height },
-            .format{ vk::Format::eD32Sfloat },
+            .format{ m_depth_format },
             .usage{ vk::ImageUsageFlagBits::eDepthStencilAttachment },
             .property{ vk::MemoryPropertyFlagBits::eDeviceLocal }
         });
@@ -770,7 +840,7 @@ namespace lgo {
             .name{ "frame.depth" },
             .device{ &m_device },
             .image{ &m_depth_image.interface_get() },
-            .format{ vk::Format::eD32Sfloat },
+            .format{ m_depth_format },
             .aspect{ vk::ImageAspectFlagBits::eDepth }
         });
 
@@ -924,20 +994,8 @@ namespace lgo {
         {
             return;
         }
-        //Acquire next image.
-		if
-        (
-            m_device.waitForFences
-            (
-                *m_fence,
-                vk::True,
-                std::numeric_limits<std::uint64_t>::max()
-            ) !=
-            vk::Result::eSuccess
-        )
-		{
-			throw;
-		}
+        // Use finite waits so events and transfers keep progressing on timeouts.
+        if (m_device.waitForFences(*m_fence, vk::True, 50'000'000) == vk::Result::eTimeout) return;
         std::size_t semaphore_index{ m_frame_number % m_swap_chain_image.size() };
         vk::Result result{};
         std::uint32_t image_index{};
@@ -945,7 +1003,7 @@ namespace lgo {
         {
             std::tie(result, image_index) = m_swap_chain.acquireNextImage
             (
-                std::numeric_limits<std::uint64_t>::max(),
+                50'000'000,
                 *m_semaphore_image[semaphore_index],
                 nullptr
             );
@@ -956,6 +1014,7 @@ namespace lgo {
             m_swap_chain_dirty = true;
             return;
         }
+        if (result == vk::Result::eTimeout || result == vk::Result::eNotReady) return;
         m_swap_chain_dirty = result == vk::Result::eSuboptimalKHR;
 
         //Record the command buffer.
@@ -1090,6 +1149,15 @@ namespace lgo {
     {
         device_lost();
     }
+    catch (const vk::SurfaceLostKHRError&)
+    {
+        m_surface_lost = true;
+        device_lost();
+    }
+    catch (const vk::OutOfDateKHRError&)
+    {
+        m_swap_chain_dirty = true;
+    }
 
     auto engine_t::flush() -> void
     {
@@ -1118,6 +1186,11 @@ namespace lgo {
     auto engine_t::format_get() const -> vk::Format
     {
         return m_surface_format.surfaceFormat.format;
+    }
+
+    auto engine_t::depth_format_get() const -> vk::Format
+    {
+        return m_depth_format;
     }
 
     auto engine_t::set_exit() -> void

@@ -176,7 +176,8 @@ namespace lgo
             .name{ "rect_primitive_t::solid_pipeline_state" },
             .descriptor_set_layout{ &m_solid_descriptor_set_layout },
             .topology{ vk::PrimitiveTopology::eTriangleStrip },
-            .surface_format{ m_engine->format_get() }
+            .surface_format{ m_engine->format_get() },
+            .depth_format{ m_engine->depth_format_get() }
         });
         m_solid_pipeline_state.vertex_binding_add
         (
@@ -228,7 +229,8 @@ namespace lgo
             .name{ "rect_primitive_t::texture_pipeline_state" },
             .descriptor_set_layout{ &m_texture_descriptor_set_layout },
             .topology{ vk::PrimitiveTopology::eTriangleStrip },
-            .surface_format{ m_engine->format_get() }
+            .surface_format{ m_engine->format_get() },
+            .depth_format{ m_engine->depth_format_get() }
         });
         m_texture_pipeline_state.vertex_binding_add
         (

@@ -35,6 +35,8 @@ export
     using ::GLFWwindow;
     
     using ::glfwInit;
+    using ::glfwVulkanSupported;
+    using ::glfwGetError;
     using ::glfwTerminate;
 
     using ::glfwGetRequiredInstanceExtensions;

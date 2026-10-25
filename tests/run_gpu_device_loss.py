@@ -13,7 +13,11 @@ import urllib.request
 
 source = Path(__file__).resolve().parents[1]
 project = source.parent
-gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown', 'logging', 'logging-crash', 'gui-names', 'capabilities', 'image-memory-properties', 'fatal-submit', 'fatal-remove', 'fatal-unknown')
+gpu_modes = ('no-depth-format', 'no-present-modes', 'no-device-features', 'image-memory-properties',
+             'acquire-suboptimal', 'present-suboptimal', 'fatal-submit', 'fatal-remove', 'fatal-unknown', 'invalid-shader', 'device-fallback', 'capabilities', 'fence-timeout', 'acquire-timeout', 'acquire-not-ready', 'acquire-outdated',
+                 'surface-lost', 'present-outdated', 'present-surface-lost', 'depth-fallback', 'no-surface-formats',
+                 'out-of-memory', 'logging', 'logging-crash', 'gui-names', 'names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native',
+                 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=Path, default=project / 'build/x64-win32-pe-mingw_Release')
 parser.add_argument('--runtime', type=Path, default=project / 'install/x64-win32-pe-mingw_Release')

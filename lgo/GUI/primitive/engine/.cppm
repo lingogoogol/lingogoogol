@@ -38,6 +38,7 @@ export namespace lgo
         vk::raii::Device m_device{ nullptr };
         vk::raii::Queue m_command_queue{ nullptr };
         vk::SurfaceFormat2KHR m_surface_format{};
+        vk::Format m_depth_format{ vk::Format::eD32Sfloat };
         vk::Extent2D m_swap_chain_extent{};
         vk::raii::SwapchainKHR m_swap_chain{ nullptr };
         std::vector<vk::Image> m_swap_chain_image{};
@@ -53,7 +54,10 @@ export namespace lgo
         std::uint64_t m_frame_number{ 0 };
         bool m_exit{ false };
         bool m_device_lost{};
+        bool m_surface_lost{};
         bool m_recovering{};
+        std::string m_last_gpu_error{};
+        std::string m_gpu_failure{};
         unsigned m_recovery_attempts{};
         std::chrono::steady_clock::time_point m_recovery_window{};
         std::chrono::steady_clock::time_point m_next_recovery{};
@@ -98,7 +102,9 @@ export namespace lgo
         )
         -> vk::Bool32;
 
+        auto create_surface() -> void;
         auto create_device() -> void;
+        auto initialize_device() -> void;
         auto release_device() noexcept -> void;
         auto recover_device() -> void;
         auto recreate_swap_chain() -> bool;
@@ -134,10 +140,12 @@ export namespace lgo
         auto flush() -> void;
         auto device_lost() noexcept -> void;
         auto gpu_available() const noexcept -> bool;
+        auto gpu_failure_reason() const noexcept -> std::string_view;
         auto texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void;
         auto log(std::uint32_t tab_count) const -> void;
 
         auto format_get() const -> vk::Format;
+        auto depth_format_get() const -> vk::Format;
         auto set_exit() -> void;
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;

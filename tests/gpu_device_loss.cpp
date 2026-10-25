@@ -141,6 +141,289 @@ auto test_names() -> void
         lgo::vulkan_names_enabled ? "enabled" : "disabled");
 }
 
+auto test_capabilities() -> void
+{
+    vk::PhysicalDeviceMemoryProperties properties{};
+    properties.memoryTypeCount = 3;
+    for (std::uint32_t i{}; i < 3; ++i) properties.memoryTypes[i].propertyFlags = vk::MemoryPropertyFlagBits::eDeviceLocal;
+    vk::MemoryRequirements requirements{ .size{ 256 }, .alignment{ 1 }, .memoryTypeBits{ 4 } };
+    check(lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal) == 2,
+        "An unsupported memory type passed the type-bit mask.");
+    properties.memoryTypes[2].propertyFlags = vk::MemoryPropertyFlagBits::eHostVisible;
+    bool rejected{};
+    try { lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal); }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    check(rejected, "Missing device memory properties were not rejected.");
+    rejected = false;
+    try { lgo::vulkan_surface_format({}); }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    check(rejected, "An empty surface format list was accepted.");
+    std::array formats{ vk::SurfaceFormatKHR{ .format{ vk::Format::eUndefined }, .colorSpace{ vk::ColorSpaceKHR::eSrgbNonlinear } } };
+    check(lgo::vulkan_surface_format(formats).format == vk::Format::eB8G8R8A8Srgb,
+        "Undefined surface format did not permit application selection.");
+    formats[0].format = vk::Format::eR8G8B8A8Unorm;
+    check(lgo::vulkan_surface_format(formats).format == vk::Format::eR8G8B8A8Unorm,
+        "Supported RGBA fallback format was rejected.");
+    formats[0].format = vk::Format::eR16G16B16A16Sfloat;
+    rejected = false;
+    try { lgo::vulkan_surface_format(formats); }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    check(rejected, "An unsupported HDR format was silently accepted.");
+    check(lgo::vulkan_composite_alpha(vk::CompositeAlphaFlagBitsKHR::eInherit) == vk::CompositeAlphaFlagBitsKHR::eInherit,
+        "A surface without opaque composition had no fallback.");
+    rejected = false;
+    try { lgo::vulkan_composite_alpha({}); }
+    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+    check(rejected, "An empty alpha capability mask was accepted.");
+    std::println("PASS: memory type bits/properties, empty/undefined/SDR/HDR surface formats and alpha fallback");
+}
+
+auto test_fatal_cleanup(const std::string& mode) -> void
+{
+    static int destroyed_buffers;
+    static bool destroyed_before_device;
+    bool reported{};
+    try
+    {
+        lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Fatal Vulkan cleanup" };
+        engine.flush();
+        auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(engine.device_get().getDispatcher())>>*>(engine.device_get().getDispatcher());
+        static decltype(dispatch->vkDestroyBuffer) destroy_buffer;
+        static decltype(dispatch->vkDestroyDevice) destroy_device;
+        destroy_buffer = dispatch->vkDestroyBuffer;
+        destroy_device = dispatch->vkDestroyDevice;
+        dispatch->vkDestroyBuffer = [](auto... args) { ++destroyed_buffers; destroy_buffer(args...); };
+        dispatch->vkDestroyDevice = [](auto... args)
+        {
+            destroyed_before_device = destroyed_buffers > 0;
+            destroy_device(args...);
+        };
+        auto* rect = engine.add_rect({ .pos{ 10, 10 }, .size{ 100, 80 }, .depth{ 0.1f }, .color{ lgo::std_white } });
+        if (mode == "fatal-remove")
+        {
+            auto original = dispatch->vkQueueWaitIdle;
+            dispatch->vkQueueWaitIdle = [](auto... args) { return static_cast<decltype(original(args...))>(-2); };
+            engine.remove_rect(rect);
+        }
+        else
+        {
+            static int code;
+            code = mode == "fatal-unknown" ? -13 : -2;
+            auto original = dispatch->vkQueueSubmit;
+            dispatch->vkQueueSubmit = [](auto... args) { return static_cast<decltype(original(args...))>(code); };
+            engine.draw();
+        }
+    }
+    catch (const vk::SystemError& error)
+    {
+        reported = error.code().value() == (mode == "fatal-unknown" ? -13 : -2);
+    }
+    check(reported && destroyed_before_device, "Fatal Vulkan errors lost the cause or leaked children beyond device destruction.");
+    std::println("PASS: {} reports the API error and destroys tracked buffers before the GPU device", mode);
+}
+
+auto test_shader_failure() -> void
+{
+    const auto original{ lgo::get_file_str("shader/solid.spv") };
+    struct restore_t
+    {
+        const std::string& bytes;
+        ~restore_t() { lgo::create_ofstream_destroy("shader/solid.spv") << bytes; }
+    } restore{ original };
+    lgo::create_ofstream_destroy("shader/solid.spv") << "bad";
+    bool rejected{};
+    try { lgo::engine_t failed{ lgo::size_2D{ 1000, 700 }, "Invalid shader" }; }
+    catch (const std::runtime_error& error) { rejected = std::string_view{ error.what() }.contains("SPIR-V"); }
+    check(rejected, "A truncated shader was passed to the driver.");
+    lgo::create_ofstream_destroy("shader/solid.spv") << std::string(20, 'x');
+    rejected = false;
+    try { lgo::engine_t failed{ lgo::size_2D{ 1000, 700 }, "Invalid shader magic" }; }
+    catch (const std::runtime_error& error) { rejected = std::string_view{ error.what() }.contains("magic"); }
+    check(rejected, "An invalid SPIR-V header was passed to the driver.");
+    lgo::create_ofstream_destroy("shader/solid.spv") << original;
+    lgo::engine_t recovered{ lgo::size_2D{ 1000, 700 }, "Shader restored" };
+    recovered.message_loop();
+    check(recovered.frame_rate() > 0, "Constructor failure leaked native or static GPU state.");
+    std::println("PASS: corrupt shader diagnostics and cleanup after failed initialization");
+}
+
+auto test_vulkan_errors(const std::string& mode) -> void
+{
+    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Vulkan errors" };
+    engine.flush();
+    auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(engine.device_get().getDispatcher())>>*>(engine.device_get().getDispatcher());
+    if (mode == "device-fallback")
+    {
+        auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
+            decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
+        static auto physical = static_cast<vk::PhysicalDevice::CType>(*engine.device_physical_get());
+        static decltype(instance->vkEnumeratePhysicalDevices) original_enumerate;
+        original_enumerate = instance->vkEnumeratePhysicalDevices;
+        instance->vkEnumeratePhysicalDevices = [](auto instance, auto* count, auto* devices)
+        {
+            if (devices) { devices[0] = physical; devices[1] = physical; }
+            *count = 2;
+            return static_cast<decltype(original_enumerate(instance, count, devices))>(0);
+        };
+        static decltype(instance->vkCreateDevice) original_create;
+        original_create = instance->vkCreateDevice;
+        static int attempts;
+        instance->vkCreateDevice = [](auto... args)
+        {
+            if (++attempts == 1) return static_cast<decltype(original_create(args...))>(-3);
+            return original_create(args...);
+        };
+        engine.device_lost();
+        check(!engine.message_loop() && engine.gpu_available(), "GPU initialization did not try the next candidate.");
+        check(attempts == 2, "GPU fallback did not attempt both candidates.");
+        instance->vkEnumeratePhysicalDevices = original_enumerate;
+        instance->vkCreateDevice = original_create;
+    }
+    else if (mode == "fence-timeout")
+    {
+        auto original = dispatch->vkWaitForFences;
+        dispatch->vkWaitForFences = [](auto... args) { return static_cast<decltype(original(args...))>(2); };
+        engine.draw();
+        dispatch->vkWaitForFences = original;
+        check(engine.gpu_available(), "A fence timeout incorrectly discarded the GPU.");
+    }
+    else if (mode == "acquire-suboptimal")
+    {
+        static decltype(dispatch->vkAcquireNextImageKHR) original;
+        original = dispatch->vkAcquireNextImageKHR;
+        dispatch->vkAcquireNextImageKHR = [](auto... args)
+        {
+            const auto result{ original(args...) };
+            return static_cast<int>(result) == 0 ? static_cast<decltype(result)>(1000001003) : result;
+        };
+        engine.draw();
+        dispatch->vkAcquireNextImageKHR = original;
+    }
+    else if (mode == "acquire-timeout" || mode == "acquire-not-ready" || mode == "acquire-outdated" || mode == "surface-lost")
+    {
+        static int code;
+        code = mode == "acquire-timeout" ? 2 : mode == "acquire-not-ready" ? 1 : mode == "acquire-outdated" ? -1000001004 : -1000000000;
+        auto original = dispatch->vkAcquireNextImageKHR;
+        dispatch->vkAcquireNextImageKHR = [](auto... args) { return static_cast<decltype(original(args...))>(code); };
+        engine.draw();
+        dispatch->vkAcquireNextImageKHR = original;
+        if (mode == "surface-lost") check(!engine.gpu_available(), "Lost surface did not schedule GPU recovery.");
+    }
+    else if (mode == "present-outdated" || mode == "present-surface-lost" || mode == "present-suboptimal")
+    {
+        static int code;
+        code = mode == "present-outdated" ? -1000001004 : mode == "present-suboptimal" ? 1000001003 : -1000000000;
+        static decltype(dispatch->vkQueuePresentKHR) original;
+        original = dispatch->vkQueuePresentKHR;
+        dispatch->vkQueuePresentKHR = [](auto... args)
+        {
+            // Consume the real present wait before injecting a result on a healthy
+            // device; otherwise a signaled semaphore is left pending in the mock.
+            original(args...);
+            return static_cast<decltype(original(args...))>(code);
+        };
+        engine.draw();
+        dispatch->vkQueuePresentKHR = original;
+    }
+    else if (mode == "out-of-memory")
+    {
+        auto original = dispatch->vkCreateBuffer;
+        dispatch->vkCreateBuffer = [](auto... args) { return static_cast<decltype(original(args...))>(-2); };
+        bool rejected{};
+        try
+        {
+            lgo::buffer_t buffer{ { .device_physical{ &engine.device_physical_get() }, .device{ &engine.device_get() },
+                .usage{ vk::BufferUsageFlagBits::eVertexBuffer }, .size{ 128 } } };
+        }
+        catch (const vk::OutOfDeviceMemoryError&) { rejected = true; }
+        dispatch->vkCreateBuffer = original;
+        check(rejected, "GPU allocation failure was swallowed.");
+    }
+    else if (mode == "depth-fallback" || mode == "no-depth-format" || mode == "no-surface-formats" ||
+        mode == "no-present-modes" || mode == "no-device-features" || mode == "image-memory-properties")
+    {
+        auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
+            decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
+        static decltype(instance->vkGetPhysicalDeviceFormatProperties) original_properties;
+        static decltype(instance->vkGetPhysicalDeviceFeatures2) original_features;
+        static decltype(instance->vkGetPhysicalDeviceMemoryProperties) original_memory;
+        original_properties = instance->vkGetPhysicalDeviceFormatProperties;
+        original_features = instance->vkGetPhysicalDeviceFeatures2;
+        original_memory = instance->vkGetPhysicalDeviceMemoryProperties;
+        auto original_formats = instance->vkGetPhysicalDeviceSurfaceFormatsKHR;
+        auto original_modes = instance->vkGetPhysicalDeviceSurfacePresentModesKHR;
+        static bool no_depth;
+        no_depth = mode == "no-depth-format";
+        if (mode == "depth-fallback" || no_depth)
+            instance->vkGetPhysicalDeviceFormatProperties = [](auto physical, auto format, auto* properties)
+            {
+                original_properties(physical, format, properties);
+                if (static_cast<vk::Format>(format) == vk::Format::eD32Sfloat ||
+                    (no_depth && static_cast<vk::Format>(format) == vk::Format::eD16Unorm)) properties->optimalTilingFeatures = 0;
+            };
+        else if (mode == "no-surface-formats")
+            instance->vkGetPhysicalDeviceSurfaceFormatsKHR = [](auto, auto, auto* count, auto*)
+            {
+                *count = 0;
+                return static_cast<decltype(original_formats(nullptr, {}, nullptr, nullptr))>(0);
+            };
+        else if (mode == "no-present-modes")
+            instance->vkGetPhysicalDeviceSurfacePresentModesKHR = [](auto, auto, auto* count, auto*)
+            {
+                *count = 0;
+                return static_cast<decltype(original_modes(nullptr, {}, nullptr, nullptr))>(0);
+            };
+        else if (mode == "no-device-features")
+            instance->vkGetPhysicalDeviceFeatures2 = [](auto physical, auto* features)
+            {
+                original_features(physical, features);
+                for (auto* chain = reinterpret_cast<vk::BaseOutStructure*>(features->pNext); chain; chain = chain->pNext)
+                    if (chain->sType == vk::StructureType::ePhysicalDeviceVulkan13Features)
+                        reinterpret_cast<vk::PhysicalDeviceVulkan13Features*>(chain)->dynamicRendering = vk::False;
+            };
+        else
+            instance->vkGetPhysicalDeviceMemoryProperties = [](auto physical, auto* properties)
+            {
+                original_memory(physical, properties);
+                for (std::uint32_t i{}; i < properties->memoryTypeCount; ++i) properties->memoryTypes[i].propertyFlags = 0;
+            };
+        if (mode == "image-memory-properties")
+        {
+            bool rejected{};
+            try
+            {
+                lgo::image_t image{ { .device_physical{ &engine.device_physical_get() }, .device{ &engine.device_get() },
+                    .width{ 16 }, .height{ 16 }, .format{ engine.depth_format_get() },
+                    .usage{ vk::ImageUsageFlagBits::eDepthStencilAttachment }, .property{ vk::MemoryPropertyFlagBits::eDeviceLocal } } };
+            }
+            catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
+            check(rejected, "Image allocation did not forward the requested memory properties.");
+        }
+        else
+        {
+            engine.device_lost();
+            check(!engine.message_loop(), "Unsupported capability closed the window before retrying.");
+            if (mode == "depth-fallback") check(engine.depth_format_get() == vk::Format::eD16Unorm,
+                "Depth format did not fall back to D16.");
+            else check(!engine.gpu_available(), "Missing Vulkan capability was treated as a successful rebuild.");
+        }
+        instance->vkGetPhysicalDeviceFormatProperties = original_properties;
+        instance->vkGetPhysicalDeviceSurfaceFormatsKHR = original_formats;
+        instance->vkGetPhysicalDeviceSurfacePresentModesKHR = original_modes;
+        instance->vkGetPhysicalDeviceFeatures2 = original_features;
+        instance->vkGetPhysicalDeviceMemoryProperties = original_memory;
+    }
+    const auto deadline{ std::chrono::steady_clock::now() + 10s };
+    do
+    {
+        check(!engine.message_loop(), "Recoverable Vulkan error closed the window.");
+        check(std::chrono::steady_clock::now() < deadline, "Vulkan error recovery timed out.");
+    } while (!engine.gpu_available());
+    for (int i{}; i < 4; ++i) check(!engine.message_loop(), "Recovered renderer closed.");
+    check(engine.frame_rate() > 0, "Rendering did not resume after a Vulkan error.");
+    std::println("PASS: Vulkan {} preserves event processing and resumes rendering", mode);
+}
+
 auto test_logging() -> void
 {
     std::filesystem::remove("concurrent-log.txt");
@@ -236,93 +519,6 @@ auto test_gui_names() -> void
     std::println("PASS: GUI names {}, automatic events {}, unique identities, copies, composite members and explicit logs",
         lgo::gui_object_names_enabled ? "enabled" : "disabled",
         lgo::gui_object_events_enabled ? "enabled" : "disabled");
-}
-
-auto test_capabilities() -> void
-{
-    vk::PhysicalDeviceMemoryProperties properties{};
-    properties.memoryTypeCount = 3;
-    for (std::uint32_t i{}; i < 3; ++i) properties.memoryTypes[i].propertyFlags = vk::MemoryPropertyFlagBits::eDeviceLocal;
-    vk::MemoryRequirements requirements{ .size{ 256 }, .alignment{ 1 }, .memoryTypeBits{ 4 } };
-    check(lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal) == 2,
-        "An unsupported memory type passed the type-bit mask.");
-    properties.memoryTypes[2].propertyFlags = vk::MemoryPropertyFlagBits::eHostVisible;
-    bool rejected{};
-    try { lgo::vulkan_memory_type_index(requirements, properties, vk::MemoryPropertyFlagBits::eDeviceLocal); }
-    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
-    check(rejected, "Missing device memory properties were not rejected.");
-    std::println("PASS: Vulkan memory type bits and required properties");
-}
-
-auto test_image_memory_properties() -> void
-{
-    lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Image memory properties" };
-    auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
-        decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
-    static decltype(instance->vkGetPhysicalDeviceMemoryProperties) original;
-    original = instance->vkGetPhysicalDeviceMemoryProperties;
-    instance->vkGetPhysicalDeviceMemoryProperties = [](auto physical, auto* properties)
-    {
-        original(physical, properties);
-        for (std::uint32_t i{}; i < properties->memoryTypeCount; ++i) properties->memoryTypes[i].propertyFlags = 0;
-    };
-    bool rejected{};
-    try
-    {
-        lgo::image_t image{ { .device_physical{ &engine.device_physical_get() }, .device{ &engine.device_get() },
-            .width{ 16 }, .height{ 16 }, .format{ vk::Format::eD32Sfloat },
-            .usage{ vk::ImageUsageFlagBits::eDepthStencilAttachment }, .property{ vk::MemoryPropertyFlagBits::eDeviceLocal } } };
-    }
-    catch (const lgo::vulkan_unsupported_t&) { rejected = true; }
-    instance->vkGetPhysicalDeviceMemoryProperties = original;
-    check(rejected, "Image allocation ignored the requested memory properties.");
-    engine.message_loop();
-    check(engine.frame_rate() > 0, "Image allocation failure prevented subsequent rendering.");
-    std::println("PASS: image allocation forwards required memory properties");
-}
-
-auto test_fatal_cleanup(const std::string& mode) -> void
-{
-    static int destroyed_buffers;
-    static bool destroyed_before_device;
-    bool reported{};
-    try
-    {
-        lgo::engine_t engine{ lgo::size_2D{ 1000, 700 }, "Fatal Vulkan cleanup" };
-        engine.flush();
-        auto* dispatch = const_cast<std::remove_const_t<std::remove_pointer_t<decltype(engine.device_get().getDispatcher())>>*>(engine.device_get().getDispatcher());
-        static decltype(dispatch->vkDestroyBuffer) destroy_buffer;
-        static decltype(dispatch->vkDestroyDevice) destroy_device;
-        destroy_buffer = dispatch->vkDestroyBuffer;
-        destroy_device = dispatch->vkDestroyDevice;
-        dispatch->vkDestroyBuffer = [](auto... args) { ++destroyed_buffers; destroy_buffer(args...); };
-        dispatch->vkDestroyDevice = [](auto... args)
-        {
-            destroyed_before_device = destroyed_buffers > 0;
-            destroy_device(args...);
-        };
-        auto* rect = engine.add_rect({ .pos{ 10, 10 }, .size{ 100, 80 }, .depth{ 0.1f }, .color{ lgo::std_white } });
-        if (mode == "fatal-remove")
-        {
-            auto original = dispatch->vkQueueWaitIdle;
-            dispatch->vkQueueWaitIdle = [](auto... args) { return static_cast<decltype(original(args...))>(-2); };
-            engine.remove_rect(rect);
-        }
-        else
-        {
-            static int code;
-            code = mode == "fatal-unknown" ? -13 : -2;
-            auto original = dispatch->vkQueueSubmit;
-            dispatch->vkQueueSubmit = [](auto... args) { return static_cast<decltype(original(args...))>(code); };
-            engine.draw();
-        }
-    }
-    catch (const vk::SystemError& error)
-    {
-        reported = error.code().value() == (mode == "fatal-unknown" ? -13 : -2);
-    }
-    check(reported && destroyed_before_device, "Fatal Vulkan errors lost the cause or leaked children beyond device destruction.");
-    std::println("PASS: {} reports the API error and destroys tracked buffers before the GPU device", mode);
 }
 
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
@@ -434,6 +630,30 @@ int main(int argc, char** argv)
     {
         const std::string mode{ argc > 1 ? argv[1] : "fence" };
         lgo::init_logfile("logfile/device-loss.txt");
+        if (mode == "fatal-submit" || mode == "fatal-remove" || mode == "fatal-unknown")
+        {
+            test_fatal_cleanup(mode);
+            return 0;
+        }
+        if (mode == "invalid-shader")
+        {
+            test_shader_failure();
+            return 0;
+        }
+        if (mode == "capabilities")
+        {
+            test_capabilities();
+            return 0;
+        }
+        if (mode == "fence-timeout" || mode == "acquire-timeout" || mode == "acquire-not-ready" ||
+            mode == "acquire-outdated" || mode == "surface-lost" || mode == "present-outdated" ||
+            mode == "present-surface-lost" || mode == "depth-fallback" || mode == "no-surface-formats" || mode == "out-of-memory" || mode == "device-fallback" ||
+            mode == "no-depth-format" || mode == "no-present-modes" || mode == "no-device-features" ||
+            mode == "image-memory-properties" || mode == "acquire-suboptimal" || mode == "present-suboptimal")
+        {
+            test_vulkan_errors(mode);
+            return 0;
+        }
         if (mode == "logging-crash")
         {
             std::filesystem::remove("crash-log.txt");
@@ -452,21 +672,6 @@ int main(int argc, char** argv)
         if (mode == "gui-names")
         {
             test_gui_names();
-            return 0;
-        }
-        if (mode == "capabilities")
-        {
-            test_capabilities();
-            return 0;
-        }
-        if (mode == "image-memory-properties")
-        {
-            test_image_memory_properties();
-            return 0;
-        }
-        if (mode == "fatal-submit" || mode == "fatal-remove" || mode == "fatal-unknown")
-        {
-            test_fatal_cleanup(mode);
             return 0;
         }
         if (mode == "names")

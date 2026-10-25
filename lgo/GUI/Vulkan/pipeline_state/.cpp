@@ -18,6 +18,7 @@ namespace lgo
         m_descriptor_set_layout = ctor.descriptor_set_layout;
         m_input_assembly.topology = ctor.topology;
         m_surface_format = ctor.surface_format;
+        m_depth_format = ctor.depth_format;
         return;
     }
 
@@ -191,7 +192,7 @@ namespace lgo
             {
                 .colorAttachmentCount{ 1 },
                 .pColorAttachmentFormats{ &m_surface_format },
-                .depthAttachmentFormat{ vk::Format::eD32Sfloat }
+                .depthAttachmentFormat{ m_depth_format }
             }
         };
         m_interface = vk::raii::Pipeline

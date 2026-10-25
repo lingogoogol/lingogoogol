@@ -35,13 +35,21 @@ namespace lgo
     auto buffer_t::init(const ctor_t& ctor) -> void
     {
         clear();
+        if (!ctor.device || !ctor.device_physical || !*(*ctor.device) || !*(*ctor.device_physical))
+            throw std::invalid_argument{ "Vulkan buffer creation requires a physical and logical device." };
         ctor_t ctor_copy{ ctor };
         if (ctor_copy.pixmap)
         {
-            ctor_copy.size = ctor_copy.pixmap->dim_get().x * ctor_copy.pixmap->dim_get().y;
+            const auto dimensions{ ctor_copy.pixmap->dim_get() };
+            if (dimensions.x <= 0 || dimensions.y <= 0 || static_cast<std::uint64_t>(dimensions.x) >
+                std::numeric_limits<std::uint64_t>::max() / static_cast<std::uint64_t>(dimensions.y))
+                throw std::invalid_argument{ "Vulkan staging buffer dimensions must be positive and fit in 64 bits." };
+            ctor_copy.size = static_cast<std::uint64_t>(dimensions.x) * static_cast<std::uint64_t>(dimensions.y);
             ctor_copy.usage = vk::BufferUsageFlagBits::eTransferSrc;
             ctor_copy.property = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
         }
+        if (!ctor_copy.size || !std::to_underlying(ctor_copy.usage))
+            throw std::invalid_argument{ "Vulkan buffers require a nonzero size and usage." };
         vk::BufferCreateInfo vertex_buffer_info
         {
             .size{ ctor_copy.size },

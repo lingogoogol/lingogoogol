@@ -33,7 +33,7 @@
 
 ### 1. 準備執行環境
 
-需要 Windows x64、支援 Vulkan 1.4 的圖形環境，以及可連線至 Google API 的網路。
+需要 Windows x64、支援 Vulkan 1.3 且具備必要 features 與圖形／呈現佇列的圖形環境，以及可連線至 Google API 的網路。
 
 準備編譯後的 `storage.exe` 與完整執行期資源，放在同一個目錄：
 
@@ -115,6 +115,9 @@ Set-Location "C:\path\to\runtime"
 ## 目前限制
 
 - 顯示卡驅動程式重設、移除或 GPU 異常可能造成 Vulkan 裝置遺失（`VK_ERROR_DEVICE_LOST`）。程式會重新選擇可用的 GPU、重建裝置及繪圖資源，保留目前目錄、傳輸工作與進度；重建期間畫面可能暫停更新，傳輸不會因此重新開始。重建失敗時至少間隔一秒再試，同一個 60 秒區間最多嘗試三次，超過後會關閉並寫回未使用的 `blob_queue`。未完成的傳輸不會在下次啟動時自動續傳；復原過程與失敗原因會記錄在 `logfile/`。
+- 啟動會檢查 Vulkan loader、必要的 instance／device extensions、圖形與呈現佇列、必要 features、SDR surface 格式及字型貼圖能力；GPU 不符條件時記錄具體原因，裝置初始化失敗時會嘗試其他合格 GPU。Debug 缺少 validation layer 或 debug-utils 時會略過可選診斷功能。使用 Vulkan 1.3，無須 `VK_KHR_get_surface_capabilities2`。
+- swapchain 過期或 suboptimal 會重建；surface 遺失會重建 surface 與 GPU 資源，保留傳輸工作，沿用上述重試上限。fence 與影像擷取每次最多等待 50 毫秒，逾時或尚無可用影像時返回事件迴圈。surface 格式變更時重建 pipeline；透明度模式依支援能力選擇，深度格式優先 D32，必要時退回 D16。
+- 不支援的資源尺寸、無適合記憶體類型、損壞的 SPIR-V 標頭及 Vulkan API 失敗會回報原因。無法恢復的錯誤會停止傳輸、保存未使用的佇列並顯示錯誤對話框；程式以非零狀態結束。尚未完成的傳輸仍不支援跨次啟動續傳。validation 訊息只記錄，不會從驅動程式的 C callback 拋出例外。
 - 工具列的「新增資料夾」與「清除」仍未完成實作。
 - 檔案內容使用 Base64URL 編碼，目前沒有實作檔案內容的端對端加密。
 - 請等待傳輸完成後再關閉；目前沒有完整的傳輸中斷續傳機制。上傳中斷時，未連結的 blob 可能留在雲端，目前不會自動清理。
@@ -165,10 +168,6 @@ Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan
 
 此選項只啟用物件命名，不會額外啟用 validation layers。若 loader 不支援 `VK_EXT_debug_utils`，會跳過命名；命名 API 失敗也不會中止程式。Wine 10 的 Vulkan 橋接層在命名 debug messenger 時會直接 abort，因此 Wine 下略過這一種診斷物件；其他物件及原生 Windows 仍照常命名。
 
-日誌寫入會重用檔案並同步多執行緒存取，每筆寫入後 `flush()`，不必等到關閉檔案才送出。成功 flush 的紀錄已送交作業系統，通常能在程式閃退後保留；閃退時正在寫入的最後一筆可能不完整。這不是每筆強制寫入實體磁碟的保證，斷電、系統當機或磁碟故障仍可能遺失快取中的資料。目的地無法寫入時會輸出錯誤並繼續執行，避免無限重試。
-
-GPU 測試的 `logging` 與 `logging-crash` 模式分別驗證並行寫入、失敗後恢復，以及未關閉 logger 便直接結束程序後的日誌保留。
-
 ### GUI 物件名稱與日誌
 
 Debug 建置會自動定義 `DEBUG_GUI_OBJECT_NAME`，Release 預設也會啟用。所有繼承 `GUI_object_t` 的物件（包含容器建立及內嵌子物件）都會取得建構位置與流水號組成的 `m_name`；複製物件會取得新的識別，指定運算則保留目的物件名稱。可用 `name_set()` 指定用途，`name_get()` 讀取名稱，明確呼叫物件的 `log()` 可列出名稱、識別及子物件資訊。
@@ -188,24 +187,25 @@ cmake --build "$project_workspace/build/x64-win32-pe-mingw_Release" --parallel 4
 
 將 `DEBUG_GUI_OBJECT_LOG` 設為 `ON` 可啟用詳細事件；將它與 `DEBUG_GUI_OBJECT_NAME` 都設為 `OFF` 則關閉自動 GUI 命名及事件，手動 `name_set()` 仍可使用。
 
-Vulkan 記憶體配置會同時檢查資源允許的類型位元遮罩與所需屬性；找不到合適類型時會回報明確錯誤。
+日誌寫入會重用檔案並同步多執行緒存取，每筆寫入後 `flush()`，不必等到關閉檔案才送出。成功 flush 的紀錄已送交作業系統，通常能在程式閃退後保留；閃退時正在寫入的最後一筆可能不完整。這不是每筆強制寫入實體磁碟的保證，斷電、系統當機或磁碟故障仍可能遺失快取中的資料。目的地無法寫入時會輸出錯誤並繼續執行，避免無限重試。
 
-影像配置會傳遞呼叫端指定的記憶體屬性，再依資源需求選擇符合條件的記憶體類型。
+啟動時若沒有可用的 Vulkan 驅動或合格 GPU，程式會顯示標題為 `Storage` 的 Windows 錯誤訊息視窗，列出失敗原因及日誌位置，然後以非零狀態結束。這個「啟動失敗對話框」不需要 GPU 成功初始化，也會在讀取帳戶金鑰前處理圖形初始化失敗。
 
-Vulkan validation 訊息只會記錄日誌；錯誤訊息不會從驅動程式的 C callback 拋出例外，避免直接終止程序。 Debug 會先檢查 validation layer 是否可用，缺少時記錄原因並繼續執行。
-
-初始化、移除圖元或傳輸畫面更新發生例外時，仍會清理追蹤中的 GPU 子資源，先釋放資源再銷毀裝置與原生視窗。
-
-GPU 裝置遺失與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
+GPU 裝置遺失、Vulkan 錯誤與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
 
 ```bash
 python3 tests/run_gpu_device_loss.py
+python3 tests/run_vulkan_startup_error.py
 python3 tests/run_folder_download.py
 ```
 
-測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
+測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 與 Vulkan 啟動測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
 
 GPU 測試也會檢查物件命名的 macro 開關、extension 不可用或命名失敗時的處理，以及視窗縮放和 GPU 重建後的物件命名。可分別在 Release 預設設定與 `DEBUG_VULKAN_NAME=OFF` 編譯後執行。
+
+GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複製與指定運算、內嵌子物件和生命週期日誌；可分別以命名開啟／關閉與 `DEBUG_GUI_OBJECT_LOG=ON` 建置驗證。也會以不執行解構函式的程序結束，檢查已 flush 的日誌仍可讀取。
+
+新增 Vulkan 回歸涵蓋資源清理、未知 API 錯誤、記憶體類型位元遮罩、空／未指定／不支援 surface 格式、透明度與深度格式退回、fence／acquire 逾時、out-of-date、surface 遺失、GPU 初始化退回、記憶體不足，以及 shader 損壞時的建構失敗清理。`tests/run_gpu_device_loss.py --mode surface-lost` 可只跑指定項目；可重複 `--mode`，`--mode transfer` 則執行本機上下載整合測試。
 
 資料夾下載測試另涵蓋 201 個分塊跨頁索引與內容亂序、空檔案及目錄、工作最後一次回呼的生命週期，以及準備、索引、內容、解碼、大小與本機輸出錯誤。測試確認失敗原因保留在畫面、失敗後的在途回應不再寫檔，其他下載仍可完成；也會注入八種異常或部分失敗的批次回應，檢查安全重試及已成功子請求的保留。
 
