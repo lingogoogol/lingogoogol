@@ -24,13 +24,16 @@ export namespace lgo
         };
 
         buffer_t() = default;
+        buffer_t(buffer_t&&) = default;
+        auto operator=(buffer_t&& other) noexcept -> buffer_t&;
+        auto clear() noexcept -> void;
         buffer_t(const ctor_t& ctor);
         auto init(const ctor_t& ctor) -> void;
 
         auto interface_get() -> vk::raii::Buffer&;
         auto memory_get() -> memory_t&;
     private:
-        vk::raii::Buffer m_interface{ nullptr };
         memory_t m_memory{};
+        vk::raii::Buffer m_interface{ nullptr };
     };
 }

@@ -46,7 +46,9 @@ namespace lgo
     }
 
     auto rect_primitive_t::upload_vertex_data() -> void
+    try
     {
+        if (!m_engine->gpu_available()) return;
         std::unique_lock lock{ m_mutex };
         float pos_x{ static_cast<float>(m_pos.x) / static_cast<float>(m_engine->get_window_size().x) * 2.0f - 1.0f };
         float pos_y{ static_cast<float>(m_pos.y) / static_cast<float>(m_engine->get_window_size().y) * 2.0f - 1.0f };
@@ -131,6 +133,11 @@ namespace lgo
             upload_vertex_data(vertex_data);
         }
         return;
+    }
+
+    catch (const vk::DeviceLostError&)
+    {
+        m_engine->device_lost();
     }
 
     template<typename t_type>
@@ -357,8 +364,23 @@ namespace lgo
     {
         m_texture_enable = ctor.image_view;
 
+        create_gpu();
+    }
+
+    auto rect_primitive_t::release_gpu() noexcept -> void
+    {
+        m_descriptor_set.clear();
+        m_descriptor_pool.clear();
+        m_vertex_buffer.clear();
+    }
+
+    auto rect_primitive_t::create_gpu() -> void
+    try
+    {
+        if (!m_engine->gpu_available()) return;
         create_vertex_buffer();
         upload_vertex_data();
+        if (!m_engine->gpu_available()) return;
 
         if (m_texture_enable)
         {
@@ -404,6 +426,11 @@ namespace lgo
         }
 
         return;
+    }
+
+    catch (const vk::DeviceLostError&)
+    {
+        m_engine->device_lost();
     }
 
     auto rect_primitive_t::set_pos(pos_2D pos) -> void

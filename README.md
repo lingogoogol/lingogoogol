@@ -110,8 +110,7 @@ Set-Location "C:\path\to\runtime"
 
 ## 目前限制
 
-- Vulkan 裝置遺失時，關閉流程會記錄等待 GPU 失敗的原因並繼續清理；字型快取會在 GPU 裝置銷毀前釋放。
-
+- 顯示卡驅動程式重設、移除或 GPU 異常可能造成 Vulkan 裝置遺失（`VK_ERROR_DEVICE_LOST`）。程式會重新選擇可用的 GPU、重建裝置及繪圖資源，保留目前目錄、傳輸工作與進度；重建期間畫面可能暫停更新，傳輸不會因此重新開始。重建失敗時至少間隔一秒再試，同一個 60 秒區間最多嘗試三次，超過後會關閉並寫回未使用的 `blob_queue`。未完成的傳輸不會在下次啟動時自動續傳；復原過程與失敗原因會記錄在 `logfile/`。
 - 工具列的「新增資料夾」與「清除」仍未完成實作。
 - 檔案內容使用 Base64URL 編碼，目前沒有實作檔案內容的端對端加密。
 - 請等待傳輸完成後再關閉；目前沒有完整的傳輸中斷續傳機制。上傳中斷時，未連結的 blob 可能留在雲端，目前不會自動清理。
@@ -153,6 +152,14 @@ cmake --install "$project_workspace/build/x64-win32-pe-mingw_Release"
 ```
 
 完成後，依「使用說明」補上字型與帳戶設定。建置也會產生 `compare.exe` 與 `filegen.exe` 輔助工具；`compare.exe` 可逐位元組比對下載檔案與原始檔案。
+
+GPU 裝置遺失回歸測試可在完成建置與安裝後，從原始碼目錄執行：
+
+```bash
+python3 tests/run_gpu_device_loss.py
+```
+
+測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
 
 ## 歡迎貢獻
 

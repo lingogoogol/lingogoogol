@@ -52,7 +52,13 @@ export namespace lgo
         vk::raii::Fence m_fence{ nullptr };
         std::uint64_t m_frame_number{ 0 };
         bool m_exit{ false };
-        bool m_initialized{ false };
+        bool m_device_lost{};
+        bool m_recovering{};
+        unsigned m_recovery_attempts{};
+        std::chrono::steady_clock::time_point m_recovery_window{};
+        std::chrono::steady_clock::time_point m_next_recovery{};
+        std::function<void()> m_release_textures{};
+        std::function<void()> m_restore_textures{};
         bool m_tearing_supported{};
         std::recursive_mutex m_rect_mutex{};
         std::set<rect_primitive_t*> m_rect_primitive{};
@@ -92,6 +98,9 @@ export namespace lgo
         )
         -> vk::Bool32;
 
+        auto create_device() -> void;
+        auto release_device() noexcept -> void;
+        auto recover_device() -> void;
         auto recreate_swap_chain() -> bool;
         auto update_window_size() -> void;
         auto render_frame() -> void;
@@ -123,6 +132,9 @@ export namespace lgo
         auto message_loop() -> bool;
         auto draw() -> void;
         auto flush() -> void;
+        auto device_lost() noexcept -> void;
+        auto gpu_available() const noexcept -> bool;
+        auto texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void;
         auto log(std::uint32_t tab_count) const -> void;
 
         auto format_get() const -> vk::Format;

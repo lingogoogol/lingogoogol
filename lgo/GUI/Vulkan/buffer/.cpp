@@ -8,6 +8,24 @@ import lgo.GUI.texture;
 
 namespace lgo
 {
+    auto buffer_t::clear() noexcept -> void
+    {
+        // Bound objects must be destroyed before their backing memory.
+        m_interface.clear();
+        m_memory = {};
+    }
+
+    auto buffer_t::operator=(buffer_t&& other) noexcept -> buffer_t&
+    {
+        if (this != &other)
+        {
+            clear();
+            m_memory = std::move(other.m_memory);
+            m_interface = std::move(other.m_interface);
+        }
+        return *this;
+    }
+
     buffer_t::buffer_t(const ctor_t& ctor)
     {
         init(ctor);
@@ -16,6 +34,7 @@ namespace lgo
 
     auto buffer_t::init(const ctor_t& ctor) -> void
     {
+        clear();
         ctor_t ctor_copy{ ctor };
         if (ctor_copy.pixmap)
         {

@@ -30,6 +30,9 @@ export namespace lgo
         };
 
         image_t() = default;
+        image_t(image_t&&) = default;
+        auto operator=(image_t&& other) noexcept -> image_t&;
+        auto clear() noexcept -> void;
         image_t(const ctor_t& ctor);
         auto init(const ctor_t& ctor) -> void;
 
@@ -49,8 +52,8 @@ export namespace lgo
     private:
         std::string m_name{};
         const pixmap_t* m_pixmap{};
-        vk::raii::Image m_interface{ nullptr };
-        buffer_t m_buffer{};
         memory_t m_memory{};
+        buffer_t m_buffer{};
+        vk::raii::Image m_interface{ nullptr };
     };
 }

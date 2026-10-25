@@ -255,6 +255,7 @@ namespace lgo
                 return;
             }
             text_line_t* ptr{ *begin };
+            if (!ptr->m_engine->gpu_available()) return;
             m_pending.erase(begin);
             pending_lock.unlock();
             ptr->load();
@@ -268,11 +269,85 @@ namespace lgo
         return;
     }
 
+    auto text_line_t::release_gpu() -> void
+    {
+        // Keep cache nodes and image-view addresses stable: visible rectangles reference them.
+        for (auto& [face, glyphs] : m_font)
+        {
+            for (auto& [code, glyph] : glyphs)
+            {
+                glyph.m_image_view = {};
+                glyph.m_image.clear();
+            }
+        }
+    }
+
+    auto text_line_t::upload_glyph(glyph_t& glyph, engine_t* engine, vk::raii::CommandBuffer& commands) -> void
+    {
+        pixmap_t empty{};
+        empty.dim_set({ 1, 1 });
+        empty[0, 0] = std::byte{ 0 };
+        const auto& pixmap{ glyph.m_font.pixmap_get() };
+        glyph.m_image.init
+        ({
+            .name{ "font glyph" },
+            .device_physical{ &engine->device_physical_get() },
+            .device{ &engine->device_get() },
+            .command_buffer{ &commands },
+            .pixmap{ pixmap.dim_get() == size_2D{ 0, 0 } ? &empty : &pixmap }
+        });
+        glyph.m_image_view = image_view_t
+        {{
+            .device{ &engine->device_get() },
+            .image{ &glyph.m_image.interface_get() },
+            .format{ vk::Format::eR8Unorm },
+            .aspect{ vk::ImageAspectFlagBits::eColor }
+        }};
+    }
+
+    auto text_line_t::restore_gpu(engine_t* engine) -> void
+    {
+        auto commands{ engine->command_buffer_create() };
+        for (auto& [face, glyphs] : m_font)
+        {
+            for (auto& [code, glyph] : glyphs) upload_glyph(glyph, engine, commands);
+        }
+        commands.end();
+        const vk::SubmitInfo submit{ .commandBufferCount{ 1 }, .pCommandBuffers{ &*commands } };
+        engine->command_queue_get().submit(submit, nullptr);
+        engine->command_queue_get().waitIdle();
+    }
+
     auto text_line_t::load() -> void
+    {
+        m_engine->texture_recovery_set(&release_gpu, [engine = m_engine] { restore_gpu(engine); });
+        if (m_engine->gpu_available())
+        {
+            try
+            {
+                load_gpu();
+                std::unique_lock lock{ m_load_mutex };
+                m_pending.erase(this);
+                return;
+            }
+            catch (const vk::DeviceLostError&)
+            {
+                m_engine->device_lost();
+            }
+        }
+        // Retry an interrupted glyph/layout update after device recovery. Never unwind
+        // into HTTP completion bookkeeping or replay a user's upload/download action.
+        std::unique_lock lock{ m_load_mutex };
+        m_load_pending = true;
+        m_pending.emplace(this);
+    }
+
+    auto text_line_t::load_gpu() -> void
     {
         std::unique_lock lock{ m_mutex };
         m_load_pending = false;
         m_div.clear_state();
+        m_rect_id.clear();
         std::wstring text_w{ to_wstring(m_text) };
         vk::raii::CommandBuffer command_buffer{ m_engine->command_buffer_create() };
         m_glyph.resize(text_w.size());
@@ -292,41 +367,8 @@ namespace lgo
             {
                 glyph_t glyph{};
                 glyph.m_font.init(text_w[i], face, index);
-                pixmap_t pixmap_empty{};//...move to init
-                pixmap_empty.dim_set({ 1, 1 });
-                pixmap_empty[0, 0] = std::byte{ 0 };
-                const pixmap_t* pixmap_ptr{};
-                if (glyph.m_font.pixmap_get().dim_get() == size_2D{ 0, 0 })
-                {
-                    pixmap_ptr = &pixmap_empty;
-                }
-                else
-                {
-                    pixmap_ptr = &glyph.m_font.pixmap_get();
-                }
-                glyph.m_image.init
-                ({
-                    .name
-                    {
-                        "text_line_t::m_font[family = " +
-                        face->family_get() +
-                        ", style = " + face->style_get() +
-                        "][code = " +
-                        std::to_string(static_cast<std::uint32_t>(text_w[i])) + "].m_image"
-                    },
-                    .device_physical{ &m_engine->device_physical_get() },
-                    .device{ &m_engine->device_get() },
-                    .command_buffer{ &command_buffer },
-                    .pixmap{ pixmap_ptr }
-                });
+                upload_glyph(glyph, m_engine, command_buffer);
                 glyph.m_index = m_font_heap_index;
-                glyph.m_image_view = image_view_t
-                { {
-                    .device{ &m_engine->device_get() },
-                    .image{ &glyph.m_image.interface_get() },
-                    .format{ vk::Format::eR8Unorm },
-                    .aspect{ vk::ImageAspectFlagBits::eColor }
-                } };
                 ++m_font_heap_index;
                 m_glyph[i] = &face_loaded.emplace(text_w[i], std::move(glyph)).first->second;
             }

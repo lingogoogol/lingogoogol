@@ -63,6 +63,8 @@ export namespace lgo
 
         constexpr static std::size_t vertex_data_len{ 4 };
 
+        auto release_gpu() noexcept -> void;
+        auto create_gpu() -> void;
         auto create_vertex_buffer() -> void;
         auto upload_vertex_data() -> void;
         template<typename t_type>

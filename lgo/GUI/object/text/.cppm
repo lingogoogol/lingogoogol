@@ -1,6 +1,7 @@
 export module lgo.GUI.object.text;
 
 import std;
+import external.Vulkan;
 
 import lgo.math.vec;
 import lgo.GUI.misc;
@@ -108,6 +109,10 @@ export namespace lgo
 
         static std::map<const font_face_t*, std::map<char32_t, glyph_t>> m_font;
         static std::uint64_t m_font_heap_index;
+        static auto release_gpu() -> void;
+        static auto restore_gpu(engine_t* engine) -> void;
+        static auto upload_glyph(glyph_t& glyph, engine_t* engine, vk::raii::CommandBuffer& commands) -> void;
+        auto load_gpu() -> void;
 
         //Populate m_div and m_glyph based on other members.
         auto load() -> void;

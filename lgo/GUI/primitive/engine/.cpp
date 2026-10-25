@@ -64,18 +64,19 @@ namespace lgo {
     auto engine_t::GLFW_callback_cursor_enter(GLFWwindow* window, int entered) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback(ptr->m_callback_mouse_enter, entered);
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
     
     auto engine_t::GLFW_callback_cursor_move(GLFWwindow* window, double x, double y) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback
@@ -84,13 +85,14 @@ namespace lgo {
                 pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
             );
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_mouse_button(GLFWwindow* window, int button, int action, int mods) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback
@@ -101,13 +103,14 @@ namespace lgo {
                 mods
             );
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback
@@ -116,28 +119,31 @@ namespace lgo {
                 size_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) }
             );
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mod) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback(ptr->m_callback_key, key, action, mod);
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
     auto engine_t::GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
-        if (ptr->m_refresh_error) return;
+        if (ptr->m_recovering || ptr->m_refresh_error) return;
         try
         {
             call_callback(ptr->m_callback_cha, static_cast<char32_t>(codepoint));
         }
+        catch (const vk::DeviceLostError&) { ptr->device_lost(); }
         catch (...) { ptr->m_refresh_error = std::current_exception(); }
     }
 
@@ -393,6 +399,25 @@ namespace lgo {
         glfwCreateWindowSurface(*m_instance, m_window, nullptr, &surface_c);
         m_surface = vk::raii::SurfaceKHR{ m_instance, surface_c };
 
+        create_device();
+
+        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
+        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
+        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
+        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
+        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
+        glfwSetKeyCallback(m_window, GLFW_callback_key);
+        glfwSetCharCallback(m_window, GLFW_callback_char);
+
+        rect_primitive_t::init(this);
+        m_device.waitIdle();
+        // Register only after the swapchain and rendering resources are ready.
+        glfwSetWindowRefreshCallback(m_window, GLFW_callback_window_refresh);
+        return;
+    }
+
+    auto engine_t::create_device() -> void
+    {
         //Create a physical device.
         std::vector<vk::raii::PhysicalDevice> device_available{ m_instance.enumeratePhysicalDevices() };
         std::multimap<int, vk::raii::PhysicalDevice> device_score{};
@@ -454,7 +479,7 @@ namespace lgo {
         }
         if (device_score.empty())
         {
-            throw;
+            throw std::runtime_error{ "No compatible Vulkan GPU is available." };
         }
         else
         {
@@ -581,19 +606,95 @@ namespace lgo {
 
         recreate_swap_chain();
 
-        glfwSetWindowUserPointer(m_window, reinterpret_cast<void*>(this));
-        glfwSetCursorEnterCallback(m_window, GLFW_callback_cursor_enter);
-        glfwSetCursorPosCallback(m_window, GLFW_callback_cursor_move);
-        glfwSetMouseButtonCallback(m_window, GLFW_callback_mouse_button);
-        glfwSetScrollCallback(m_window, GLFW_callback_wheel);
-        glfwSetKeyCallback(m_window, GLFW_callback_key);
-        glfwSetCharCallback(m_window, GLFW_callback_char);
+    }
 
-        rect_primitive_t::init(this);
-        m_device.waitIdle();
-        // Register only after the swapchain and rendering resources are ready.
-        glfwSetWindowRefreshCallback(m_window, GLFW_callback_window_refresh);
-        return;
+    auto engine_t::release_device() noexcept -> void
+    {
+        m_command_buffer.clear();
+        m_fence.clear();
+        m_semaphore_image.clear();
+        m_semaphore_draw.clear();
+        m_depth_image_view = {};
+        m_depth_image.clear();
+        m_swap_chain_image_view.clear();
+        m_swap_chain_image.clear();
+        m_swap_chain.clear();
+        m_pipeline_state = {};
+        m_command_pool.clear();
+        m_command_queue.clear();
+        m_device.clear();
+        m_device_physical.clear();
+        m_frame_number = 0;
+        m_swap_chain_dirty = true;
+    }
+
+    auto engine_t::device_lost() noexcept -> void
+    {
+        m_device_lost = true;
+    }
+
+    auto engine_t::gpu_available() const noexcept -> bool
+    {
+        return !m_device_lost;
+    }
+
+    auto engine_t::texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void
+    {
+        m_release_textures = std::move(release);
+        m_restore_textures = std::move(restore);
+    }
+
+    auto engine_t::recover_device() -> void
+    {
+        const auto now{ std::chrono::steady_clock::now() };
+        if (now < m_next_recovery)
+        {
+            return;
+        }
+        if (now - m_recovery_window > std::chrono::seconds{ 60 })
+        {
+            m_recovery_window = now;
+            m_recovery_attempts = 0;
+        }
+        // Bound repeated driver failures, including devices lost immediately after recreation.
+        if (++m_recovery_attempts > 3)
+        {
+            log_file("GPU recovery failed repeatedly; closing and saving the blob queue.\n");
+            m_exit = true;
+            return;
+        }
+        std::unique_lock lock{ m_rect_mutex };
+        m_recovering = true;
+        try
+        {
+            log_file("VK_ERROR_DEVICE_LOST: rebuilding GPU resources.\n");
+            for (auto* rect : m_rect_primitive)
+            {
+                rect->release_gpu();
+            }
+            if (m_release_textures) m_release_textures();
+            rect_primitive_t::uninit();
+            release_device();
+            create_device();
+            m_device_lost = false;
+            rect_primitive_t::init(this);
+            if (m_restore_textures) m_restore_textures();
+            for (auto* rect : m_rect_primitive)
+            {
+                rect->create_gpu();
+            }
+            m_device.waitIdle();
+            if (m_device_lost) throw std::runtime_error{ "The rebuilt GPU was lost." };
+            m_frame_time.clear();
+            log_file("GPU recovery completed; transfer tasks were preserved.\n");
+        }
+        catch (const std::exception& error)
+        {
+            m_device_lost = true;
+            m_next_recovery = now + std::chrono::seconds{ 1 };
+            log_file(std::string{ "GPU recovery attempt failed: " } + error.what() + "\n");
+        }
+        m_recovering = false;
     }
 
     auto engine_t::recreate_swap_chain() -> bool
@@ -779,7 +880,11 @@ namespace lgo {
         {
             std::rethrow_exception(std::exchange(m_refresh_error, {}));
         }
-        if (glfwWindowShouldClose(m_window))
+        if (m_device_lost && !glfwWindowShouldClose(m_window))
+        {
+            recover_device();
+        }
+        if (m_exit || glfwWindowShouldClose(m_window))
         {
             return true;
         }
@@ -798,7 +903,7 @@ namespace lgo {
     auto engine_t::render_frame() -> void
     {
         // Native messages can re-enter during layout or swapchain operations; never nest GPU work.
-        if (m_rendering || m_refresh_error || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+        if (m_rendering || m_recovering || m_device_lost || m_refresh_error || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
         {
             return;
         }
@@ -822,7 +927,9 @@ namespace lgo {
     }
 
     auto engine_t::draw() -> void
+    try
     {
+        if (m_device_lost || m_recovering) return;
         int width{}, height{};
         glfwGetFramebufferSize(m_window, &width, &height);
         if (width <= 0 || height <= 0)
@@ -999,9 +1106,16 @@ namespace lgo {
         return;
     }
 
+    catch (const vk::DeviceLostError&)
+    {
+        device_lost();
+    }
+
     auto engine_t::flush() -> void
     {
-        m_command_queue.waitIdle();
+        if (m_device_lost) return;
+        try { m_command_queue.waitIdle(); }
+        catch (const vk::DeviceLostError&) { device_lost(); }
         return;
     }
 

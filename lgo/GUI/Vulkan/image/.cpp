@@ -8,6 +8,28 @@ import lgo.GUI.texture;
 
 namespace lgo
 {
+    auto image_t::clear() noexcept -> void
+    {
+        // Bound objects must be destroyed before their backing memory.
+        m_interface.clear();
+        m_buffer.clear();
+        m_memory = {};
+    }
+
+    auto image_t::operator=(image_t&& other) noexcept -> image_t&
+    {
+        if (this != &other)
+        {
+            clear();
+            m_name = std::move(other.m_name);
+            m_pixmap = std::move(other.m_pixmap);
+            m_memory = std::move(other.m_memory);
+            m_buffer = std::move(other.m_buffer);
+            m_interface = std::move(other.m_interface);
+        }
+        return *this;
+    }
+
     image_t::image_t(const ctor_t& ctor)
     {
         init(ctor);
@@ -16,6 +38,7 @@ namespace lgo
 
     auto image_t::init(const ctor_t& ctor) -> void
     {
+        clear();
         ctor_t ctor_copy{ ctor };
         vk::raii::Buffer* buffer{};
         if (ctor_copy.buffer)
