@@ -16,6 +16,7 @@ target_link_libraries(
         lgo.math.vec
         lgo.GUI.misc
         lgo.GUI.primitive
+        lgo.GUI.object.object
         lgo.GUI.object.depth_tracker
         lgo.GUI.object.text_scroll
         lgo.GUI.object.click_area

@@ -81,6 +81,7 @@ namespace lgo
 
     auto state_t::log(std::uint32_t tab_count) const -> void
     {
+        if constexpr (!gui_object_names_enabled) return;
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: state_t\n");
         log_file(tab(tab_count + 1) + "current:\n");

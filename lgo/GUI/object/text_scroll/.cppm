@@ -271,6 +271,7 @@ export namespace lgo
     template<typename t_text>
     auto text_scroll_impl_t<t_text>::log(std::uint32_t tab_count) const -> void
     {
+        if constexpr (!gui_object_names_enabled) return;
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: text_scroll_impl_t<>\n");
         t_text::log(tab_count + 1);

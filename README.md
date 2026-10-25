@@ -169,6 +169,25 @@ Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan
 
 GPU 測試的 `logging` 與 `logging-crash` 模式分別驗證並行寫入、失敗後恢復，以及未關閉 logger 便直接結束程序後的日誌保留。
 
+### GUI 物件名稱與日誌
+
+Debug 建置會自動定義 `DEBUG_GUI_OBJECT_NAME`，Release 預設也會啟用。所有繼承 `GUI_object_t` 的物件（包含容器建立及內嵌子物件）都會取得建構位置與流水號組成的 `m_name`；複製物件會取得新的識別，指定運算則保留目的物件名稱。可用 `name_set()` 指定用途，`name_get()` 讀取名稱，明確呼叫物件的 `log()` 可列出名稱、識別及子物件資訊。
+
+GUI 名稱會增加物件建立時的字串配置、流水號操作與記憶體使用；只啟用命名不會自動寫入生命週期日誌。詳細事件另以 `DEBUG_GUI_OBJECT_LOG` 控制：Debug 自動啟用，Release 預設關閉。啟用後記錄建立、複製、重新命名、顯示、隱藏、容器掛接與銷毀。大量 GUI 更新可能產生大量日誌並增加 I/O 成本，需要排查物件生命週期時才在 Release 開啟。CMake 啟用事件日誌時也會啟用 GUI 命名。
+
+以下為建議的 Release 設定：
+
+```bash
+cmake -S "$project_workspace/source" \
+      -B "$project_workspace/build/x64-win32-pe-mingw_Release" \
+      -DDEBUG_VULKAN_NAME=ON \
+      -DDEBUG_GUI_OBJECT_NAME=ON \
+      -DDEBUG_GUI_OBJECT_LOG=OFF
+cmake --build "$project_workspace/build/x64-win32-pe-mingw_Release" --parallel 4
+```
+
+將 `DEBUG_GUI_OBJECT_LOG` 設為 `ON` 可啟用詳細事件；將它與 `DEBUG_GUI_OBJECT_NAME` 都設為 `OFF` 則關閉自動 GUI 命名及事件，手動 `name_set()` 仍可使用。
+
 GPU 裝置遺失與資料夾下載回歸測試可在完成建置與安裝後，從原始碼目錄執行：
 
 ```bash

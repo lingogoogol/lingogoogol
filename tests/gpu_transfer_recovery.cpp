@@ -33,6 +33,13 @@ try {
     lgo::font_face_t face{"font/NotoSansTC-VariableFont_wght.ttf", static_cast<std::uint64_t>(lgo::std_font_size.x)};
     lgo::font_preference_t::default_get().push_back(&face);
     lgo::engine_t engine{lgo::size_2D{1536,1024}, "upload-regression"};
+    struct font_cleanup_t {
+        lgo::engine_t& engine;
+        ~font_cleanup_t() {
+            try { engine.flush(); } catch (...) {}
+            lgo::text_line_t::free();
+        }
+    } cleanup{engine};
     lgo::depth_tracker_t depth{};
     lgo::state_t gui{&engine, &depth};
     load_state_t loads{};

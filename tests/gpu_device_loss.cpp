@@ -153,6 +153,76 @@ auto test_logging() -> void
     std::println("PASS: concurrent log writes, unwritable destination and reopen");
 }
 
+// A CPU-only object exercises names without depending on font or GPU setup.
+class naming_probe_t: public lgo::GUI_object_t
+{
+public:
+    naming_probe_t() = default;
+    naming_probe_t(lgo::engine_t*, lgo::depth_tracker_t*) {}
+    auto get_pos() const -> lgo::pos_2D override { return {}; }
+    auto set_pos(lgo::pos_2D) -> void override {}
+    auto get_size() const -> lgo::size_2D override { return {}; }
+    auto get_margin() const -> lgo::size_1D override { return {}; }
+    auto log(std::uint32_t tabs) const -> void override { GUI_object_t::log(tabs); }
+    auto show_impl(bool base) -> void override { if (show_begin(base)) show_end(base); }
+    auto hide_impl(bool base) -> void override { if (hide_begin(base)) hide_end(base); }
+};
+
+auto test_gui_names() -> void
+{
+    // Capture only this test's diagnostics; logger buffers in memory before init.
+    lgo::get_logfile_path().clear();
+    lgo::get_logfile_string().clear();
+    {
+        naming_probe_t first, second;
+        if constexpr (lgo::gui_object_names_enabled)
+        {
+            check(!first.name_get().empty() && first.name_get() != second.name_get(),
+                "Automatic GUI names must be nonempty and unique.");
+            check(first.name_get().find("naming_probe_t") != std::string::npos,
+                "Automatic name lost its construction context.");
+        }
+        else check(first.name_get().empty() && second.name_get().empty(), "Disabled GUI naming generated names.");
+        first.name_set("transfer progress");
+        check(first.name_get() == "transfer progress", "Explicit GUI names did not work.");
+        naming_probe_t copied{ first };
+        if constexpr (lgo::gui_object_names_enabled)
+            check(copied.name_get() != first.name_get() && copied.name_get().contains("transfer progress"),
+                "A copied GUI object reused its source identity.");
+        const auto destination_name{ second.name_get() };
+        second = first;
+        check(second.name_get() == destination_name, "Assignment replaced the destination GUI identity.");
+        first.show();
+        first.hide();
+        if constexpr (!lgo::gui_object_events_enabled)
+            check(lgo::get_logfile_string().empty(), "Naming alone emitted automatic GUI event logs.");
+        first.log(0);
+        lgo::state_t state;
+        state.add_object<naming_probe_t>();
+        state.log(0);
+        state.clear_state();
+        // Composite members are constructed directly, outside state_t's factory.
+        lgo::button_plus_t plus;
+        lgo::text_line_std_t text;
+        if constexpr (lgo::gui_object_names_enabled)
+            check(!plus.name_get().empty() && !text.name_get().empty(), "Composite objects were unnamed.");
+        plus.log(0);
+        text.log(0);
+    }
+    const auto& output{ lgo::get_logfile_string() };
+    for (const auto marker : { "GUI create", "GUI rename", "GUI copy", "GUI show", "GUI hide", "GUI attach", "GUI destroy" })
+        check(output.contains(marker) == lgo::gui_object_events_enabled, "GUI lifecycle log switch was not respected.");
+    if constexpr (lgo::gui_object_names_enabled)
+    {
+        for (const auto marker : { "type: GUI_object_t", "type: click_area_t", "type: rect_t" })
+            check(output.contains(marker), "Explicit nested object logging was missing.");
+    }
+    else check(output.empty(), "Disabled GUI naming still emitted object logs.");
+    std::println("PASS: GUI names {}, automatic events {}, unique identities, copies, composite members and explicit logs",
+        lgo::gui_object_names_enabled ? "enabled" : "disabled",
+        lgo::gui_object_events_enabled ? "enabled" : "disabled");
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -275,6 +345,11 @@ int main(int argc, char** argv)
         if (mode == "logging")
         {
             test_logging();
+            return 0;
+        }
+        if (mode == "gui-names")
+        {
+            test_gui_names();
             return 0;
         }
         if (mode == "names")

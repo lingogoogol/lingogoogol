@@ -484,6 +484,7 @@ export namespace lgo
             break;
         }
         m_current.m_object.emplace(m_current_id_object, object);
+        if constexpr (gui_object_events_enabled) object->debug_attach(this, m_current_id_object);
         object->set_pos
         (
             pos_2D{ t_y ? object_pos_sideways : object_pos_forward, t_y ? object_pos_forward : object_pos_sideways }
@@ -728,6 +729,7 @@ export namespace lgo
     template<bool t_y, bool t_hard>
     auto GUI_div_impl_t<t_y, t_hard>::log(std::uint32_t tab_count) const -> void
     {
+        if constexpr (!gui_object_names_enabled) return;
         log_file(tab(tab_count) + "{\n");
         std::string type_str{};
         if (t_y)

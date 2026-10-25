@@ -179,6 +179,7 @@ namespace lgo
 
     auto click_area_t::log(std::uint32_t tab_count) const -> void
     {
+        if constexpr (!gui_object_names_enabled) return;
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: click_area_t\n");
         GUI_object_t::log(tab_count + 1);

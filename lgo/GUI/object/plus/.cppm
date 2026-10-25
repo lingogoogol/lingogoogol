@@ -47,6 +47,7 @@ export namespace lgo
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;
         auto get_margin() const -> size_1D override;
+        auto log(std::uint32_t tab_count) const -> void override;
 
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;

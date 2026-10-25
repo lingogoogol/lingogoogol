@@ -46,6 +46,12 @@ option(DEBUG_VULKAN_NAME "Name Vulkan objects outside Debug builds." ON)
 target_compile_definitions(common INTERFACE
     $<$<OR:$<CONFIG:Debug>,$<BOOL:${DEBUG_VULKAN_NAME}>>:DEBUG_VULKAN_NAME>
 )
+option(DEBUG_GUI_OBJECT_NAME "Name GUI objects outside Debug builds." ON)
+option(DEBUG_GUI_OBJECT_LOG "Log GUI lifecycle events outside Debug builds." OFF)
+target_compile_definitions(common INTERFACE
+    $<$<OR:$<CONFIG:Debug>,$<BOOL:${DEBUG_GUI_OBJECT_NAME}>,$<BOOL:${DEBUG_GUI_OBJECT_LOG}>>:DEBUG_GUI_OBJECT_NAME>
+    $<$<OR:$<CONFIG:Debug>,$<BOOL:${DEBUG_GUI_OBJECT_LOG}>>:DEBUG_GUI_OBJECT_LOG>
+)
 set(
     COMMON_COMPILE_OPT_MSVC
     /permissive-

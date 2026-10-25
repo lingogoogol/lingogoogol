@@ -132,7 +132,12 @@ export namespace lgo
     }
 
     template<typename t_type>
-    auto button_template_t<t_type>::log(std::uint32_t) const -> void {}
+    auto button_template_t<t_type>::log(std::uint32_t tab_count) const -> void
+    {
+        if constexpr (!gui_object_names_enabled) return;
+        GUI_object_t::log(tab_count);
+        m_click_area.log(tab_count + 1);
+    }
 
     template<typename t_type>
     auto button_template_t<t_type>::show_impl(bool base) -> void
@@ -222,6 +227,7 @@ export namespace lgo
     template<typename t_type>
     auto button_t<t_type>::log(std::uint32_t tab_count) const -> void
     {
+        if constexpr (!gui_object_names_enabled) return;
         log_file(tab(tab_count) + "{\n");
         log_file(tab(tab_count + 1) + "type: button_t<>\n");
         t_type::log(tab_count + 1);

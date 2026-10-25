@@ -30,6 +30,12 @@ export namespace lgo
         auto get_size() const -> size_2D override;
         auto get_margin() const -> size_1D override;
         auto obj_get() const -> const std::shared_ptr<t_type>;
+        auto log(std::uint32_t tab_count) const -> void override
+        {
+            if constexpr (!gui_object_names_enabled) return;
+            GUI_object_t::log(tab_count);
+            m_obj->log(tab_count + 1);
+        }
 
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;

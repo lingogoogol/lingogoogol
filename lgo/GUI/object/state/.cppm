@@ -69,6 +69,8 @@ export namespace lgo
                 std::forward<t_arg>(arg)...
             )
         );
+        if constexpr (gui_object_events_enabled)
+            m_current.m_object[m_current_id_object]->debug_attach(this, m_current_id_object);
         m_current.m_object[m_current_id_object]->show();
         return m_current_id_object++;
     }

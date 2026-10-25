@@ -15,6 +15,16 @@ import lgo.GUI.object.std;
 
 namespace lgo
 {
+    auto button_plus_t::log(std::uint32_t tab_count) const -> void
+    {
+        if constexpr (!gui_object_names_enabled) return;
+        GUI_object_t::log(tab_count);
+        m_click_area.log(tab_count + 1);
+        m_rect.log(tab_count + 1);
+        m_horizontal.log(tab_count + 1);
+        m_vertical.log(tab_count + 1);
+    }
+
     auto button_plus_t::button_plus_callback_mouse_leave() -> void
     {
         std::unique_lock lock{ m_mutex };
