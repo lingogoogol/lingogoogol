@@ -21,6 +21,27 @@ int main()
     try
     {
         lgo::init_logfile("logfile/folder-download.txt");
+        if (std::getenv("STORAGE_DOWNLOAD_PROTOCOL_ONLY"))
+        {
+            for (const auto& kind : { "missing-id", "unknown-id", "duplicate-id", "truncated", "boundary", "http-header", "http-status", "mixed" })
+            {
+                google_batch_t batch{};
+                batch.boundary_set("+");
+                batch.path_set("/drive/v3");
+                for (const auto& suffix : { "a", "b" })
+                    blob_get(batch, std::string{ "protocol-" } + kind + "-" + suffix, "description");
+                batch.method_post();
+                batch.run();
+                check(batch.part_count() == 2, "Malformed batch added unexpected responses.");
+                for (std::size_t i{}; i < 2; ++i)
+                {
+                    const auto payload = nlohmann::json::parse(batch.response_get(i).body_get());
+                    check(payload["description"] == "[]", "Batch retry lost a response.");
+                }
+            }
+            std::println("PASS: malformed multipart responses retry safely and retain successful subrequests");
+            return 0;
+        }
         lgo::FreeType_t freetype{};
         lgo::font_face_t::freetype_set(&freetype);
         lgo::font_face_t face{ "font/NotoSansTC-VariableFont_wght.ttf", 24 };

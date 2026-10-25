@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -94,15 +95,30 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
             env = {**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': port}
             if env.get('WINEPREFIX'):
                 Path(env['WINEPREFIX']).mkdir(parents=True, exist_ok=True)
-            result = subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64', str(test / 'test.exe')],
-                                    cwd=test, env=env, capture_output=True, text=True, timeout=40)
-            print(result.stdout, end='', flush=True)
-            if result.returncode:
-                raise RuntimeError(f'Folder download test failed ({result.returncode}): {result.stderr}')
+            for mode in ('download', 'protocol'):
+                run_env = {**env}
+                run_env.pop('STORAGE_DOWNLOAD_PROTOCOL_ONLY', None)
+                if mode == 'protocol':
+                    run_env['STORAGE_DOWNLOAD_PROTOCOL_ONLY'] = '1'
+                with subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64', str(test / 'test.exe')],
+                                      cwd=test, env=run_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True, start_new_session=True) as process:
+                    try:
+                        stdout, stderr = process.communicate(timeout=40)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.communicate()
+                        raise RuntimeError(f'{mode} test timed out.')
+                    print(stdout, end='', flush=True)
+                    if process.returncode:
+                        raise RuntimeError(f'{mode} test failed ({process.returncode}): {stderr}')
             with urllib.request.urlopen(f'http://127.0.0.1:{port}/report', timeout=5) as response:
                 report = json.load(response)
             assert not any(event[0] == 'PATCH' for event in report['events']), 'Downloads modified mock cloud data.'
             events = report['events']
+            assert len([event for event in events if event[0] == 'PROTOCOL_FAULT']) == 8
+            assert events.count(['BATCH_GET', 'protocol-mixed-a']) == 1, 'Retry repeated an already successful request.'
+            assert events.count(['BATCH_GET', 'protocol-mixed-b']) == 2
             assert events.index(['BATCH_GET', 'chunk-reordered-100']) < events.index(['BATCH_GET', 'chunk-reordered-0']), 'Index responses were not reordered.'
             assert events.index(['BATCH_GET', 'data-reordered-1']) < events.index(['BATCH_GET', 'data-reordered-0']), 'Content responses were not reordered.'
         finally:

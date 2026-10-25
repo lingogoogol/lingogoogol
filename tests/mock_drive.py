@@ -10,6 +10,7 @@ fail_publish=True
 fail_transport=True
 violations=[]
 events=[]
+protocol_attempts={}
 def decode_file(id):
     result=b''
     while id!='null':
@@ -84,13 +85,18 @@ class Handler(BaseHTTPRequestHandler):
         if 'files/data-reordered-0?' in body: time.sleep(.2)
         boundary=self.headers['Content-Type'].split('boundary=')[1]
         parts=[]
+        protocol_kind=None
         for part in body.split('--'+boundary)[1:-1]:
             header,request=part.lstrip('\r\n').split('\r\n\r\n',1)
             content_id=re.search(r'Content-ID: (\d+)',header)[1]
             first=request.split('\r\n',1)[0]
             id=urllib.parse.urlparse(first.split()[1]).path.rsplit('/',1)[-1]
+            if id.startswith('protocol-'):
+                protocol_kind=id[len('protocol-'):].rsplit('-',1)[0]
             if first.startswith('GET '):
-                code,response=200,blobs[id]
+                code,response=200,blobs.get(id,{'name':'{}','description':'[]'})
+                if protocol_kind=='mixed' and id.endswith('-b') and not protocol_attempts.get(protocol_kind):
+                    code=503
                 events.append(['BATCH_GET',id])
             else:
                 data=json.loads(request.split('\r\n\r\n',1)[1].strip())
@@ -98,6 +104,16 @@ class Handler(BaseHTTPRequestHandler):
             encoded=json.dumps(response)
             parts.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{content_id}\r\n\r\nHTTP/1.1 {code} OK\r\nContent-Type: application/json\r\n\r\n{encoded}\r\n')
         response=(''.join(parts)+'--fixture--\r\n').encode()
+        if protocol_kind and not protocol_attempts.get(protocol_kind):
+            protocol_attempts[protocol_kind]=1
+            events.append(['PROTOCOL_FAULT',protocol_kind])
+            if protocol_kind=='missing-id': response=response.replace(b'Content-ID: response-0',b'Ignored-ID: response-0')
+            if protocol_kind=='unknown-id': response=response.replace(b'Content-ID: response-0',b'Content-ID: response-999')
+            if protocol_kind=='duplicate-id': response=response.replace(b'Content-ID: response-1',b'Content-ID: response-0')
+            if protocol_kind=='truncated': response=response[:response.find(b'--fixture',len(b'--fixture'))]
+            if protocol_kind=='http-header': response=response.replace(b'Content-Type: application/json\r\n',b'Broken header\r\n')
+            if protocol_kind=='http-status': response=response.replace(b'HTTP/1.1 200 OK',b'HTTP/1.1 bad OK')
+            if protocol_kind=='boundary': return self.respond(200,response,'multipart/mixed')
         self.respond(200,response,'multipart/mixed; boundary=fixture')
 server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
 (base/'server-port').write_text(str(server.server_port))

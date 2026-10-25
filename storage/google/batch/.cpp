@@ -108,48 +108,82 @@ auto google_batch_t::run_clear_if_full() -> void
 
 auto google_batch_t::parse() -> void
 {
-    if (!curl_easy_t::valid())
+    if (!curl_easy_t::valid()) return;
+
+    // A successful outer HTTP response can still contain a truncated or invalid
+    // multipart body. Validate the entire frame before committing any subresponse;
+    // otherwise an unexpected ID can grow m_part and overrun download chunk arrays.
+    try
     {
-        return;
+        curl_header* content_type{};
+        if (curl_easy_header(*this, "Content-Type", 0, CURLH_HEADER, -1, &content_type) != CURLHE_OK || !content_type)
+            throw std::invalid_argument{ "Missing multipart Content-Type." };
+        std::string type{ content_type->value };
+        const auto parameter{ type.find("boundary=") };
+        if (parameter == std::string::npos)
+            throw std::invalid_argument{ "Missing multipart boundary." };
+        auto boundary{ type.substr(parameter + 9) };
+        if (boundary.starts_with('"'))
+        {
+            const auto closing{ boundary.find('"', 1) };
+            if (closing == std::string::npos) throw std::invalid_argument{ "Unclosed multipart boundary." };
+            boundary = boundary.substr(1, closing - 1);
+        }
+        else
+        {
+            boundary = boundary.substr(0, boundary.find_first_of("; \t\r\n"));
+        }
+        if (boundary.empty()) throw std::invalid_argument{ "Empty multipart boundary." };
+        const auto delimiter{ "--" + boundary };
+        const auto& response{ m_write->m_payload };
+        std::map<std::uint64_t, http_response_t> parsed;
+        auto position{ response.find(delimiter) };
+        if (position == std::string::npos) throw std::invalid_argument{ "Multipart boundary not found." };
+        while (true)
+        {
+            position += delimiter.size();
+            if (response.compare(position, 2, "--") == 0) break;
+            if (response.compare(position, 2, "\r\n") != 0)
+                throw std::invalid_argument{ "Invalid multipart separator." };
+            position += 2;
+            const auto next{ response.find("\r\n" + delimiter, position) };
+            const auto header_end{ response.find("\r\n\r\n", position) };
+            if (next == std::string::npos || header_end == std::string::npos || header_end >= next)
+                throw std::invalid_argument{ "Truncated multipart response." };
+            const auto headers{ response.substr(position, header_end - position) };
+            const std::string id_header{ "Content-ID: response-" };
+            const auto id_position{ headers.find(id_header) };
+            if (id_position == std::string::npos ||
+                (id_position != 0 && headers.substr(id_position - 2, 2) != "\r\n"))
+                throw std::invalid_argument{ "Missing multipart Content-ID." };
+            const auto id_begin{ id_position + id_header.size() };
+            const auto id_text{ headers.substr(id_begin, headers.find("\r\n", id_begin) - id_begin) };
+            std::uint64_t id{};
+            const auto conversion{ std::from_chars(id_text.data(), id_text.data() + id_text.size(), id) };
+            if (conversion.ec != std::errc{} || conversion.ptr != id_text.data() + id_text.size())
+                throw std::invalid_argument{ "Invalid multipart Content-ID." };
+            const auto requested{ m_part.find(id) };
+            if (requested == m_part.end() || requested->second.m_valid || parsed.contains(id))
+                throw std::invalid_argument{ "Unexpected or duplicate multipart Content-ID." };
+            const auto body_begin{ header_end + 4 };
+            parsed.emplace(id, http_response_t{ response.substr(body_begin, next - body_begin) });
+            position = next + 2;
+        }
+        if (parsed.size() != m_count)
+            throw std::invalid_argument{ "Missing multipart subresponses." };
+        for (auto& [id, response] : parsed)
+        {
+            auto& part{ m_part.at(id) };
+            part.m_valid = response.status_code_get().starts_with('2');
+            part.m_response = std::move(response);
+        }
     }
-
-    std::string& response{ m_write->m_payload };
-
-    //Get the boundary between parts.
-    curl_header* content_type{};
-    api_curlh
-    (
-        curl_easy_header
-        (
-            *this,
-            "Content-Type",
-            0,
-            CURLH_HEADER,
-            -1,
-            &content_type
-        )
-    );
-    std::string boundary{ content_type->value };
-    std::string boundary_name{ "; boundary=" };
-    boundary = "--" + boundary.substr(boundary.find(boundary_name) + boundary_name.size());
-
-    //Parse the response body.
-    std::uint64_t pos_begin{ response.find(boundary) + boundary.size() + 2 };
-    for (std::uint64_t i{ 0 }; i < m_count; ++i)
+    catch (const std::invalid_argument& error)
     {
-        std::string content_id_name{ "Content-ID: response-" };
-        std::uint64_t content_id_begin{ response.find(content_id_name, pos_begin) + content_id_name.size() };
-        std::uint64_t content_id_end{ response.find("\r\n", content_id_begin) };
-        std::uint64_t content_id{ std::stoull(response.substr(content_id_begin, content_id_end - content_id_begin)) };
-        pos_begin = response.find("\r\n\r\n", pos_begin) + 2;
-        std::uint64_t pos_end{ response.find(boundary, pos_begin) };
-        std::string content{ response.substr(pos_begin, pos_end - pos_begin) };
-        pos_begin = pos_end + boundary.size() + 2;
-        http_response_t http_response{ content };
-        m_part[content_id].m_response = http_response;
-        m_part[content_id].m_valid = http_response.status_code_get().starts_with('2');
+        // Leave pending parts invalid so the existing retry path resends them.
+        // Responses from earlier successful attempts remain available.
+        lgo::log_file(std::string{ "Invalid Google batch response; retrying: " } + error.what() + "\n");
     }
-    return;
 }
 
 auto google_batch_t::valid() -> bool
