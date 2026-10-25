@@ -859,13 +859,13 @@ auto home
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&folder_upload_callback, load_state, blob_queue, *pos),
+		[load_state, blob_queue, pos] { folder_upload_callback(load_state, blob_queue, *pos); },
 		"上傳資料夾"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
 	(
 		lgo::depth_range_t{ 0.0f, 0.5f },
-		std::bind(&file_upload_callback, load_state, blob_queue, *pos),
+		[load_state, blob_queue, pos] { file_upload_callback(load_state, blob_queue, *pos); },
 		"上傳檔案"
 	);
     menu_right->add_object<lgo::button_classic_std_t>
