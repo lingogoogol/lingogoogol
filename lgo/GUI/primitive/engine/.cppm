@@ -117,7 +117,7 @@ export namespace lgo
     public:
         engine_t(size_2D window_size, std::string name);
         engine_t(const engine_t&) = delete;
-        ~engine_t();
+        ~engine_t() noexcept;
         auto operator=(const engine_t&) = delete;
 
         auto message_loop() -> bool;

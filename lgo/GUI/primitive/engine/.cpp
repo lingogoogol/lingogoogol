@@ -708,10 +708,35 @@ namespace lgo {
         }
     }
 
-    engine_t::~engine_t()
+    engine_t::~engine_t() noexcept
     {
         glfwSetWindowRefreshCallback(m_window, nullptr);
-        m_device.waitIdle();
+        const char* cleanup_error{};
+        try
+        {
+            if (*m_device) m_device.waitIdle();
+        }
+        catch (const vk::DeviceLostError&)
+        {
+            //A lost device cannot finish GPU work. Continue destroying its resources;
+            //letting Vulkan-Hpp's exception escape a destructor would call terminate().
+            cleanup_error = "VK_ERROR_DEVICE_LOST while waiting for GPU shutdown.\n";
+        }
+        catch (...)
+        {
+            cleanup_error = "The GPU idle wait failed during engine cleanup.\n";
+        }
+        if (cleanup_error)
+        {
+            try
+            {
+                log_file(cleanup_error);
+            }
+            catch (...)
+            {
+                //Logging failures must not interrupt cleanup or replace an active exception.
+            }
+        }
         rect_primitive_t::uninit();
         glfwDestroyWindow(m_window);
         glfwTerminate();

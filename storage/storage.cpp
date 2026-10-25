@@ -118,6 +118,15 @@ auto app() -> void
 	lgo::font_face_t font_face{ "./font/NotoSansTC-VariableFont_wght.ttf", static_cast<std::uint64_t>(lgo::std_font_size.x) };
 	lgo::font_preference_t::default_get().push_back(&font_face);
     lgo::engine_t engine{ lgo::size_2D{ 0x600, 0x400 }, "wWinMain.engine" };
+    struct font_cleanup_t
+    {
+        lgo::engine_t& engine;
+        ~font_cleanup_t()
+        {
+            try { engine.flush(); } catch (...) {}
+            lgo::text_line_t::free();
+        }
+    } font_cleanup{ engine };
     lgo::depth_tracker_t depth_tracker{};
     lgo::state_t state{ &engine, &depth_tracker };
 	load_state_t load_state{};
@@ -177,7 +186,6 @@ auto app() -> void
 
 		close_app = true;
 		engine.flush();
-        lgo::text_line_t::free();
 	}
     state.clear_state();
 	return;
