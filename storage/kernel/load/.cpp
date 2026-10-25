@@ -643,6 +643,10 @@ auto upload_chunk_transfer_begin
         };
         std::string content( size, 0 );
         stream.read(content.data(), size);
+        if (stream.gcount() != static_cast<std::streamsize>(size))
+        {
+            throw lgo::error_t{ "The upload source could not be read completely: " + file->m_path_local };
+        }
         blob.m_content = base64url_encode(content);
         blob_update(batch, blob);
     }
