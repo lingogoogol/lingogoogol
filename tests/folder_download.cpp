@@ -63,6 +63,15 @@ int main()
         }
         check(nested->m_file_arr.size()==4 && concurrent->m_file_arr.size()==4,"Folder entries differ.");
         std::println("PASS: production callbacks prepare concurrent folders using worker-owned HTTP handles");
+        auto bad{ add("folder-bad", "output/bad") };
+        check(bad->m_prepared.wait_for(5s) == std::future_status::ready, "Bad preparation never completed.");
+        bool reported{};
+        try { google_easy_t unused{}; transfer_begin(&loads, multi, std::move(unused), &queue); }
+        catch (const nlohmann::json::exception&) { reported = true; }
+        check(reported && loads.m_end.empty(), "Preparation error was ignored or scheduled invalid work.");
+        column->remove_object(bad->m_progress_div);
+        loads.m_task_list.erase(bad->m_self_i);
+        std::println("PASS: folder preparation errors are consumed before inspecting unfinished task state");
         engine.flush();
         gui.clear_state();
         column.reset();

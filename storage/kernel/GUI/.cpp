@@ -303,7 +303,6 @@ auto file_download_callback
             // get() is thread_local: acquire it in this worker, never on the GUI thread.
             std::filesystem::remove_all(path_local);
 			file_download(&google_easy_t::get(), task, pos, path_local);
-			task->m_idle_first = task->m_file_arr.begin();
 			return;
 		},
 		task.get(),
@@ -330,7 +329,7 @@ auto file_download_callback
 			add_object_shared<lgo::text_line_scroll_std_t>
 		(
 			lgo::depth_range_t{ 0.0f, 0.5f },
-			"檔案：0B/?B " + name,
+			"準備下載檔案：" + name,
 			lgo::std_green_light,
 			lgo::size_1D{ 0x100 },
 			false
@@ -376,7 +375,6 @@ auto folder_download_callback
             // get() is thread_local: acquire it in this worker, never on the GUI thread.
             std::filesystem::remove_all(path_local);
 			folder_download(&google_easy_t::get(), task, pos, path_local);
-			task->m_idle_first = task->m_file_arr.begin();
 			return;
 		},
 		task.get(),
@@ -403,7 +401,7 @@ auto folder_download_callback
 			add_object_shared<lgo::text_line_scroll_std_t>
 		(
 			lgo::depth_range_t{ 0.0f, 0.5f },
-			"資料夾：0B/?B " + name,
+			"準備下載資料夾：" + name,
 			lgo::std_green_light,
 			lgo::size_1D{ 0x100 },
 			false

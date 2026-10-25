@@ -332,9 +332,21 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
         else if (task_ptr->m_type == "download")
         {
             auto download_task_ptr{ std::dynamic_pointer_cast<download_task_t>(task_ptr) };
-            if (download_task_ptr->m_prepared.wait_for(0s) != std::future_status::ready)
+            if (download_task_ptr->m_prepared.valid())
             {
-                continue;
+                if (download_task_ptr->m_prepared.wait_for(0s) != std::future_status::ready)
+                {
+                    continue;
+                }
+                // A ready future can contain a preparation error. Consume it before
+                // inspecting containers/iterators that the worker may not have initialized.
+                download_task_ptr->m_prepared.get();
+                download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
+                download_task_ptr->m_progress_text->set_text
+                (
+                    "下載：0B/" + std::to_string(download_task_ptr->m_size) + "B " + download_task_ptr->m_name,
+                    false
+                );
             }
             auto file_i{ download_task_ptr->m_idle_first };
             if (file_i == download_task_ptr->m_file_arr.end())
