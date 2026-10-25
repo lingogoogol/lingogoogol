@@ -16,6 +16,7 @@ export
 		std::filesystem::path m_path{};
 		google_account_t* m_account{};
 		const std::atomic_bool* m_close{};
+		std::atomic_bool m_stopped{ false };
 		bool m_clearing{ false };
 		bool m_cleared{ false };
 		std::deque<std::chrono::steady_clock::time_point> m_cycle_time{};
@@ -24,6 +25,7 @@ export
 	public:
 		blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close);
 		~blob_queue_t();
+        auto stop() -> void;
 
 		auto get() -> std::string;
 		auto get(std::uint64_t count) -> std::vector<std::string>;

@@ -129,7 +129,6 @@ auto app() -> void
     } font_cleanup{ engine };
     lgo::depth_tracker_t depth_tracker{};
     lgo::state_t state{ &engine, &depth_tracker };
-	load_state_t load_state{};
     int argc{};
     CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argc > 1)
@@ -154,7 +153,19 @@ auto app() -> void
 		lgo::create_ofstream_destroy("root") << root_id;
 	}
 	{
-		blob_queue_t blob_queue{ "blob_queue", &google_account_t::default_get(), &close_app };
+        blob_queue_t blob_queue{ "blob_queue", &google_account_t::default_get(), &close_app };
+        load_state_t load_state{};
+        struct transfer_shutdown_t
+        {
+            blob_queue_t& queue;
+            ~transfer_shutdown_t()
+            {
+                // Stop queue waits before task destructors join preparation workers;
+                // tasks must finish using the queue before its destructor saves it.
+                close_app = true;
+                queue.stop();
+            }
+        } transfer_shutdown{ blob_queue };
 		std::string pos{ root_id };
 		std::shared_ptr<lgo::divy_soft_t> progress_column{};
 		GUI_persistent_t persistent{};

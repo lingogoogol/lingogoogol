@@ -26,7 +26,7 @@ auto blob_queue_t::process() -> void
     }
 
     std::chrono::steady_clock::time_point last_cycle_time{};
-    while (!*m_close)
+    while (!*m_close && !m_stopped)
     {
         std::this_thread::sleep_until(last_cycle_time + 0.1s);
         std::chrono::high_resolution_clock::time_point now{ std::chrono::high_resolution_clock::now() };
@@ -108,8 +108,19 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
     return;
 }
 
+auto blob_queue_t::stop() -> void
+{
+    // Publish cancellation under the same mutex as get()'s predicate to avoid lost wakeups.
+    {
+        std::unique_lock lock{ m_mutex };
+        m_stopped = true;
+    }
+    m_condition_variable.notify_all();
+}
+
 blob_queue_t::~blob_queue_t()
 {
+    stop();
     m_thread.join();
     //Use `=` instead of `{}` to avoid wrapping the empty array into `[[]]`.
     nlohmann::json arr = nlohmann::json::array();
@@ -125,7 +136,8 @@ blob_queue_t::~blob_queue_t()
 auto blob_queue_t::get() -> std::string
 {
     std::unique_lock lock{ m_mutex };
-    m_condition_variable.wait(lock, [this] () -> bool { return !m_clearing && m_id.size() > 1; });
+    m_condition_variable.wait(lock, [this] () -> bool { return m_stopped || (!m_clearing && m_id.size() > 1); });
+    if (m_stopped) throw std::runtime_error{ "Blob queue stopped." };
     std::string out{ m_id.front() };
     m_id.pop_front();
     return out;
@@ -134,7 +146,8 @@ auto blob_queue_t::get() -> std::string
 auto blob_queue_t::get(std::uint64_t count) -> std::vector<std::string>
 {
     std::unique_lock lock{ m_mutex };
-    m_condition_variable.wait(lock, [this, count] () -> bool { return !m_clearing && m_id.size() >= count; });
+    m_condition_variable.wait(lock, [this, count] () -> bool { return m_stopped || (!m_clearing && m_id.size() >= count); });
+    if (m_stopped) throw std::runtime_error{ "Blob queue stopped." };
     std::vector<std::string> out{ m_id.begin(), m_id.begin() + count };
     m_id.erase(m_id.begin(), m_id.begin() + count);
     return out;
