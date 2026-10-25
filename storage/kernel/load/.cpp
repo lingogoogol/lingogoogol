@@ -287,7 +287,7 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                 {
                     upload_chunk_load_begin(multi, std::move(easy), file_ptr);
                 }
-                else if (file_ptr->m_chunk_arr.size() > file_ptr->m_file_load_begin_progress)
+                else if (file_ptr->m_next_id != "null")
                 {
                     upload_file_load_begin(multi, std::move(easy), blob_queue, file_ptr);
                 }
@@ -377,6 +377,7 @@ auto upload_complete(upload_entity_t* entity) -> void
             auto file{ dynamic_cast<upload_file_t*>(entity) };
             if
             (
+                file->m_load_end &&
                 file->m_chunk_cover_progress == file->m_size &&
                 file->m_file_load_end_progress == file->m_chunk_arr.size() &&
                 file->m_chunk_load_end_progress == file->m_chunk_arr.size() &&
@@ -393,7 +394,7 @@ auto upload_complete(upload_entity_t* entity) -> void
         else if (entity->m_type == "folder")
         {
             auto folder{ dynamic_cast<upload_folder_t*>(entity) };
-            if (folder->m_folder_load_end_progress == folder->m_entity_arr.size())
+            if (folder->m_load_end && folder->m_folder_load_end_progress == folder->m_entity_arr.size())
             {
                 ++task->m_end_progress;
             }
@@ -501,6 +502,10 @@ auto upload_file_load_end
     )
     {
         ++file->m_file_load_end_progress;
+    }
+    if (begin_i + chunk_count == file->m_chunk_arr.size())
+    {
+        file->m_load_end = true;
     }
     upload_complete(file);
     return;
@@ -789,6 +794,10 @@ auto upload_folder_load_end
     )
     {
         ++folder->m_folder_load_end_progress;
+    }
+    if (begin_i + entity_count == folder->m_entity_arr.size())
+    {
+        folder->m_load_end = true;
     }
     upload_complete(folder);
     return;

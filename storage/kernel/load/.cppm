@@ -135,6 +135,8 @@ export
         //The first chunk that has not finished transfer.
         std::size_t m_chunk_transfer_end_progress{ 0 };
         std::vector<upload_chunk_t> m_chunk_arr{};
+        //Also required for empty files, whose chunk counters are always zero.
+        bool m_load_end{ false };
     };
 
     struct upload_folder_t: public upload_entity_t
@@ -147,6 +149,8 @@ export
         std::uint64_t m_folder_load_end_progress{ 0 };
         std::vector<std::size_t> m_entity_arr{};
         std::vector<bool> m_entity_load_end{};
+        //An empty folder still needs a successful metadata response.
+        bool m_load_end{ false };
     };
 
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
