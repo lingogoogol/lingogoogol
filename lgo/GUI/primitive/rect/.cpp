@@ -472,9 +472,11 @@ namespace lgo
     auto rect_primitive_t::set_image_view(image_view_t& image_view) -> void
     {
         std::unique_lock lock{ m_mutex };
-        m_image_view = &image_view;
         m_engine->flush();
-        upload_vertex_data();
+        m_image_view = &image_view;
+        // Descriptor sets still reference the previous view until rebuilt.
+        release_gpu();
+        create_gpu();
         return;
     }
 

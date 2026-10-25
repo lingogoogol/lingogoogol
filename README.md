@@ -168,6 +168,10 @@ Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan
 
 此選項只啟用物件命名，不會額外啟用 validation layers。若 loader 不支援 `VK_EXT_debug_utils`，會跳過命名；命名 API 失敗也不會中止程式。Wine 10 的 Vulkan 橋接層在命名 debug messenger 時會直接 abort，因此 Wine 下略過這一種診斷物件；其他物件及原生 Windows 仍照常命名。
 
+### 矩形 primitive 的資源更新
+
+`rect_primitive_t::set_image_view()` 會等待 GPU 完成工作，再重建 descriptor，使後續繪圖使用新指定的 image view。
+
 ### GUI 物件名稱與日誌
 
 Debug 建置會自動定義 `DEBUG_GUI_OBJECT_NAME`，Release 預設也會啟用。所有繼承 `GUI_object_t` 的物件（包含容器建立及內嵌子物件）都會取得建構位置與流水號組成的 `m_name`；複製物件會取得新的識別，指定運算則保留目的物件名稱。可用 `name_set()` 指定用途，`name_get()` 讀取名稱，明確呼叫物件的 `log()` 可列出名稱、識別及子物件資訊。
