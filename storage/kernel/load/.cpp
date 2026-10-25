@@ -67,6 +67,7 @@ auto folder_upload
 -> std::size_t
 {
 	auto folder{ std::make_shared<upload_folder_t>() };
+	folder->m_task = task;
 	folder->m_parent = parent;
 	folder->m_type = "folder";
 	folder->m_name = path_local.string();
