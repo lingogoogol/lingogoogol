@@ -72,6 +72,7 @@ auto base64url_encode(std::string in) -> std::string
 
 auto base64url_decode(std::string in) -> std::string
 {
+    if (in.empty()) return {};
     //Convert Base64URL (`-`, `_`) back to standard Base64 (`+`, `/`) and decode with `CRYPT_STRING_BASE64`
     //because Wine's `crypt32.dll` does not support `CRYPT_STRING_BASE64URI`.
     for (char& c : in)
@@ -86,7 +87,7 @@ auto base64url_decode(std::string in) -> std::string
         }
     }
     DWORD out_size{};
-    CryptStringToBinaryA
+    if (!CryptStringToBinaryA
     (
         reinterpret_cast<LPCSTR>(in.data()),
         static_cast<DWORD>(in.size()),
@@ -95,10 +96,10 @@ auto base64url_decode(std::string in) -> std::string
         &out_size,
         0,
         nullptr
-    );
+    )) throw std::runtime_error{ "Invalid Base64URL download content." };
     std::string out{};
     out.resize(out_size);
-    CryptStringToBinaryA
+    if (!CryptStringToBinaryA
     (
         reinterpret_cast<LPCSTR>(in.data()),
         static_cast<DWORD>(in.size()),
@@ -107,6 +108,6 @@ auto base64url_decode(std::string in) -> std::string
         &out_size,
         0,
         nullptr
-    );
+    )) throw std::runtime_error{ "Cannot decode Base64URL download content." };
     return out;
 }

@@ -16,6 +16,30 @@ import storage.encode;
 import storage.http;
 import storage.google;
 
+auto download_fail(download_task_t& task, const std::exception& error) -> void
+{
+    if (!task.m_error.empty()) return;
+    task.m_error = error.what();
+    if (task.m_error.empty()) task.m_error = "Unknown download error.";
+    lgo::log_file("Download failed: " + task.m_name + "\n" + task.m_error + "\n");
+    task.m_progress_text->set_text("下載失敗：" + task.m_name + "（" + task.m_error + "）", false);
+}
+
+auto download_on_end(download_task_t& task, CURL* key,
+    std::function<void(std::unique_ptr<curl_easy_t>&)> callback) -> void
+{
+    // Keep task/file storage alive through the last callback, even when completion
+    // removes the task from the list. Failed tasks drain existing requests only.
+    auto owner{ std::static_pointer_cast<download_task_t>(*task.m_self_i) };
+    task.m_state->m_end.emplace(key,
+        [owner = std::move(owner), callback = std::move(callback)](std::unique_ptr<curl_easy_t>& easy)
+        {
+            if (!owner->m_error.empty()) return;
+            try { callback(easy); }
+            catch (const std::exception& error) { download_fail(*owner, error); }
+        });
+}
+
 auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::json
 {
     std::string next{ *pos };
@@ -345,7 +369,13 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                 }
                 // A ready future can contain a preparation error. Consume it before
                 // inspecting containers/iterators that the worker may not have initialized.
-                download_task_ptr->m_prepared.get();
+                if (!download_task_ptr->m_error.empty()) continue;
+                try { download_task_ptr->m_prepared.get(); }
+                catch (const std::exception& error)
+                {
+                    download_fail(*download_task_ptr, error);
+                    continue;
+                }
                 download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
                 download_task_ptr->m_files_remaining = download_task_ptr->m_file_arr.size();
                 download_task_ptr->m_progress_text->set_text
@@ -361,6 +391,7 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                     return false;
                 }
             }
+            if (!download_task_ptr->m_error.empty()) continue;
             auto file_i{ download_task_ptr->m_idle_first };
             if (file_i == download_task_ptr->m_file_arr.end())
             {
@@ -896,6 +927,8 @@ auto download_complete(download_file_t& file) -> void
     {
         return;
     }
+    if (file.m_written != file.m_size)
+        throw std::runtime_error{ "Downloaded size differs from the declared size: " + file.m_path_local };
     file.m_complete = true;
     auto& task{ *file.m_task };
     if (--task.m_files_remaining == 0)
@@ -948,8 +981,9 @@ auto download_file_load_begin
     multi.add(std::move(easy_google));
 
     file_i->m_file_loading = true;
-    file_i->m_task->m_state->m_end.emplace
+    download_on_end
     (
+        *file_i->m_task,
         key,
         std::bind(download_file_load_end, std::placeholders::_1, file_i)
     );
@@ -962,6 +996,8 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
     nlohmann::json payload = nlohmann::json::parse(easy->payload());
     nlohmann::json blob_name = nlohmann::json::parse(payload["name"].get<std::string>());
     nlohmann::json blob_content = nlohmann::json::parse(payload["description"].get<std::string>());
+    if (!blob_content.is_array() || blob_content.size() > 100)
+        throw std::runtime_error{ "File chunk index must be an array of at most 100 IDs." };
     file_i->m_next_id = blob_name["next"];
     for (const auto& i : blob_content)
     {
@@ -1005,8 +1041,9 @@ auto download_chunk_load_begin
     multi.add(std::move(batch));
 
     file_i->m_chunk_load_begin_progress = i_end;
-    file_i->m_task->m_state->m_end.emplace
+    download_on_end
     (
+        *file_i->m_task,
         key,
         std::bind(download_chunk_load_end, std::placeholders::_1, file_i, i_begin)
     );
@@ -1028,6 +1065,8 @@ auto download_chunk_load_end
         download_chunk_t& chunk{ file_i->m_chunk_arr[i_begin + i] };
         nlohmann::json payload = nlohmann::json::parse(batch.response_get(i).body_get());
         nlohmann::json content_id_arr = nlohmann::json::parse(payload["description"].get<std::string>());
+        if (!content_id_arr.is_array() || content_id_arr.empty() || content_id_arr.size() > 100)
+            throw std::runtime_error{ "Chunk content index must contain 1 to 100 IDs." };
         chunk.m_content_id.resize(content_id_arr.size());
         std::ranges::copy(content_id_arr, chunk.m_content_id.begin());
         chunk.m_loaded = true;
@@ -1071,8 +1110,9 @@ auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, down
     multi.add(std::move(batch));
 
     ++chunk.m_file->m_chunk_transfer_begin_progress;
-    chunk.m_file->m_task->m_state->m_end.emplace
+    download_on_end
     (
+        *chunk.m_file->m_task,
         key,
         std::bind(download_chunk_transfer_end, std::placeholders::_1, chunk.m_file, &chunk - chunk.m_file->m_chunk_arr.data())
     );
@@ -1129,6 +1169,8 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
 
     // Finish the write before publishing progress or removing the last task owner.
     content_stream.close();
+    if (!content_stream) throw std::runtime_error{ "Cannot finish writing download file: " + file->m_path_local };
+    file->m_written += filesystem_size;
     //Update progress.
     download_task_t& task{ *chunk.m_file->m_task };
     task.m_progress += filesystem_size;

@@ -67,6 +67,16 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
     folder('folder-zeros', [('folder', 'folder-empty', 'child'), ('file', 'slow-empty', 'zero.bin')])
     blob('folder-bad', {'next': 'null'}, [[]])
     blob('slow-empty', {'size': 0, 'next': 'null'}, [])
+    blob('file-bad-index', {'size': 1, 'next': 'null'}, {'bad': 'index'})
+    blob('file-empty-chunk', {'size': 1, 'next': 'null'}, ['chunk-empty'])
+    blob('chunk-empty', {}, [])
+    blob('file-bad-content', {'size': 1, 'next': 'null'}, ['chunk-bad-content'])
+    blob('chunk-bad-content', {}, ['data-bad-content'])
+    fixture['data-bad-content'] = {'name': '{}', 'description': 123}
+    blob('file-bad-encoding', {'size': 1, 'next': 'null'}, ['chunk-bad-encoding'])
+    blob('chunk-bad-encoding', {}, ['data-bad-encoding'])
+    fixture['data-bad-encoding'] = {'name': '{}', 'description': '!'}
+    blob('file-wrong-size', {'size': 1, 'next': 'null'}, ['chunk-main'])
     # Two index batches can finish in reverse order. Keep the first pending
     # until the scheduler has observed the second response.
     blob('file-reordered', {'size': 201, 'next': 'file-reordered-next'},
@@ -74,6 +84,9 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
     blob('file-reordered-next', {'size': 201, 'next': 'file-reordered-tail'},
          [f'chunk-reordered-{i}' for i in range(100, 200)])
     blob('file-reordered-tail', {'size': 201, 'next': 'null'}, ['chunk-reordered-200'])
+    blob('file-failed-inflight', {'size': 201, 'next': 'file-failed-inflight-next'},
+         [f'chunk-reordered-{i}' for i in range(100)])
+    blob('file-failed-inflight-next', {'size': 201, 'next': 'null'}, ['chunk-empty'])
     for i in range(201):
         blob(f'chunk-reordered-{i}', {}, [f'data-reordered-{i}'])
         fixture[f'data-reordered-{i}'] = {'name': '{}', 'description': base64.urlsafe_b64encode(bytes([i])).decode()}

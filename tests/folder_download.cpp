@@ -115,15 +115,51 @@ int main()
             check(static_cast<unsigned char>(reordered_bytes[i]) == i, "Reordered download bytes differ.");
         std::println("PASS: concurrent recursive folders, pagination, empty files/directories, delayed metadata and empty blob reserve");
 
+        for (int i{}; i < 8; ++i)
+            add("file-main", "output/unowned-" + std::to_string(i) + ".bin", false);
+        const auto owner_deadline{ std::chrono::steady_clock::now() + 10s };
+        while (!loads.m_task_list.empty())
+        {
+            check(std::chrono::steady_clock::now() < owner_deadline, "Unowned task download stalled.");
+            check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed during final task release.");
+            lgo::text_line_t::pending_load();
+        }
+        check(loads.m_end.empty(), "Last task owner was released before callbacks finished.");
+        for (int i{}; i < 8; ++i)
+            check(lgo::get_file_str("output/unowned-" + std::to_string(i) + ".bin") == "ABCDEF", "Unowned task content differs.");
+        std::println("PASS: final callbacks safely release tasks without external owners");
+
         auto bad{ add("folder-bad", "output/bad") };
         check(bad->m_prepared.wait_for(5s) == std::future_status::ready, "Bad preparation never completed.");
-        bool reported{};
-        try { message_loop(&engine, &persistent, &multi, &loads, &queue); }
-        catch (const nlohmann::json::exception&) { reported = true; }
-        check(reported && loads.m_end.empty(), "Preparation error was ignored or scheduled invalid work.");
-        column->remove_object(bad->m_progress_div);
-        loads.m_task_list.erase(bad->m_self_i);
-        std::println("PASS: folder preparation errors are consumed before inspecting unfinished task state");
+        auto bad_index{ add("file-bad-index", "output/bad-index.bin", false) };
+        auto empty_chunk{ add("file-empty-chunk", "output/empty-chunk.bin", false) };
+        auto bad_content{ add("file-bad-content", "output/bad-content.bin", false) };
+        auto bad_encoding{ add("file-bad-encoding", "output/bad-encoding.bin", false) };
+        auto wrong_size{ add("file-wrong-size", "output/wrong-size.bin", false) };
+        auto bad_output{ add("file-main", "output/bad-output.bin", false) };
+        auto inflight{ add("file-failed-inflight", "output/inflight.bin", false) };
+        check(bad_output->m_prepared.wait_for(5s) == std::future_status::ready, "Output preparation stalled.");
+        // Force an actual output-open error after successful preparation.
+        std::filesystem::remove("output/bad-output.bin");
+        std::filesystem::create_directory("output/bad-output.bin");
+        auto healthy{ add("file-main", "output/after-failure.bin", false) };
+        const auto failures{ std::array{ bad, bad_index, empty_chunk, bad_content, bad_encoding, wrong_size, bad_output, inflight } };
+        const auto error_deadline{ std::chrono::steady_clock::now() + 10s };
+        while (loads.m_task_list.size() != failures.size() || !loads.m_end.empty() ||
+            std::ranges::any_of(failures, [](const auto& task) { return task->m_error.empty(); }))
+        {
+            check(std::chrono::steady_clock::now() < error_deadline, "Failed downloads blocked other tasks.");
+            check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed after download failure.");
+            lgo::text_line_t::pending_load();
+        }
+        check(lgo::get_file_str("output/after-failure.bin") == "ABCDEF", "Healthy download did not finish after failures.");
+        for (const auto& task : failures)
+            check(task->m_progress_text->get_text().starts_with("下載失敗："), "Failure reason is missing from the GUI.");
+        check(inflight->m_file_arr[0].m_chunk_load_begin_progress == 101 &&
+            inflight->m_file_arr[0].m_chunk_load_end_progress == 0 &&
+            inflight->m_file_arr[0].m_written == 0, "Failed task processed late responses or wrote content.");
+        check(bad_encoding->m_error.find("Base64URL") != std::string::npos, "Invalid encoding was silently decoded.");
+        std::println("PASS: preparation, metadata, empty chunk, content, encoding, size and output errors stay visible; late responses drain while other downloads finish");
         engine.flush();
         gui.clear_state();
         column.reset();

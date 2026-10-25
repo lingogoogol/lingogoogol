@@ -198,6 +198,7 @@ export
         std::string m_name{};
         std::string m_path_local{};
         std::uint64_t m_size{};
+        std::uint64_t m_written{};
         //`m_idle` means this file can send more requests for now.
         //If `m_idle` is false, the file must wait for a response from the server before it can send more requests.
         //Specifically, m_idle does not mean that the file is not running tranfers.
@@ -235,6 +236,8 @@ export
         }
         std::string m_name{};
         std::string m_pos{};
+        // Failed tasks remain visible; outstanding responses are drained without writes.
+        std::string m_error{};
         std::future<void> m_prepared{};
         std::uint64_t m_size{ 0 };
         //The total size in bytes of chunks that has finished writing to local filesystem.
