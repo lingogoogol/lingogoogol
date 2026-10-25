@@ -204,6 +204,7 @@ export
         bool m_idle{ true };
         //`m_file_loading` is true if it is loading more file blobs into `m_chunk_arr`.
         bool m_file_loading{ false };
+        bool m_complete{ false };
         //The first chunk that needs to be loaded.
         //We can't use an iterator for this variable because this file may still be loading,
         // and `m_chunk_arr` may be modified, invalidating the iterator.
@@ -238,6 +239,7 @@ export
         //The total size in bytes of chunks that has finished writing to local filesystem.
         std::uint64_t m_progress{ 0 };
         std::vector<download_file_t> m_file_arr{};
+        std::size_t m_files_remaining{};
         //The first file that can send more requests.
         std::vector<download_file_t>::iterator m_idle_first{};
     };

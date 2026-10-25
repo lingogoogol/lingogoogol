@@ -105,6 +105,9 @@ auto file_download
     file.m_path_local = path_local.string();
 	file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
 	file.m_next_id = pos;
+    // Create zero-byte files too; they never reach the content-writing callback.
+    auto output{ lgo::create_ofstream_destroy(path_local.string()) };
+    if (!output) throw std::runtime_error{ "Cannot create download file: " + path_local.string() };
 	task->m_size += file.m_size;
 	task->m_file_arr.emplace_back(file);
 	return;
@@ -342,11 +345,19 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                 // inspecting containers/iterators that the worker may not have initialized.
                 download_task_ptr->m_prepared.get();
                 download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
+                download_task_ptr->m_files_remaining = download_task_ptr->m_file_arr.size();
                 download_task_ptr->m_progress_text->set_text
                 (
                     "下載：0B/" + std::to_string(download_task_ptr->m_size) + "B " + download_task_ptr->m_name,
                     false
                 );
+                if (!download_task_ptr->m_files_remaining)
+                {
+                    // An empty directory tree is complete once its directories exist.
+                    state->m_progress_column->remove_object(download_task_ptr->m_progress_div);
+                    state->m_task_list.erase(download_task_ptr->m_self_i);
+                    return false;
+                }
             }
             auto file_i{ download_task_ptr->m_idle_first };
             if (file_i == download_task_ptr->m_file_arr.end())
@@ -871,6 +882,26 @@ auto upload_folder_load_end
     return;
 }
 
+// Byte totals alone cannot prove a folder is complete: empty files may still
+// have metadata requests in flight. Keep their task alive until every file finishes.
+auto download_complete(download_file_t& file) -> void
+{
+    if (file.m_complete || file.m_file_loading || file.m_next_id != "null" ||
+        file.m_filesystem_progress != file.m_chunk_arr.size())
+    {
+        return;
+    }
+    file.m_complete = true;
+    auto& task{ *file.m_task };
+    if (--task.m_files_remaining == 0)
+    {
+        if (task.m_progress != task.m_size)
+            throw std::runtime_error{ "Downloaded size differs from the declared size: " + task.m_name };
+        task.m_state->m_progress_column->remove_object(task.m_progress_div);
+        task.m_state->m_task_list.erase(task.m_self_i);
+    }
+}
+
 //Update the idle status of the file and its task after beginning a load or transfer.
 //This function only moves the `m_idle_first` pointer forward.
 //Moving it backward is the task of the `_end` functions.
@@ -940,12 +971,10 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
     }
     file_i->m_file_loading = false;
 
-    //Update idle information.
-    file_i->m_idle = true;
-    if (file_i < file_i->m_task->m_idle_first)
-    {
-        file_i->m_task->m_idle_first = file_i;
-    }
+    // An empty file has no chunk work to schedule. Skip it while preserving
+    // earlier files whose responses may also have made them runnable.
+    download_idle_update(std::min(file_i, file_i->m_task->m_idle_first));
+    download_complete(*file_i);
     return;
 }
 
@@ -1069,6 +1098,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
     }
 
     std::ofstream content_stream{ lgo::create_ofstream_preserve(chunk.m_file->m_path_local) };
+    if (!content_stream) throw std::runtime_error{ "Cannot write download file: " + chunk.m_file->m_path_local };
     content_stream.seekp(0, std::ios_base::end);
     std::uint64_t filesystem_size{};
     while (true)
@@ -1094,6 +1124,8 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
         ++chunk_filesystem.m_file->m_filesystem_progress;
     }
 
+    // Finish the write before publishing progress or removing the last task owner.
+    content_stream.close();
     //Update progress.
     download_task_t& task{ *chunk.m_file->m_task };
     task.m_progress += filesystem_size;
@@ -1106,12 +1138,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
         false
     );
 
-    //Remove the task from load state if it is finished.
-    if (task.m_progress == task.m_size)
-    {
-        task.m_state->m_progress_column->remove_object(task.m_progress_div);
-        task.m_state->m_task_list.erase(task.m_self_i);
-    }
+    download_complete(*file);
 
     return;
 }

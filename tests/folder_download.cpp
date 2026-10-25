@@ -36,6 +36,7 @@ int main()
         GUI_persistent_t persistent{};
         curl_multi_t multi{};
         home(&engine, &gui, &persistent, &column, &loads, &multi, &queue, &pos);
+        check(queue.count() == 21000, "This test requires the upload reserve threshold.");
         auto add = [&](const std::string& id, const std::filesystem::path& path, bool folder = true)
         {
             // The fixture replaces only the native picker with an "output" selection;
@@ -51,22 +52,36 @@ int main()
         auto empty{ add("folder-empty", "output/empty") };
         auto zeros{ add("folder-zeros", "output/zeros") };
         auto empty_file{ add("slow-empty", "output/single-empty.bin", false) };
-        for (int i{};i!=3;++i) {
-            if(!list_folder_content(google_easy_t::get(),&pos).empty()) throw std::runtime_error("Browsing returned wrong data.");
-            engine.message_loop();
+        // Browsing uses the GUI thread's connection while preparation uses worker-local connections.
+        for (int i{}; i != 3; ++i) check(list_folder_content(google_easy_t::get(), &pos).empty(), "Browsing returned wrong data.");
+        const auto deadline{ std::chrono::steady_clock::now() + 20s };
+        while (!loads.m_task_list.empty())
+        {
+            check(std::chrono::steady_clock::now() < deadline, "Folder download stalled.");
+            check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed during preparation/download.");
+            lgo::text_line_t::pending_load();
         }
-        for(auto task : {nested,concurrent,empty,zeros,empty_file}) {
-            check(task->m_prepared.wait_for(5s)==std::future_status::ready,"Preparation stalled.");
-            task->m_prepared.get();
-            column->remove_object(task->m_progress_div);
-            loads.m_task_list.erase(task->m_self_i);
+        check(loads.m_end.empty(), "A completed download still has pending callbacks.");
+        for (const auto& directory : { "output/nested", "output/concurrent" })
+        {
+            const std::filesystem::path path{ directory };
+            check(lgo::get_file_str((path / "payload.bin").string()) == "ABCDEF", "Multipart file content differs.");
+            check(lgo::get_file_str((path / "sub/child.bin").string()) == "nested", "Nested file content differs.");
+            check(lgo::get_file_str((path / "page-two.bin").string()) == "page two", "Paginated folder entry missing.");
+            check(std::filesystem::file_size(path / "empty.bin") == 0, "Empty file missing.");
+            check(std::filesystem::is_directory(path / "empty-dir"), "Empty subfolder missing.");
         }
-        check(nested->m_file_arr.size()==4 && concurrent->m_file_arr.size()==4,"Folder entries differ.");
-        std::println("PASS: production callbacks prepare concurrent folders using worker-owned HTTP handles");
+        check(std::filesystem::is_directory("output/empty"), "Empty root directory missing.");
+        check(std::filesystem::is_directory("output/zeros/child"), "Nested empty directory missing.");
+        check(std::filesystem::file_size("output/zeros/zero.bin") == 0, "Zero-only folder file missing.");
+        check(std::filesystem::file_size("output/single-empty.bin") == 0, "Standalone empty file missing.");
+        check(nested->m_progress == nested->m_size && nested->m_files_remaining == 0, "Task completion counters differ.");
+        std::println("PASS: concurrent recursive folders, pagination, empty files/directories, and delayed empty-file metadata");
+
         auto bad{ add("folder-bad", "output/bad") };
         check(bad->m_prepared.wait_for(5s) == std::future_status::ready, "Bad preparation never completed.");
         bool reported{};
-        try { google_easy_t unused{}; transfer_begin(&loads, multi, std::move(unused), &queue); }
+        try { message_loop(&engine, &persistent, &multi, &loads, &queue); }
         catch (const nlohmann::json::exception&) { reported = true; }
         check(reported && loads.m_end.empty(), "Preparation error was ignored or scheduled invalid work.");
         column->remove_object(bad->m_progress_div);
