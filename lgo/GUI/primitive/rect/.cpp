@@ -483,14 +483,23 @@ namespace lgo
     auto rect_primitive_t::color_enable() -> void
     {
         std::unique_lock lock{ m_mutex };
+        if (!m_texture_enable) return;
+        m_engine->flush();
         m_texture_enable = false;
+        // Solid and textured vertices have different layouts and buffer sizes.
+        release_gpu();
+        create_gpu();
         return;
     }
 
     auto rect_primitive_t::texture_enable() -> void
     {
         std::unique_lock lock{ m_mutex };
+        if (m_texture_enable) return;
+        m_engine->flush();
         m_texture_enable = true;
+        release_gpu();
+        create_gpu();
         return;
     }
 

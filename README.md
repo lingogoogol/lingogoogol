@@ -170,7 +170,7 @@ Release 預設也會定義 `DEBUG_VULKAN_NAME`。它會在建立或重建 Vulkan
 
 ### 矩形 primitive 的資源更新
 
-`rect_primitive_t::set_image_view()` 會等待 GPU 完成工作，再重建 descriptor，使後續繪圖使用新指定的 image view。
+`rect_primitive_t::set_image_view()` 會等待 GPU 完成工作，再重建 descriptor，使後續繪圖使用新指定的 image view。`color_enable()` 與 `texture_enable()` 切換模式時也會等待 GPU 閒置，並重建符合頂點格式的緩衝區與 descriptor；貼圖模式須先提供有效的 image view。
 
 ### GUI 物件名稱與日誌
 
