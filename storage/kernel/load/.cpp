@@ -273,6 +273,10 @@ auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy
                 {
                     //Keep the progress entry until publication succeeds, and propagate errors.
                     upload_task_ptr->m_linked.get();
+                    if (state->m_on_upload_linked)
+                    {
+                        state->m_on_upload_linked(upload_task_ptr->m_pos.m_main_id);
+                    }
                     state->m_progress_column->remove_object(upload_task_ptr->m_progress_div);
                     state->m_task_list.erase(upload_task_ptr->m_self_i);
                     return false;

@@ -81,6 +81,8 @@ export
         std::shared_ptr<lgo::divy_soft_t> m_progress_column{};
         //Serialize read/modify/write publication to existing folders to avoid lost entries.
         std::shared_future<void> m_upload_linked{};
+        //Invoked on the GUI thread after publication succeeds.
+        std::function<void(const std::string&)> m_on_upload_linked{};
     };
     
     struct load_task_t

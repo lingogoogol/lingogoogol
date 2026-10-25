@@ -809,6 +809,20 @@ auto home
 		)
 	};
 
+    load_state->m_on_upload_linked =
+        [engine, persistent, multi, load_state, blob_queue, pos, viewer = std::weak_ptr{ viewer_div }]
+        (const std::string& uploaded_pos)
+        {
+            //Navigation already reloads other folders. Refresh only the visible destination
+            //so completing an upload never navigates the user away from their current folder.
+            if (*pos == uploaded_pos)
+            {
+                if (auto viewer_div{ viewer.lock() })
+                {
+                    list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos);
+                }
+            }
+        };
 
 	auto center_div
 	{
