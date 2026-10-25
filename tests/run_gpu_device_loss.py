@@ -13,7 +13,7 @@ import urllib.request
 
 source = Path(__file__).resolve().parents[1]
 project = source.parent
-gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown')
+gpu_modes = ('names', 'flush', 'fence', 'acquire', 'submit', 'present', 'map', 'buffer', 'glyph', 'native', 'retry', 'fallback', 'repeated', 'shutdown', 'unwind', 'transfer-shutdown', 'logging', 'logging-crash')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build', type=Path, default=project / 'build/x64-win32-pe-mingw_Release')
 parser.add_argument('--runtime', type=Path, default=project / 'install/x64-win32-pe-mingw_Release')
@@ -69,7 +69,12 @@ with tempfile.TemporaryDirectory(prefix='storage-gpu-test-') as directory:
         Path(env['WINEPREFIX']).mkdir(parents=True, exist_ok=True)
     for mode in gpu_modes:
         if not args.mode or mode in args.mode:
-            run_test(test / 'test.exe', test, env, mode)
+            if mode == 'logging-crash':
+                run_test(test / 'test.exe', test, env, mode, expected_code=86)
+                assert (test / 'crash-log.txt').read_bytes() == b'first completed message\nlast completed message\n'
+                print('PASS: flushed log messages survive abrupt exit without destructors or closing the log handle', flush=True)
+            else:
+                run_test(test / 'test.exe', test, env, mode)
 
     if args.mode and 'transfer' not in args.mode:
         raise SystemExit(0)

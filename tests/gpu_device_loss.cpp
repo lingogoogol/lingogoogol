@@ -126,6 +126,33 @@ auto test_names() -> void
         lgo::vulkan_names_enabled ? "enabled" : "disabled");
 }
 
+auto test_logging() -> void
+{
+    std::filesystem::remove("concurrent-log.txt");
+    lgo::get_logfile_string().clear();
+    lgo::init_logfile("concurrent-log.txt");
+    {
+        std::vector<std::jthread> workers;
+        for (int worker{}; worker < 4; ++worker)
+            workers.emplace_back([worker]
+            {
+                for (int line{}; line < 100; ++line)
+                    lgo::log_file(std::format("{}:{}\n", worker, line));
+            });
+    }
+    std::istringstream lines{ lgo::get_file_str("concurrent-log.txt") };
+    std::set<std::string> entries;
+    for (std::string line; std::getline(lines, line);) entries.insert(line);
+    check(entries.size() == 400, "Concurrent log writes were lost or interleaved.");
+    // A directory cannot be opened for appending: this used to retry forever.
+    lgo::get_logfile_path() = ".";
+    lgo::log_file("unwritable log probe\n");
+    lgo::get_logfile_path() = "concurrent-log.txt";
+    lgo::log_file("reopened\n");
+    check(lgo::get_file_str("concurrent-log.txt").ends_with("reopened\n"), "Logger did not recover after an open failure.");
+    std::println("PASS: concurrent log writes, unwritable destination and reopen");
+}
+
 // Inject through Vulkan-Hpp's dispatch table, without adding production fault switches.
 // Drain the real device first: the test reports loss on an otherwise healthy driver.
 #define INJECT(function) \
@@ -235,6 +262,21 @@ int main(int argc, char** argv)
     {
         const std::string mode{ argc > 1 ? argv[1] : "fence" };
         lgo::init_logfile("logfile/device-loss.txt");
+        if (mode == "logging-crash")
+        {
+            std::filesystem::remove("crash-log.txt");
+            lgo::init_logfile("crash-log.txt");
+            lgo::log_file("first completed message\n");
+            lgo::log_file("last completed message\n");
+            // _Exit skips C++ destructors and C stream flushing: the persistent
+            // logger handle is deliberately left open at abrupt process exit.
+            std::_Exit(86);
+        }
+        if (mode == "logging")
+        {
+            test_logging();
+            return 0;
+        }
         if (mode == "names")
         {
             test_names();

@@ -104,38 +104,62 @@ namespace lgo
         return logfile_string;
     }
 
+    namespace
+    {
+        struct logfile_t
+        {
+            std::mutex mutex;
+            std::string path;
+            std::ofstream stream;
+        };
+
+        auto logfile() -> logfile_t&
+        {
+            static logfile_t state;
+            return state;
+        }
+    }
+
     auto log_file(const std::string& in) -> void
     {
-        if (get_logfile_path() == "")
+        auto& state{ logfile() };
+        std::unique_lock lock{ state.mutex };
+        if (get_logfile_path().empty())
         {
             get_logfile_string() += in;
             return;
         }
-        while (true)
+        try
         {
-            try
+            // Reuse an append handle: object lifecycle traces can contain many
+            // thousands of entries. Flush each message to retain crash diagnostics.
+            if (state.path != get_logfile_path() || !state.stream.is_open())
             {
-                std::ofstream stream{ create_ofstream_preserve(get_logfile_path()) };
-                stream.seekp(0, std::ios_base::end);
-                stream.write(in.data(), in.size());
-                return;
+                state.stream.close();
+                state.stream.clear();
+                state.path = get_logfile_path();
+                state.stream.open(state.path, std::ios::binary | std::ios::app);
             }
-            catch (const std::exception& e)
-            {
-                std::println("log_file:");
-                std::println("{0}", e.what());
-                std::println("  in:");
-                std::println("{0}", in);
-            }
+            state.stream.write(in.data(), static_cast<std::streamsize>(in.size()));
+            state.stream.flush();
+            if (!state.stream) throw std::runtime_error{ "Cannot write the log file: " + state.path };
         }
-        return;
+        catch (const std::exception& error)
+        {
+            // A full disk or invalid path must not trap rendering/native callbacks
+            // in an infinite retry loop. The next message may retry opening once.
+            state.stream.close();
+            state.stream.clear();
+            std::cerr << "log_file: " << error.what() << '\n';
+        }
     }
 
     auto init_logfile(const std::string& path) -> bool
     {
+        const auto parent{ std::filesystem::path{ path }.parent_path() };
+        if (!parent.empty()) std::filesystem::create_directories(parent);
         get_logfile_path() = path;
         log_file(get_logfile_string());
-        std::filesystem::create_directories(std::filesystem::path{ path }.parent_path());
         return true;
     }
 
