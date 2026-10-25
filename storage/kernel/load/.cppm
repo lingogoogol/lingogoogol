@@ -160,6 +160,11 @@ export
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
     struct upload_task_t: public load_task_t
     {
+        ~upload_task_t() override
+        {
+            // Preparation captures this task and writes its containers. Join before member destruction.
+            if (m_prepared.valid()) m_prepared.wait();
+        }
         std::string m_name{};
         std::future<void> m_prepared{};
         std::uint64_t m_size{ 0 };
@@ -222,6 +227,10 @@ export
 
     struct download_task_t: public load_task_t
     {
+        ~download_task_t() override
+        {
+            if (m_prepared.valid()) m_prepared.wait();
+        }
         std::string m_name{};
         std::string m_pos{};
         std::future<void> m_prepared{};
