@@ -10,6 +10,8 @@ constexpr auto CURL_GLOBAL_DEFAULT_export{ CURL_GLOBAL_DEFAULT };
 #undef CURL_GLOBAL_DEFAULT
 constexpr auto CURL_SEEKFUNC_OK_export{ CURL_SEEKFUNC_OK };
 #undef CURL_SEEKFUNC_OK
+constexpr auto CURL_SOCKET_BAD_export{ CURL_SOCKET_BAD };
+#undef CURL_SOCKET_BAD
 
 export
 {
@@ -19,6 +21,9 @@ export
     using ::curl_slist;
     using ::curl_header;
     using ::curl_off_t;
+    using ::curl_socket_t;
+    using ::curl_sockaddr;
+    using ::curlsocktype;
 
     using ::CURLcode;
     using enum ::CURLcode;
@@ -61,4 +66,5 @@ export
     constexpr auto CURLH_HEADER{ CURLH_HEADER_export };
     constexpr auto CURL_GLOBAL_DEFAULT{ CURL_GLOBAL_DEFAULT_export };
     constexpr auto CURL_SEEKFUNC_OK{ CURL_SEEKFUNC_OK_export };
+    constexpr auto CURL_SOCKET_BAD{ CURL_SOCKET_BAD_export };
 }

@@ -66,13 +66,30 @@ auto curl_multi_t::operator->() const -> CURLM*
     return m_interface;
 }
 
-auto curl_multi_t::run() -> std::uint64_t
+auto curl_multi_t::add(std::unique_ptr<curl_easy_t> easy) -> void
+{
+    if (!easy || !easy->nonempty()) throw std::invalid_argument{ "Cannot submit an empty curl request." };
+    CURL* key{ easy->interface_get() };
+    if (m_added.contains(key)) throw std::logic_error{ "Curl request is already submitted." };
+    curl_easy_multi_access_t::write_get(*easy) = std::make_unique<curl_easy_t::write_t>();
+    api_curl(curl_easy_setopt(key, CURLOPT_WRITEDATA,
+        static_cast<void*>(curl_easy_multi_access_t::write_get(*easy).get())));
+    auto [entry, inserted]{ m_added.emplace(key, std::move(easy)) };
+    try { api_curlm(curl_multi_add_handle(m_interface, key)); }
+    catch (...) { m_added.erase(entry); throw; }
+    ++m_running_count;
+}
+
+auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
 {
     api_curlm(curl_multi_perform(m_interface, &m_running_count));
     int message_count{};
     std::uint64_t failed_count{ 0 };
     while (true)
     {
+        // Socket shutdown may have interrupted Schannel inside perform(). Do not
+        // parse, regenerate or retry requests while the owner is stopping.
+        if (cancelled && cancelled->load()) return failed_count;
         CURLMsg* message{ curl_multi_info_read(m_interface, &message_count) };
         if (message)
         {
@@ -108,6 +125,7 @@ auto curl_multi_t::run() -> std::uint64_t
                         }
                         lgo::log_file(e.message() + "\n");
                     }
+                    if (cancelled && cancelled->load()) return failed_count;
                     if (successful && easy_ptr->valid())
                     {
                         m_ready.emplace(message->easy_handle);
@@ -157,7 +175,8 @@ auto curl_multi_t::running_count() -> int
 
 auto curl_multi_t::read_progress(CURL* key) -> std::uint64_t
 {
-    return curl_easy_multi_access_t::read_get(*m_added[key])->m_progress;
+    auto found{ m_added.find(key) };
+    return found == m_added.end() ? 0 : curl_easy_multi_access_t::read_get(*found->second)->m_progress;
 }
 
 auto curl_multi_t::poll(int timeout_ms) -> void

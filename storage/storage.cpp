@@ -157,20 +157,24 @@ auto app() -> void
 	{
         blob_queue_t blob_queue{ "blob_queue", &google_account_t::default_get(), &close_app };
         load_state_t load_state{};
+        curl_multi_worker_t multi{};
+		std::string pos{ root_id };
+		std::shared_ptr<lgo::divy_soft_t> progress_column{};
+		GUI_persistent_t persistent{};
         struct transfer_shutdown_t
         {
             blob_queue_t& queue;
+            curl_multi_worker_t& multi;
             ~transfer_shutdown_t()
             {
                 // Stop queue waits before task destructors join preparation workers;
                 // tasks must finish using the queue before its destructor saves it.
                 close_app = true;
                 queue.stop();
+                // Join curl before GUI state and transfer task callbacks are released.
+                multi.stop();
             }
-        } transfer_shutdown{ blob_queue };
-		std::string pos{ root_id };
-		std::shared_ptr<lgo::divy_soft_t> progress_column{};
-		GUI_persistent_t persistent{};
+        } transfer_shutdown{ blob_queue, multi };
 		home
 		(
 			&engine,
@@ -178,7 +182,7 @@ auto app() -> void
 			&persistent,
 			&progress_column,
 			&load_state,
-			&curl_multi_t::get(),
+			&multi,
 			&blob_queue,
 			&pos
 		);
@@ -188,7 +192,7 @@ auto app() -> void
 			(
 				&engine,
 				&persistent,
-				&curl_multi_t::get(),
+				&multi,
 				&load_state,
 				&blob_queue
 			)

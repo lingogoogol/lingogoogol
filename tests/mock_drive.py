@@ -93,9 +93,10 @@ class Handler(BaseHTTPRequestHandler):
             id=urllib.parse.urlparse(first.split()[1]).path.rsplit('/',1)[-1]
             if id.startswith('protocol-'):
                 protocol_kind=id[len('protocol-'):].rsplit('-',1)[0]
+            fault_kind=protocol_kind.removeprefix('worker-') if protocol_kind else None
             if first.startswith('GET '):
                 code,response=200,blobs.get(id,{'name':'{}','description':'[]'})
-                if protocol_kind=='mixed' and id.endswith('-b') and not protocol_attempts.get(protocol_kind):
+                if fault_kind=='mixed' and id.endswith('-b') and not protocol_attempts.get(protocol_kind):
                     code=503
                 events.append(['BATCH_GET',id])
             else:
@@ -107,13 +108,13 @@ class Handler(BaseHTTPRequestHandler):
         if protocol_kind and not protocol_attempts.get(protocol_kind):
             protocol_attempts[protocol_kind]=1
             events.append(['PROTOCOL_FAULT',protocol_kind])
-            if protocol_kind=='missing-id': response=response.replace(b'Content-ID: response-0',b'Ignored-ID: response-0')
-            if protocol_kind=='unknown-id': response=response.replace(b'Content-ID: response-0',b'Content-ID: response-999')
-            if protocol_kind=='duplicate-id': response=response.replace(b'Content-ID: response-1',b'Content-ID: response-0')
-            if protocol_kind=='truncated': response=response[:response.find(b'--fixture',len(b'--fixture'))]
-            if protocol_kind=='http-header': response=response.replace(b'Content-Type: application/json\r\n',b'Broken header\r\n')
-            if protocol_kind=='http-status': response=response.replace(b'HTTP/1.1 200 OK',b'HTTP/1.1 bad OK')
-            if protocol_kind=='boundary': return self.respond(200,response,'multipart/mixed')
+            if fault_kind=='missing-id': response=response.replace(b'Content-ID: response-0',b'Ignored-ID: response-0')
+            if fault_kind=='unknown-id': response=response.replace(b'Content-ID: response-0',b'Content-ID: response-999')
+            if fault_kind=='duplicate-id': response=response.replace(b'Content-ID: response-1',b'Content-ID: response-0')
+            if fault_kind=='truncated': response=response[:response.find(b'--fixture',len(b'--fixture'))]
+            if fault_kind=='http-header': response=response.replace(b'Content-Type: application/json\r\n',b'Broken header\r\n')
+            if fault_kind=='http-status': response=response.replace(b'HTTP/1.1 200 OK',b'HTTP/1.1 bad OK')
+            if fault_kind=='boundary': return self.respond(200,response,'multipart/mixed')
         self.respond(200,response,'multipart/mixed; boundary=fixture')
 server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
 (base/'server-port').write_text(str(server.server_port))

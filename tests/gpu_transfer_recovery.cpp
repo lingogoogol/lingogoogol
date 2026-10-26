@@ -48,7 +48,7 @@ try {
     std::string pos{"root"};
     std::shared_ptr<lgo::divy_soft_t> column{};
     GUI_persistent_t persistent{};
-    curl_multi_t multi{};
+    curl_multi_worker_t multi{};
     home(&engine,&gui,&persistent,&column,&loads,&multi,&queue,&pos);
     auto main=gui.get_object_shared<lgo::divy_hard_t>(0);
     auto work=main->get_object_shared<lgo::divx_soft_t>(3);

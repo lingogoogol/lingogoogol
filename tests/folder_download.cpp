@@ -21,17 +21,32 @@ int main()
     try
     {
         lgo::init_logfile("logfile/folder-download.txt");
-        if (std::getenv("STORAGE_DOWNLOAD_PROTOCOL_ONLY"))
+        if (const auto* protocol{ std::getenv("STORAGE_DOWNLOAD_PROTOCOL_ONLY") })
         {
+            const bool background{ std::string_view{ protocol } == "worker" };
+            curl_multi_worker_t worker;
             for (const auto& kind : { "missing-id", "unknown-id", "duplicate-id", "truncated", "boundary", "http-header", "http-status", "mixed" })
             {
                 google_batch_t batch{};
                 batch.boundary_set("+");
                 batch.path_set("/drive/v3");
                 for (const auto& suffix : { "a", "b" })
-                    blob_get(batch, std::string{ "protocol-" } + kind + "-" + suffix, "description");
+                    blob_get(batch, std::string{ "protocol-" } + (background ? "worker-" : "") + kind + "-" + suffix, "description");
                 batch.method_post();
-                batch.run();
+                if (background)
+                {
+                    worker.add(std::move(batch));
+                    const auto deadline{ std::chrono::steady_clock::now() + 5s };
+                    while (!worker.ready_nonempty())
+                    {
+                        worker.run();
+                        check(std::chrono::steady_clock::now() < deadline, "Background batch retry stalled.");
+                        std::this_thread::sleep_for(1ms);
+                    }
+                    auto response{ worker.ready_get_unique() };
+                    batch = std::move(dynamic_cast<google_batch_t&>(*response));
+                }
+                else batch.run();
                 check(batch.part_count() == 2, "Malformed batch added unexpected responses.");
                 for (std::size_t i{}; i < 2; ++i)
                 {
@@ -39,7 +54,8 @@ int main()
                     check(payload["description"] == "[]", "Batch retry lost a response.");
                 }
             }
-            std::println("PASS: malformed multipart responses retry safely and retain successful subrequests");
+            std::println("PASS: {} malformed multipart responses retry safely and retain successful subrequests",
+                background ? "background" : "synchronous");
             return 0;
         }
         lgo::FreeType_t freetype{};
@@ -55,7 +71,7 @@ int main()
         std::string pos{ "root" };
         std::shared_ptr<lgo::divy_soft_t> column{};
         GUI_persistent_t persistent{};
-        curl_multi_t multi{};
+        curl_multi_worker_t multi{};
         home(&engine, &gui, &persistent, &column, &loads, &multi, &queue, &pos);
         check(queue.count() == 0, "This test requires an empty blob reserve.");
         // A queued upload must not prevent downloads from using otherwise idle connections.

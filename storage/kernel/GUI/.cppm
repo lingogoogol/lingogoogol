@@ -2,6 +2,7 @@ export module storage.kernel.GUI;
 
 import std;
 
+import external.curl;
 import lgo.GUI;
 
 import storage.http;
@@ -10,25 +11,28 @@ import storage.kernel.load;
 
 export
 {
-    struct GUI_persistent_t
-    {
-        std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
-        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_cycle_rate{};
-        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_count{};
-        std::vector<std::shared_ptr<lgo::text_line_std_t>> m_load_easy_status{};
-    };
-
     struct easy_status_t
     {
         std::size_t m_text_index{};
         std::chrono::steady_clock::time_point m_add_time{};
     };
 
+    struct GUI_persistent_t
+    {
+        std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
+        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_cycle_rate{};
+        std::shared_ptr<lgo::text_line_std_t> m_blob_queue_count{};
+        std::vector<std::shared_ptr<lgo::text_line_std_t>> m_load_easy_status{};
+        // Handle ownership and status belong to this GUI/worker pair, never static storage.
+        std::vector<google_easy_t> m_easy_idle{};
+        std::map<CURL*, easy_status_t> m_easy_status{};
+    };
+
     auto message_loop
     (
         lgo::engine_t* engine,
         GUI_persistent_t* persistent,
-        curl_multi_t* multi,
+        curl_multi_worker_t* multi,
 	    load_state_t* load_state,
 	    blob_queue_t* blob_queue
     )
@@ -93,7 +97,7 @@ export
     (
         lgo::engine_t* engine,
         GUI_persistent_t* persistent,
-        curl_multi_t* multi,
+        curl_multi_worker_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
         std::shared_ptr<lgo::divy_soft_t> viewer_div,
@@ -106,7 +110,7 @@ export
     (
         lgo::engine_t* engine,
         GUI_persistent_t* persistent,
-        curl_multi_t* multi,
+        curl_multi_worker_t* multi,
         load_state_t* load_state,
         blob_queue_t* blob_queue,
         std::shared_ptr<lgo::divy_soft_t> viewer_div,
@@ -121,7 +125,7 @@ export
         GUI_persistent_t* persistent,
         std::shared_ptr<lgo::divy_soft_t>* progress_column,
         load_state_t* load_state,
-        curl_multi_t* multi,
+        curl_multi_worker_t* multi,
         blob_queue_t* blob_queue,
         std::string* pos
     )

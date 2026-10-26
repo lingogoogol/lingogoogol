@@ -302,13 +302,13 @@ export
     -> void;
 
     auto folder_root_create(google_easy_t& easy) -> std::string;
-    auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy, blob_queue_t* blob_queue) -> bool;
+    auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t&& easy, blob_queue_t* blob_queue) -> bool;
     auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> void;
 
     auto upload_complete(upload_entity_t* entity) -> void;
     auto upload_file_load_begin
     (
-        curl_multi_t& multi,
+        curl_multi_worker_t& multi,
         curl_easy_t&& easy,
         blob_queue_t* blob_queue,
         upload_file_t* file
@@ -322,7 +322,7 @@ export
         std::uint64_t chunk_count
     )
     -> void;
-    auto upload_chunk_load_begin(curl_multi_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void;
+    auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void;
     auto upload_chunk_load_end
     (
         std::unique_ptr<curl_easy_t>&,
@@ -333,7 +333,7 @@ export
     -> void;
     auto upload_chunk_transfer_begin
     (
-        curl_multi_t& multi,
+        curl_multi_worker_t& multi,
         curl_easy_t&& easy,
         blob_queue_t* blob_queue,
         upload_file_t* file
@@ -342,7 +342,7 @@ export
     auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* file, std::size_t chunk_i) -> void;
     auto upload_folder_load_begin
     (
-        curl_multi_t& multi,
+        curl_multi_worker_t& multi,
         curl_easy_t&& easy,
         blob_queue_t* blob_queue,
         upload_folder_t* folder
@@ -360,7 +360,7 @@ export
     auto download_idle_update(std::vector<download_file_t>::iterator file_i) -> void;
     auto download_file_load_begin
     (
-        curl_multi_t& multi,
+        curl_multi_worker_t& multi,
         curl_easy_t&& easy,
         std::vector<download_file_t>::iterator file_i
     )
@@ -368,7 +368,7 @@ export
     auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<download_file_t>::iterator file_i) -> void;
     auto download_chunk_load_begin
     (
-        curl_multi_t& multi,
+        curl_multi_worker_t& multi,
         curl_easy_t&& easy,
         std::vector<download_file_t>::iterator file_i
     )
@@ -380,7 +380,7 @@ export
         std::size_t i_begin
     )
     -> void;
-    auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void;
+    auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void;
     auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_file_t* file, std::size_t chunk_i) -> void;
 
     constexpr std::uint64_t content_size_max{ 25000 };

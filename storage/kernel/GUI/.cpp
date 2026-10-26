@@ -22,7 +22,7 @@ auto message_loop
 (
 	lgo::engine_t* engine,
 	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
+	curl_multi_worker_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue
 )
@@ -30,18 +30,14 @@ auto message_loop
 {
 	using namespace std::chrono_literals;
 	
-	//A array of easy handle that is not transfering and can be used.
-	static std::vector<google_easy_t> easy_idle_arr( load_easy_count );
-	static bool load_easy_status_init{ false };
-	static std::map<CURL*, easy_status_t> load_easy_status_map{};
-	if (!load_easy_status_init)
-	{
-		for (std::size_t i{ 0 }; i < easy_idle_arr.size(); ++i)
-		{
-			load_easy_status_map[easy_idle_arr[i].interface_get()].m_text_index = i;
-		}
-		load_easy_status_init = true;
-	}
+    auto& easy_idle_arr{ persistent->m_easy_idle };
+    auto& load_easy_status_map{ persistent->m_easy_status };
+    if (load_easy_status_map.empty())
+    {
+        easy_idle_arr.resize(load_easy_count);
+        for (std::size_t i{}; i < easy_idle_arr.size(); ++i)
+            load_easy_status_map[easy_idle_arr[i].interface_get()].m_text_index = i;
+    }
 
 	persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " + std::to_string(blob_queue->cycle_rate()));
 	persistent->m_blob_queue_count->set_text("blob_queue_count: " + std::to_string(blob_queue->count()));
@@ -81,11 +77,9 @@ auto message_loop
 		);
 	}
 
-	static std::chrono::steady_clock::time_point last_add_time{};
-	std::chrono::steady_clock::time_point now{ std::chrono::steady_clock::now() };
-	if (now - last_add_time > 0s && easy_idle_arr.size())
-	{
-		last_add_time = now;
+    // Submit at most one new request per frame; only the worker performs curl.
+    if (!easy_idle_arr.empty())
+    {
 		CURL* key{ easy_idle_arr.back().interface_get() };
 		if (transfer_begin(load_state, *multi, std::move(easy_idle_arr.back()), blob_queue))
 		{
@@ -94,7 +88,8 @@ auto message_loop
 		}
 	}
 	multi->run();
-	while (true)
+    // Bound completion work so a burst of finished requests still permits input/rendering.
+	for (std::size_t completed{}; completed < 8; ++completed)
 	{
 		if (!multi->ready_nonempty())
 		{
@@ -504,7 +499,7 @@ auto folder_button_callback
 (
 	lgo::engine_t* engine,
 	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
+	curl_multi_worker_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
 	std::shared_ptr<lgo::divy_soft_t> viewer_div,
@@ -531,7 +526,7 @@ auto list
 (
 	lgo::engine_t* engine,
 	GUI_persistent_t* persistent,
-	curl_multi_t* multi,
+	curl_multi_worker_t* multi,
 	load_state_t* load_state,
 	blob_queue_t* blob_queue,
 	std::shared_ptr<lgo::divy_soft_t> viewer_div,
@@ -633,7 +628,7 @@ auto home
 	GUI_persistent_t* persistent,
 	std::shared_ptr<lgo::divy_soft_t>* progress_column,
 	load_state_t* load_state,
-	curl_multi_t* multi,
+	curl_multi_worker_t* multi,
 	blob_queue_t* blob_queue,
 	std::string* pos
 )

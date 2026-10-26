@@ -11,6 +11,7 @@ target_sources(
 add_subdirectory(curl)
 add_subdirectory(easy)
 add_subdirectory(multi)
+add_subdirectory(worker)
 
 target_link_libraries(
     storage.http.curl
@@ -20,4 +21,5 @@ target_link_libraries(
         storage.http.curl.curl
         storage.http.curl.easy
         storage.http.curl.multi
+        storage.http.curl.worker
 )

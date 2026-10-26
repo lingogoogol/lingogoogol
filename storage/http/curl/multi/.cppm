@@ -25,8 +25,10 @@ export
 
         template<typename t_easy>
         auto add(t_easy&& easy) -> void;
+        // Preserve the dynamic type when a background queue transfers ownership.
+        auto add(std::unique_ptr<curl_easy_t> easy) -> void;
         //Returns the number of failed requests.
-        auto run() -> std::uint64_t;
+        auto run(const std::atomic_bool* cancelled = nullptr) -> std::uint64_t;
         auto running_count() -> int;
         auto read_progress(CURL* key) -> std::uint64_t;
         //Block until one of the handles has activity, or the timeout set or the internal timeout expires.
@@ -49,14 +51,7 @@ export
 template<typename t_easy>
 auto curl_multi_t::add(t_easy&& easy) -> void
 {
-    curl_easy_multi_access_t::write_get(easy) = std::make_unique<curl_easy_t::write_t>();
-    api_curl(curl_easy_setopt(curl_easy_multi_access_t::interface_get(easy), CURLOPT_WRITEDATA, static_cast<void*>(curl_easy_multi_access_t::write_get(easy).get())));
-    api_curlm(curl_multi_add_handle(m_interface, easy.interface_get()));
-    ++m_running_count;
-    //Get the key to `m_added` first before `easy` is moved.
-    CURL* key{ easy.interface_get() };
-    m_added[key] = std::make_unique<t_easy>(std::move(easy));
-    return;
+    add(std::unique_ptr<curl_easy_t>{ std::make_unique<std::remove_cvref_t<t_easy>>(std::forward<t_easy>(easy)) });
 }
 
 template<typename t_easy>
@@ -70,12 +65,13 @@ auto curl_multi_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
 {
     if (m_ready.empty())
     {
-        throw;
+        throw std::logic_error{ "No completed curl request is available." };
     }
     CURL* ptr{ *m_ready.begin() };
     m_ready.erase(ptr);
     auto out_ptr{ std::move(m_added.at(ptr)) };
-    // Returned handles may be destroyed or submitted to a different multi.
+    // A returned handle can be destroyed or submitted to a different worker.
+    // Keeping its old pointer here makes destruction touch a foreign/freed handle.
     m_added.erase(ptr);
     return out_ptr;
 }

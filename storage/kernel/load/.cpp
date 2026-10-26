@@ -286,7 +286,7 @@ auto folder_root_create(google_easy_t& easy) -> std::string
 // either because we must wait for other transfers to end to start a transfer
 // or there is simply no tasks to run.
 //This function does not modify the easy object if there are no transfers to run.
-auto transfer_begin(load_state_t* state, curl_multi_t& multi, curl_easy_t&& easy, blob_queue_t* blob_queue) -> bool
+auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t&& easy, blob_queue_t* blob_queue) -> bool
 {
     using namespace std::chrono_literals;
 
@@ -531,7 +531,7 @@ auto upload_complete(upload_entity_t* entity) -> void
 
 auto upload_file_load_begin
 (
-    curl_multi_t& multi,
+    curl_multi_worker_t& multi,
     curl_easy_t&& easy,
     blob_queue_t* blob_queue,
     upload_file_t* file
@@ -622,7 +622,7 @@ auto upload_file_load_end
     return;
 }
 
-auto upload_chunk_load_begin(curl_multi_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void
+auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void
 {
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
@@ -697,7 +697,7 @@ auto upload_chunk_load_end
 
 auto upload_chunk_transfer_begin
 (
-    curl_multi_t& multi,
+    curl_multi_worker_t& multi,
     curl_easy_t&& easy,
     blob_queue_t* blob_queue,
     upload_file_t* file
@@ -798,7 +798,7 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
 
 auto upload_folder_load_begin
 (
-    curl_multi_t& multi,
+    curl_multi_worker_t& multi,
     curl_easy_t&& easy,
     blob_queue_t* blob_queue,
     upload_folder_t* folder
@@ -968,7 +968,7 @@ auto download_idle_update(std::vector<download_file_t>::iterator file_i) -> void
 
 auto download_file_load_begin
 (
-    curl_multi_t& multi,
+    curl_multi_worker_t& multi,
     curl_easy_t&& easy,
     std::vector<download_file_t>::iterator file_i
 )
@@ -1021,7 +1021,7 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
 
 auto download_chunk_load_begin
 (
-    curl_multi_t& multi,
+    curl_multi_worker_t& multi,
     curl_easy_t&& easy,
     std::vector<download_file_t>::iterator file_i
 )
@@ -1095,7 +1095,7 @@ auto download_chunk_load_end
     return;
 }
 
-auto download_chunk_transfer_begin(curl_multi_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void
+auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void
 {
     std::size_t request_count{ chunk.m_content_id.size() };
     google_batch_t batch{ std::move(easy) };
