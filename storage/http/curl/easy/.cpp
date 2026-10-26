@@ -54,6 +54,7 @@ curl_easy_t::curl_easy_t(curl_easy_t&& in)
     m_header{ std::move(in.m_header) },
     m_read{ std::move(in.m_read) },
     m_write{ std::move(in.m_write) },
+    m_response_code{ in.m_response_code },
     m_header_curl{ in.m_header_curl }
 {
     in.m_interface = nullptr;
@@ -70,6 +71,7 @@ auto curl_easy_t::operator=(curl_easy_t&& in) -> curl_easy_t&
     m_header = std::move(in.m_header);
     m_read = std::move(in.m_read);
     m_write = std::move(in.m_write);
+    m_response_code = in.m_response_code;
     m_header_curl = in.m_header_curl;
     
     in.m_interface = nullptr;
