@@ -62,14 +62,8 @@ auto curl_multi_t::add(t_easy&& easy) -> void
 template<typename t_easy>
 auto curl_multi_t::ready_get() -> t_easy
 {
-    if (m_ready.empty())
-    {
-        throw;
-    }
-    CURL* ptr{ *m_ready.begin() };
-    m_ready.erase(ptr);
-    auto out_ptr{ dynamic_cast<t_easy*>(m_added[ptr].get()) };
-    return std::move(*out_ptr);
+    auto easy{ ready_get_unique() };
+    return std::move(dynamic_cast<t_easy&>(*easy));
 }
 
 auto curl_multi_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
@@ -80,6 +74,8 @@ auto curl_multi_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
     }
     CURL* ptr{ *m_ready.begin() };
     m_ready.erase(ptr);
-    auto out_ptr{ std::move(m_added[ptr]) };
+    auto out_ptr{ std::move(m_added.at(ptr)) };
+    // Returned handles may be destroyed or submitted to a different multi.
+    m_added.erase(ptr);
     return out_ptr;
 }
