@@ -1,22 +1,26 @@
 export module storage.google.easy;
 
 import std;
-
 import storage.http.curl.easy;
 
 export
 {
     class google_easy_t: public curl_easy_t
     {
+        std::string m_sent_token;
+        unsigned m_auth_retries{};
     public:
-        //Returns a google_easy_t whose underlying curl easy handle is distinct from that of curl_easy_t::get().
+        // Distinct from curl_easy_t::get(), and local to the executing thread.
         static auto get() -> google_easy_t&;
-
         google_easy_t();
         google_easy_t(curl_easy_t&& in);
-
-        virtual auto clear() -> void override;
+        auto clear() -> void override;
+        auto prepare() -> bool override;
+        auto resume() -> void override;
+    protected:
+        // Batch requests can carry a 401 inside an otherwise successful response.
+        virtual auto authorization_rejected() const -> bool;
     private:
-        virtual auto method() -> void override;
+        auto method() -> void override;
     };
 }

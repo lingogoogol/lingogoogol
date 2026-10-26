@@ -41,7 +41,7 @@ curl_multi_t::~curl_multi_t()
     {
         for (auto& added : m_added)
         {
-            if (!m_ready.contains(added.first))
+            if (!m_ready.contains(added.first) && !m_waiting.contains(added.first))
             {
                 curl_multi_remove_handle(m_interface, added.first);
             }
@@ -75,13 +75,22 @@ auto curl_multi_t::add(std::unique_ptr<curl_easy_t> easy) -> void
     api_curl(curl_easy_setopt(key, CURLOPT_WRITEDATA,
         static_cast<void*>(curl_easy_multi_access_t::write_get(*easy).get())));
     auto [entry, inserted]{ m_added.emplace(key, std::move(easy)) };
-    try { api_curlm(curl_multi_add_handle(m_interface, key)); }
+    try { m_waiting.emplace(key); }
     catch (...) { m_added.erase(entry); throw; }
-    ++m_running_count;
 }
 
 auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
 {
+    // Waiting for credentials must not stall other transfers in this multi.
+    for (auto entry{ m_waiting.begin() }; entry != m_waiting.end();)
+    {
+        if (cancelled && cancelled->load()) return 0;
+        auto& easy{ *m_added.at(*entry) };
+        if (!easy.prepare()) { ++entry; continue; }
+        curl_easy_multi_access_t::response_code_get(easy) = 0;
+        api_curlm(curl_multi_add_handle(m_interface, *entry));
+        entry = m_waiting.erase(entry);
+    }
     api_curlm(curl_multi_perform(m_interface, &m_running_count));
     int message_count{};
     std::uint64_t failed_count{ 0 };
@@ -137,15 +146,10 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                             "A transfer failed in curl_multi_t::run:\n"
                             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
                             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
-                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) +
-                            "  request:\n" +
-                            curl_easy_multi_access_t::read_get(*easy_ptr)->m_payload +
-                            "  response:\n" +
-                            curl_easy_multi_access_t::write_get(*easy_ptr)->m_payload
+                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + "\n"
                         );
                         easy_ptr->resume();
-                        api_curlm(curl_multi_add_handle(m_interface, easy_ptr->interface_get()));
-                        ++m_running_count;
+                        m_waiting.emplace(message->easy_handle);
                         ++failed_count;
                     }
                     break;
@@ -170,7 +174,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
 
 auto curl_multi_t::running_count() -> int
 {
-    return m_running_count;
+    return m_running_count + static_cast<int>(m_waiting.size());
 }
 
 auto curl_multi_t::read_progress(CURL* key) -> std::uint64_t

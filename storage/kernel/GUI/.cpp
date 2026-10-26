@@ -29,6 +29,7 @@ auto message_loop
 -> bool
 {
 	using namespace std::chrono_literals;
+    blob_queue->check_error();
 	
     auto& easy_idle_arr{ persistent->m_easy_idle };
     auto& load_easy_status_map{ persistent->m_easy_status };

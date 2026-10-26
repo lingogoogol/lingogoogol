@@ -57,6 +57,9 @@ export
 
         auto run() -> void;
         auto run_try() -> void;
+        // Nonblocking preparation before each attempt. False keeps the request
+        // outside CURLM while asynchronous credentials are being refreshed.
+        virtual auto prepare() -> bool;
         //Call parse() first then valid().
         virtual auto parse() -> void;
         //valid() is meaningful only after a call to parse().

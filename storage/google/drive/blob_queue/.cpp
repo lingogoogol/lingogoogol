@@ -106,7 +106,18 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
             m_id[i] = arr[i];
         }
     }
-    m_thread = std::thread{ std::bind(&blob_queue_t::process, this) };
+    m_thread = std::thread{ [this]
+    {
+        try { process(); }
+        catch (...)
+        {
+            {
+                std::unique_lock lock{ m_mutex };
+                if (!m_stopped) m_error = std::current_exception();
+            }
+            m_condition_variable.notify_all();
+        }
+    } };
     return;
 }
 
@@ -138,8 +149,9 @@ blob_queue_t::~blob_queue_t()
 auto blob_queue_t::get() -> std::string
 {
     std::unique_lock lock{ m_mutex };
-    m_condition_variable.wait(lock, [this] () -> bool { return m_stopped || (!m_clearing && m_id.size() > 1); });
+    m_condition_variable.wait(lock, [this] () -> bool { return m_stopped || m_error || (!m_clearing && m_id.size() > 1); });
     if (m_stopped) throw std::runtime_error{ "Blob queue stopped." };
+    if (m_error) std::rethrow_exception(m_error);
     std::string out{ m_id.front() };
     m_id.pop_front();
     return out;
@@ -148,11 +160,18 @@ auto blob_queue_t::get() -> std::string
 auto blob_queue_t::get(std::uint64_t count) -> std::vector<std::string>
 {
     std::unique_lock lock{ m_mutex };
-    m_condition_variable.wait(lock, [this, count] () -> bool { return m_stopped || (!m_clearing && m_id.size() >= count); });
+    m_condition_variable.wait(lock, [this, count] () -> bool { return m_stopped || m_error || (!m_clearing && m_id.size() >= count); });
     if (m_stopped) throw std::runtime_error{ "Blob queue stopped." };
+    if (m_error) std::rethrow_exception(m_error);
     std::vector<std::string> out{ m_id.begin(), m_id.begin() + count };
     m_id.erase(m_id.begin(), m_id.begin() + count);
     return out;
+}
+
+auto blob_queue_t::check_error() const -> void
+{
+    std::unique_lock lock{ m_mutex };
+    if (m_error) std::rethrow_exception(m_error);
 }
 
 auto blob_queue_t::count() -> std::uint64_t

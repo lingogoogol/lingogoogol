@@ -96,7 +96,11 @@ Set-Location "C:\path\to\runtime"
 
 主迴圈的上下載 multi 傳輸由專用背景執行緒處理，包含 `curl_multi_perform()`、回應解析及重試。單次請求 timeout 維持 **300 秒**，連線 timeout 維持 **100 秒**；Schannel 在斷網或傳送受阻時，即使在一次 perform 內等待 socket，GUI 仍可繼續繪製與處理事件。主執行緒透過佇列提交請求、讀取進度快照及領取結果，工作狀態和畫面由主執行緒更新。背景卡住期間，進度快照可能暫停更新；關閉此傳輸 worker 時會以 socket shutdown 喚醒等待，再停止及回收執行緒。
 
-此調整限於主迴圈的 multi 傳輸。瀏覽目錄、上傳完成後刷新清單，以及準備請求時必要的 OAuth token 更新仍有同步網路呼叫，這些操作遇到慢網路時仍可能等待；本機檔案讀寫、編碼及結果套用也仍可能影響單幀時間。
+OAuth access token 的簽署與取得也由背景 worker 處理。建立請求不再等待 token；實際送出前才取得最新授權，等待刷新時其他傳輸仍可運行。同一帳戶的並行請求共用一次刷新，效期使用 OAuth 回覆的 `expires_in`，有新請求且接近到期時會提早刷新；舊 token 尚有效時可繼續使用。
+
+一般請求的 HTTP 401 或批次內層的 401 會淘汰該次使用的 token，等待刷新後再重送，並保留原本的 HTTP method、內容及批次中已成功的子請求。較晚抵達的舊 401 不會清除較新的 token；503 等其他錯誤不會強制刷新。每個請求最多在 401 後刷新重送一次，若新 token 仍被拒絕，會回報錯誤，避免無限重試。OAuth 的網路／5xx 錯誤最多嘗試三次，重試間分別等待一秒與兩秒；4xx 或不合法的 token 回應直接回報錯誤。錯誤依既有工作／程式錯誤處理顯示；帳戶刷新失敗且無有效 token 時不會自動重啟刷新，修正帳戶設定或網路問題後重新啟動程式。失敗日誌不會寫入請求／回應本文，以免洩漏簽署憑證或 token。
+
+瀏覽目錄及上傳完成後刷新清單仍有同步的 Drive API 呼叫，這些操作遇到慢網路時仍可能等待；本機檔案讀寫、編碼及結果套用也仍可能影響單幀時間。正常關閉會停止 token worker，喚醒仍在等待授權的準備工作，並保存未使用的 blob 佇列。
 
 下載準備、資料解析、解碼或本機寫入失敗時，工作會保留在左側並顯示「下載失敗」及原因，同時記錄至 `logfile/`；其他傳輸與畫面操作可繼續。失敗工作不會再排程新請求，已在途的回應收回後不會繼續寫入。已建立的部分檔案會保留，不能視為完整下載。需要重試時，重新點選該項目的「下載」；失敗工作會保留至程式關閉，不會在下次啟動時自動重試。
 
@@ -212,6 +216,7 @@ python3 tests/run_gpu_device_loss.py
 python3 tests/run_vulkan_startup_error.py
 python3 tests/run_folder_download.py
 python3 tests/run_background_multi.py
+python3 tests/run_token_refresh.py
 ```
 
 測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 與 Vulkan 啟動測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
@@ -226,6 +231,7 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `run_background_multi.py` 另需要 OpenSSL 指令，用本機自簽 TLS 上傳製造傳送阻塞，檢查持續繪圖與縮放、GUI 輪詢延遲、停止等待、跨 worker 移交 handle、背景解析及例外傳遞。資料夾測試中的八種批次回應錯誤會分別驗證同步與背景重試。Linux 可用 `sudo -n unshare --net python3 tests/run_background_multi.py --offline` 各跑三次介面關閉及丟包測試（需 sudo、unshare 與 nft）；腳本只修改隔離 network namespace 的 loopback，並使用獨立 Wine prefix，不會關閉主機網路或存取雲端帳戶。
 
+`run_token_refresh.py` 使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
 
 ## 歡迎貢獻
 

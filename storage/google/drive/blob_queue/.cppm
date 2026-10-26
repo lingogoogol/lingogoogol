@@ -11,6 +11,7 @@ export
 	private:
 		std::deque<std::string> m_id{};
 		mutable std::mutex m_mutex{};
+        std::exception_ptr m_error{};
 		std::thread m_thread{};
 		std::condition_variable m_condition_variable{};
 		std::filesystem::path m_path{};
@@ -26,6 +27,7 @@ export
 		blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close);
 		~blob_queue_t();
         auto stop() -> void;
+        auto check_error() const -> void;
 
 		auto get() -> std::string;
 		auto get(std::uint64_t count) -> std::vector<std::string>;

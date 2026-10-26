@@ -35,6 +35,7 @@ auto google_batch_t::clear() -> void
     google_easy_t::clear();
     m_part.clear();
     m_id_current = 0;
+    m_auth_rejected = false;
     return;
 }
 
@@ -108,6 +109,7 @@ auto google_batch_t::run_clear_if_full() -> void
 
 auto google_batch_t::parse() -> void
 {
+    m_auth_rejected = false;
     if (!curl_easy_t::valid()) return;
 
     // A successful outer HTTP response can still contain a truncated or invalid
@@ -175,6 +177,7 @@ auto google_batch_t::parse() -> void
         {
             auto& part{ m_part.at(id) };
             part.m_valid = response.status_code_get().starts_with('2');
+            if (response.status_code_get() == "401") m_auth_rejected = true;
             part.m_response = std::move(response);
         }
     }
@@ -204,10 +207,20 @@ auto google_batch_t::valid() -> bool
 
 auto google_batch_t::resume() -> void
 {
-    curl_easy_t::resume();
+    google_easy_t::resume();
+    // Consume this attempt's auth failure. A later transport/framing failure
+    // must not mistake an old retained subresponse for another fresh 401.
+    m_auth_rejected = false;
     body_generate();
-    curl_easy_t::method_post(m_body);
+    // The method remains POST. Replacing just the pending body preserves the
+    // authentication retry budget; method_post() would start a new request.
+    m_read->m_payload = m_body;
     return;
+}
+
+auto google_batch_t::authorization_rejected() const -> bool
+{
+    return google_easy_t::authorization_rejected() || m_auth_rejected;
 }
 
 auto google_batch_t::body_generate() -> void

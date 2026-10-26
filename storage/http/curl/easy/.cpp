@@ -223,11 +223,9 @@ auto curl_easy_t::run() -> void
             "A transfer failed in curl_easy_t::run:"
             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(m_interface)) +
-            "  response_code: " + std::to_string(m_response_code) +
-            "  request:\n" +
-            m_read->m_payload +
-            "  response:\n" +
-            m_write->m_payload
+            // OAuth bodies contain signed assertions or access tokens. Keep
+            // failure diagnostics, but never dump arbitrary request/response bodies.
+            "  response_code: " + std::to_string(m_response_code) + "\n"
         );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
         //folder publication retries send an empty body after the first attempt.
@@ -240,6 +238,8 @@ auto curl_easy_t::run_try() -> void
 {
     while (true)
     {
+        while (!prepare()) std::this_thread::sleep_for(std::chrono::milliseconds{ 5 });
+        m_response_code = 0;
         m_write = std::make_unique<write_t>();
         api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
         try
@@ -259,6 +259,8 @@ auto curl_easy_t::run_try() -> void
     parse();
     return;
 }
+
+auto curl_easy_t::prepare() -> bool { return true; }
 
 auto curl_easy_t::parse() -> void {}
 

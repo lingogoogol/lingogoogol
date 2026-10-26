@@ -173,6 +173,7 @@ auto app() -> void
                 queue.stop();
                 // Join curl before GUI state and transfer task callbacks are released.
                 multi.stop();
+                google_account_t::default_get().stop();
             }
         } transfer_shutdown{ blob_queue, multi };
 		home

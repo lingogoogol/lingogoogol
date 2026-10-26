@@ -29,3 +29,7 @@ auto google_easy_t::clear() -> void {
     curl_easy_t::clear(); host_set(mock_host());
 }
 auto google_easy_t::method() -> void { curl_easy_setopt(interface_get(), CURLOPT_VERBOSE, 0L); curl_easy_t::method(); }
+
+auto google_easy_t::prepare() -> bool { return true; }
+auto google_easy_t::resume() -> void { curl_easy_t::resume(); }
+auto google_easy_t::authorization_rejected() const -> bool { return false; }

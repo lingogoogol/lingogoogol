@@ -36,6 +36,8 @@ export
         virtual auto parse() -> void;
         virtual auto valid() -> bool override;
         virtual auto resume() -> void override;
+    protected:
+        auto authorization_rejected() const -> bool override;
     private:
         struct part_t
         {
@@ -50,6 +52,7 @@ export
         std::string m_boundary{};
         std::uint64_t m_id_current{};
         std::string m_body{};
+        bool m_auth_rejected{};
         //The number of parts generated in `m_body` in the last call to `body_generate`.
         std::uint64_t m_count{};
     };
