@@ -10,7 +10,7 @@ export
 	{
 	private:
 		std::deque<std::string> m_id{};
-		std::mutex m_mutex{};
+		mutable std::mutex m_mutex{};
 		std::thread m_thread{};
 		std::condition_variable m_condition_variable{};
 		std::filesystem::path m_path{};

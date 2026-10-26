@@ -31,11 +31,13 @@ auto blob_queue_t::process() -> void
         std::this_thread::sleep_until(last_cycle_time + 0.1s);
         std::chrono::high_resolution_clock::time_point now{ std::chrono::high_resolution_clock::now() };
         last_cycle_time = now;
+        std::unique_lock cycle_lock{ m_mutex };
         m_cycle_time.push_back(now);
         while (m_cycle_time.front() <= now - 1s)
         {
             m_cycle_time.pop_front();
         }
+        cycle_lock.unlock();
 
         multi.run();
         while (true)
@@ -161,6 +163,7 @@ auto blob_queue_t::count() -> std::uint64_t
 
 auto blob_queue_t::cycle_rate() const -> std::uint64_t
 {
+    std::unique_lock lock{ m_mutex };
     return m_cycle_time.size();
 }
 
