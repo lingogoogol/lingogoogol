@@ -246,6 +246,19 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
         report_error("Application error", error);
         result = 1;
     }
+    catch (...)
+    {
+        try
+        {
+            lgo::log_file("uncaught exception: non-std exception reached wWinMain.\n");
+        }
+        catch (...)
+        {
+        }
+        MessageBoxW(nullptr, L"Unknown application error. See the configured logfile directory.", L"Storage",
+                    MB_OK | MB_ICONERROR);
+        result = 1;
+    }
     lgo::log_file("finished_all!\n");
     return result;
 }
