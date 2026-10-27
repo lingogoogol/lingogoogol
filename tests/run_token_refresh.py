@@ -83,12 +83,19 @@ class Handler(BaseHTTPRequestHandler):
                     state.required = state.tokens + 1
                 return self.respond(200, state.report())
         if path == '/token':
+            form = urllib.parse.parse_qs(body, strict_parsing=True)
+            valid_grant = form.get('grant_type') == ['urn:ietf:params:oauth:grant-type:jwt-bearer']
+            valid_assertion = len(form.get('assertion', [])) == 1 and bool(form['assertion'][0])
             with state.lock:
                 state.tokens += 1
                 issued = state.tokens
                 state.required = max(state.required, issued)
-                if self.command != 'POST' or 'assertion=' not in body:
+                if self.command != 'POST' or not valid_grant or not valid_assertion:
                     state.violations.append('Invalid token request.')
+            if not valid_grant:
+                return self.respond(400, {'error': 'unsupported_grant_type'})
+            if not valid_assertion:
+                return self.respond(400, {'error': 'invalid_request'})
             if state.mode == 'shutdown':
                 state.done.wait(30)
                 return self.respond(500, {})

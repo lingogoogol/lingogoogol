@@ -233,7 +233,7 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `run_background_multi.py` 另需要 OpenSSL 指令，用本機自簽 TLS 上傳製造傳送阻塞，檢查持續繪圖與縮放、GUI 輪詢延遲、停止等待、跨 worker 移交 handle、背景解析及例外傳遞。資料夾測試中的八種批次回應錯誤會分別驗證同步與背景重試。Linux 可用 `sudo -n unshare --net python3 tests/run_background_multi.py --offline` 各跑三次介面關閉及丟包測試（需 sudo、unshare 與 nft）；腳本只修改隔離 network namespace 的 loopback，並使用獨立 Wine prefix，不會關閉主機網路或存取雲端帳戶。
 
-`run_token_refresh.py` 使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
+`run_token_refresh.py` 會嚴格檢查 JWT bearer grant type 與 assertion，使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
 
 ## 歡迎貢獻
 
