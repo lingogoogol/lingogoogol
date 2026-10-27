@@ -444,12 +444,30 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
           load_state_t* load_state, blob_queue_t* blob_queue, std::shared_ptr<lgo::divy_soft_t> viewer_div,
           std::string* pos) -> void
 {
-    google_easy_t request;
-    if (load_state->m_session)
-        request.m_account_context = load_state->m_session->account;
+    // Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
+    // and wraps the returned array into a 1-element outer array `[expr]`.
+    const auto generation{++persistent->m_listing_generation};
+    for (auto& pending : persistent->m_listings)
+        pending.control->cancel();
+    auto session{load_state->m_session};
+    if (session && session->clearing)
+    {
+        viewer_div->clear_state();
+        persistent->m_directory_status->set_text("清除中");
+        return;
+    }
     auto control{std::make_shared<request_control_t>()};
     control->retry_limit = load_state->m_settings.network_retries;
-    request.control_set(control);
+    auto future{std::async(std::launch::async,
+                           [target = *pos, session, control]() mutable
+                           {
+                               google_easy_t request;
+                               if (session)
+                                   request.m_account_context = session->account;
+                               request.control_set(control);
+                               return list_folder_content(request, &target);
+                           })};
+    persistent->m_directory_status->set_text("目錄更新中");
     auto apply = [=](nlohmann::json obj_list)
     {
         viewer_div->clear_state();
@@ -492,7 +510,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             }
         }
     };
-    apply(list_folder_content(request, pos));
+    persistent->m_listings.push_back({generation, session, control, std::move(future), std::move(apply)});
     return;
 }
 

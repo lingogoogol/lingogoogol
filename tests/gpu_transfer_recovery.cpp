@@ -117,6 +117,12 @@ try {
         lgo::text_line_t::pending_load();
         std::this_thread::sleep_for(1ms);
     }
+    // Listing refresh now completes asynchronously after upload publication.
+    while(!persistent.m_listings.empty() || !engine.gpu_available()) {
+        check(std::chrono::steady_clock::now()<deadline,"asynchronous refresh timed out");
+        message_loop(&engine,&persistent,&multi,&loads,&queue);
+        lgo::text_line_t::pending_load();
+    }
     check(upload_loss && download_loss,"active transfer loss was not exercised");
     check(download->m_progress==download->m_size && download->m_size!=0,"download progress did not finish");
     check(lgo::get_file_str("downloaded.bin")==lgo::get_file_str("input/tree/sub/payload.bin"),"recovered download content mismatch");
