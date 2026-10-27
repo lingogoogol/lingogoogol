@@ -674,6 +674,45 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 };
             });
     };
+    load_state->m_clear_page = [=]
+    {
+        const auto session{load_state->m_session};
+        if (!session)
+            return;
+        persistent->m_dialog_queue.push_back(
+            [=]
+            {
+                persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                    engine, state->get_depth_tracker(), "清除全部 Drive 檔案",
+                    std::vector<std::string>{"帳戶：" + session->address,
+                                             "將永久刪除此帳戶的全部 Drive 檔案，並取消此帳戶的傳輸。",
+                                             "此操作無法復原。請輸入「清除」以確認。"},
+                    std::vector<std::pair<std::string, std::string>>{{"確認文字", ""}}, "清除全部");
+                persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
+                {
+                    if (!accepted)
+                        return true;
+                    if (persistent->m_switching)
+                    {
+                        persistent->m_dialog->error("設定套用中，請稍候");
+                        return false;
+                    }
+                    if (values.front() != "清除")
+                    {
+                        persistent->m_dialog->error("請輸入「清除」");
+                        return false;
+                    }
+                    if (session != load_state->m_session)
+                    {
+                        persistent->m_dialog->error("帳戶已變更，請重新開啟清除對話框");
+                        return false;
+                    }
+                    if (persistent->m_clear_account)
+                        persistent->m_clear_account();
+                    return true;
+                };
+            });
+    };
     menu_right->add_object<lgo::button_classic_std_t>(
         lgo::depth_range_t{0, .5f},
         [=]

@@ -142,6 +142,23 @@ try:
     value = json.loads(Path('settings.json').read_text())
     assert value['logfile_path'] == 'changed-logfile' and value['network_retries'] == 2
     capture('settings-live')
+    click(1480, 24)  # Clear
+    click(1056, 632)  # Empty confirmation must be rejected.
+    assert Path('root').read_text() == 'root'
+    click(500, 540)
+    subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
+    run('key', 'ctrl+v')
+    time.sleep(.3)
+    capture('clear-dialog')
+    click(936, 632)  # Typed confirmation followed by Cancel must still do nothing.
+    assert Path('root').read_text() == 'root'
+    click(1480, 24)
+    click(500, 540)
+    subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
+    run('key', 'ctrl+v')
+    time.sleep(.3)
+    click(1056, 632)
+    wait_for(lambda: Path('root').read_text() == 'new-root', 'Confirmed clear did not finish.')
     run('key', 'alt+F4')
     app.wait(timeout=10)
     assert app.returncode == 0, 'Application did not close normally.'
@@ -210,11 +227,11 @@ int wmain(int argc, wchar_t** argv) {
         stdout, stderr = process.communicate(timeout=60)
         if process.returncode:
             raise RuntimeError(stdout + stderr)
-        assert not server.deleted, 'Settings unexpectedly deleted files.'
+        assert server.deleted == {'root', 'outside-app-root'}, 'Clear scope differs from the confirmed whole account.'
         logs = ''.join(path.read_text(errors='replace') for path in (test / 'changed-logfile').glob('*.txt'))
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
         assert not list(test.glob('clear.*')), 'Completed clear marker was retained.'
-        print('PASS: production GUI Cancel/OK, Backspace, Ctrl+A, live settings/font/log reload and clean close')
+        print('PASS: production GUI Cancel/OK, UTF-8 paste, Backspace, Ctrl+A, live settings/font/log reload, typed whole-account clear, invalid/declined confirmation and clean close')
     finally:
         if process and process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)

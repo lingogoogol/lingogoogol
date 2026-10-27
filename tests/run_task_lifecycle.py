@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     server.gets={};server.upload_calls=server.download_batches=server.retry=server.reserves=0;server.phase=''
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
-        for phase in ('upload-crash','resume-upload','download-crash','resume-download','account-switch'):
+        for phase in ('upload-crash','resume-upload','download-crash','resume-download','account-switch','clear-crash','resume-clear'):
             server.phase=phase
             # xvfb-run can leave Wine children alive if only the wrapper is killed.
             # Give each trial its own process group so timeout cleanup is complete.
@@ -180,6 +180,10 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
             if phase.endswith('crash') and phase!='clear-crash':
                 index=json.loads((test/'task').read_text());assert len(index)==1
                 saved=json.loads((test/'task.data'/index[0]/'state').read_text());assert saved['progress']>0
+        assert 'fresh-root' in server.blobs and all(
+            identifier == 'fresh-root' or identifier.startswith('reserve-') for identifier in server.blobs
+        ), 'Clear did not remove the entire original account inventory.'
+        assert 'second-root' in server.other, 'Clear affected a different account.'
         assert not server.violations, server.violations
         assert (test/'output.bin').read_bytes()==(test/'source.bin').read_bytes()
         print('PASS: forced process exits preserve blob reservations, upload publication and exact download bytes; no live cloud data')
