@@ -3,6 +3,7 @@ add_executable(
     storage.cpp
 )
 
+add_subdirectory(state)
 add_subdirectory(encode)
 # `storage.cpp` uses `wWinMain` as its entry point; MinGW requires `-municode` to select the wide-char CRT startup.
 target_link_options(

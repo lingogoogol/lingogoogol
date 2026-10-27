@@ -16,9 +16,29 @@ import storage.encode;
 import storage.http;
 import storage.google;
 
+namespace
+{
+    auto task_ids(load_task_t* task, blob_queue_t* queue, std::string key, std::size_t count = 1)
+        -> std::vector<std::string>
+    {
+        if (task->m_control->cancelled)
+            throw std::runtime_error{"Task cancelled."};
+        if (!task->m_journal)
+            return queue->get(count, &task->m_control->cancelled);
+        return task->m_journal->allocate(std::move(key), count, [queue, task](std::size_t size)
+                                         { return queue->get(size, &task->m_control->cancelled); });
+    }
+    auto task_done(load_task_t& task) -> void
+    {
+        if (task.m_journal)
+            task.m_journal->finish();
+    }
+} // namespace
+
 auto download_fail(download_task_t& task, const std::exception& error) -> void
 {
-    if (!task.m_error.empty()) return;
+    if (!task.m_error.empty())
+        return;
     task.m_error = error.what();
     if (task.m_error.empty()) task.m_error = "Unknown download error.";
     lgo::log_file("Download failed: " + task.m_name + "\n" + task.m_error + "\n");
@@ -71,14 +91,25 @@ auto file_upload
 	file->m_parent = parent;
 	file->m_type = "file";
 	file->m_name = path_local.filename().string();
-	file->m_main_id = blob_queue->get();
-	file->m_next_id = file->m_main_id;
-	file->m_path_local = path_local.string();
-	file->m_size = std::filesystem::file_size(path_local);
-	task->m_size += file->m_size;
-	file->m_self_i = task->m_entity_arr.size();
-	task->m_entity_arr.emplace_back(file);
-	return file->m_self_i;
+    file->m_main_id = task_ids(task, blob_queue, "file:" + path_local.string()).front();
+    file->m_next_id = file->m_main_id;
+    file->m_path_local = path_local.string();
+    file->m_size = std::filesystem::file_size(path_local);
+    if (task->m_journal)
+    {
+        const auto key{"source:" + path_local.string()};
+        const auto stamp = nlohmann::json{
+            {"size", file->m_size},
+            {"mtime", std::filesystem::last_write_time(path_local).time_since_epoch().count()}};
+        const auto saved = task->m_journal->data();
+        if (saved.contains(key) && saved.at(key) != stamp)
+            throw std::runtime_error{"Upload source changed since the saved task: " + path_local.string()};
+        task->m_journal->set(key, stamp);
+    }
+    task->m_size += file->m_size;
+    file->m_self_i = task->m_entity_arr.size();
+    task->m_entity_arr.emplace_back(file);
+    return file->m_self_i;
 }
 
 auto folder_upload
@@ -95,23 +126,34 @@ auto folder_upload
 	folder->m_parent = parent;
 	folder->m_type = "folder";
 	folder->m_name = path_local.filename().string();
-	folder->m_main_id = blob_queue->get();
-	folder->m_next_id = folder->m_main_id;
+    folder->m_main_id = task_ids(task, blob_queue, "folder:" + path_local.string()).front();
+    folder->m_next_id = folder->m_main_id;
 	folder->m_self_i = task->m_entity_arr.size();
-	task->m_entity_arr.emplace_back(folder);
-	for (std::filesystem::directory_iterator i{ path_local }; i != std::filesystem::directory_iterator{}; ++i)
-	{
-		if (i->is_regular_file())
-		{
-			folder->m_entity_arr.emplace_back(file_upload(blob_queue, task, i->path(), folder.get()));
-		}
-		else if (i->is_directory())
-		{
-			folder->m_entity_arr.emplace_back(folder_upload(blob_queue, task, i->path(), folder.get()));
-		}
-	}
-	folder->m_entity_load_end.resize(folder->m_entity_arr.size());
-	return folder->m_self_i;
+    task->m_entity_arr.emplace_back(folder);
+    std::vector<std::filesystem::path> children;
+    for (const auto& child : std::filesystem::directory_iterator{path_local})
+        children.push_back(child.path());
+    std::ranges::sort(children);
+    if (task->m_journal)
+    {
+        std::vector<std::string> names;
+        for (const auto& child : children)
+            names.push_back(child.filename().string());
+        const auto key{"children:" + path_local.string()};
+        const auto saved = task->m_journal->data();
+        if (saved.contains(key) && saved.at(key) != names)
+            throw std::runtime_error{"Upload directory changed since the saved task."};
+        task->m_journal->set(key, names);
+    }
+    for (const auto& child : children)
+    {
+        if (std::filesystem::is_regular_file(child))
+            folder->m_entity_arr.push_back(file_upload(blob_queue, task, child, folder.get()));
+        else if (std::filesystem::is_directory(child))
+            folder->m_entity_arr.push_back(folder_upload(blob_queue, task, child, folder.get()));
+    }
+    folder->m_entity_load_end.resize(folder->m_entity_arr.size());
+    return folder->m_self_i;
 }
 
 auto file_download
@@ -129,12 +171,26 @@ auto file_download
     file.m_path_local = path_local.string();
 	file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
 	file.m_next_id = pos;
-    // Create zero-byte files too; they never reach the content-writing callback.
-    auto output{ lgo::create_ofstream_destroy(path_local.string()) };
-    if (!output) throw std::runtime_error{ "Cannot create download file: " + path_local.string() };
-	task->m_size += file.m_size;
-	task->m_file_arr.emplace_back(file);
-	return;
+    if (task->m_journal)
+    {
+        const auto saved = task->m_journal->data();
+        file.m_resume_written = saved.value("written:" + path_local.string(), std::uint64_t{});
+    }
+    if (file.m_resume_written)
+    {
+        if (std::filesystem::file_size(path_local) < file.m_resume_written)
+            throw std::runtime_error{"Saved download is shorter than its checkpoint."};
+        std::filesystem::resize_file(path_local, file.m_resume_written);
+    }
+    else
+    {
+        auto output{lgo::create_ofstream_destroy(path_local.string())};
+        if (!output)
+            throw std::runtime_error{"Cannot create download file: " + path_local.string()};
+    }
+    task->m_size += file.m_size;
+    task->m_file_arr.emplace_back(file);
+    return;
 }
 
 auto folder_download
@@ -227,6 +283,10 @@ auto folder_add
 	{
         folder = blob_get_run(easy, pos, "name,description");
         folder_name = nlohmann::json::parse(folder["name"].get<std::string>());
+        const auto existing = nlohmann::json::parse(folder["description"].get<std::string>());
+        for (const auto& entry : existing)
+            if (entry.at("id") == entity.at("id"))
+                return;
         if (folder_name["next"] == "null")
         {
             break;
@@ -292,6 +352,18 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
 
     for (auto& task_ptr : state->m_task_list)
     {
+        if (task_ptr->m_control->cancelled || task_ptr->m_control->paused ||
+            (task_ptr->m_session && task_ptr->m_session->clearing))
+            continue;
+        if (task_ptr->m_session)
+        {
+            blob_queue = task_ptr->m_session->queue.get();
+            easy.m_account_context = task_ptr->m_session->account;
+        }
+        else
+            easy.m_account_context.reset();
+        easy.control_set(task_ptr->m_control);
+        easy.m_journal = task_ptr->m_journal;
         if (task_ptr->m_type == "upload")
         {
             auto upload_task_ptr{ std::dynamic_pointer_cast<upload_task_t>(task_ptr) };
@@ -299,13 +371,24 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
             {
                 if (upload_task_ptr->m_linked.wait_for(0s) == std::future_status::ready)
                 {
-                    //Keep the progress entry until publication succeeds, and propagate errors.
-                    upload_task_ptr->m_linked.get();
-                    if (state->m_on_upload_linked)
+                    // Keep the progress entry until publication succeeds, and propagate errors.
+                    try
+                    {
+                        upload_task_ptr->m_linked.get();
+                    }
+                    catch (const std::exception& error)
+                    {
+                        upload_task_ptr->m_control->fail(error.what());
+                        continue;
+                    }
+                    if (state->m_on_upload_linked &&
+                        (!upload_task_ptr->m_session || !state->m_session ||
+                         upload_task_ptr->m_session->account == state->m_session->account))
                     {
                         state->m_on_upload_linked(upload_task_ptr->m_pos.m_main_id);
                     }
                     state->m_progress_column->remove_object(upload_task_ptr->m_progress_div);
+                    task_done(*upload_task_ptr);
                     state->m_task_list.erase(upload_task_ptr->m_self_i);
                     return false;
                 }
@@ -317,8 +400,17 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 {
                     continue;
                 }
-                //Consume the future so preparation failures cannot be mistaken for success.
-                upload_task_ptr->m_prepared.get();
+                // Consume the future so preparation failures cannot be mistaken for success.
+                try
+                {
+                    upload_task_ptr->m_prepared.get();
+                }
+                catch (const std::exception& error)
+                {
+                    upload_task_ptr->m_preparation_failed = true;
+                    upload_task_ptr->m_control->fail(error.what());
+                    continue;
+                }
             }
             // Downloads consume no reserved blobs. Apply the upload reserve only here.
             if (blob_queue->count() <= 10000) continue;
@@ -373,20 +465,22 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 try { download_task_ptr->m_prepared.get(); }
                 catch (const std::exception& error)
                 {
+                    download_task_ptr->m_preparation_failed = true;
+                    download_task_ptr->m_control->fail(error.what());
                     download_fail(*download_task_ptr, error);
                     continue;
                 }
                 download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
                 download_task_ptr->m_files_remaining = download_task_ptr->m_file_arr.size();
-                download_task_ptr->m_progress_text->set_text
-                (
-                    "下載：0B/" + std::to_string(download_task_ptr->m_size) + "B " + download_task_ptr->m_name,
-                    false
-                );
+                download_task_ptr->m_progress_text->set_text(
+                    "下載：" + std::to_string(download_task_ptr->m_saved_progress) + "B/" +
+                        std::to_string(download_task_ptr->m_size) + "B " + download_task_ptr->m_name,
+                    false);
                 if (!download_task_ptr->m_files_remaining)
                 {
                     // An empty directory tree is complete once its directories exist.
                     state->m_progress_column->remove_object(download_task_ptr->m_progress_div);
+                    task_done(*download_task_ptr);
                     state->m_task_list.erase(download_task_ptr->m_self_i);
                     return false;
                 }
@@ -428,14 +522,15 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
             throw;
         }
     }
-	return false;
+    return false;
 }
 
 //Completes other tasks that depends on the network transfer
 // and updates the loading state.
 auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> void
 {
-    state->m_end[easy->interface_get()](easy);
+    if (!easy->cancelled())
+        state->m_end.at(easy->interface_get())(easy);
     state->m_end.erase(easy->interface_get());
 	return;
 }
@@ -512,18 +607,24 @@ auto upload_complete(upload_entity_t* entity) -> void
         //Each worker owns its easy handle. Waiting for the previous publication prevents
         //concurrent folder_add read/modify/write operations from overwriting each other.
         //Copy the inputs so the worker never accesses task or GUI state.
-        task->m_linked = std::async
-        (
-            std::launch::async,
-            [previous = task->m_state->m_upload_linked, pos = task->m_pos.m_main_id, link = std::move(link)]
-            {
-                if (previous.valid())
-                {
-                    previous.get();
-                }
-                folder_add(google_easy_t::get(), pos, link);
-            }
-        ).share();
+        task->m_linked =
+            std::async(std::launch::async,
+                       [previous = task->m_state->m_upload_linked, pos = task->m_pos.m_main_id,
+                        link = std::move(link), session = task->m_session, control = task->m_control]
+                       {
+                           if (previous.valid())
+                           {
+                               previous.wait();
+                           }
+                           google_easy_t request;
+                           if (session)
+                               request.m_account_context = session->account;
+                           request.control_set(control);
+                           // Publication rereads the current directory. Cached GETs here could
+                           // overwrite links published by other tasks after a restored upload.
+                           folder_add(request, pos, link);
+                       })
+                .share();
         task->m_state->m_upload_linked = task->m_linked;
     }
     return;
@@ -545,7 +646,7 @@ auto upload_file_load_begin
     std::size_t chunk_count{};
     if (file->m_chunk_arr.size() - file->m_file_load_begin_progress > 100)
     {
-        file->m_next_id = blob_queue->get();
+        file->m_next_id = task_ids(file->m_task, blob_queue, "file-page:" + blob.m_id).front();
         chunk_count = 100;
     }
     else
@@ -704,21 +805,15 @@ auto upload_chunk_transfer_begin
 )
 -> void
 {
-    auto& chunk
-    {
-        file->m_chunk_arr.emplace_back
-        (
-            upload_chunk_t
-            {
-                .m_file{ file },
-                .m_id{ blob_queue->get() }
-            }
-        )
-    };
+    auto& chunk{file->m_chunk_arr.emplace_back(upload_chunk_t{
+        .m_file{file},
+        .m_id{task_ids(file->m_task, blob_queue,
+                       "chunk:" + file->m_main_id + ":" + std::to_string(file->m_chunk_cover_progress))
+                  .front()}})};
     std::uint64_t batch_size{ std::min(file->m_size - file->m_chunk_cover_progress, content_size_max_base64 * 100) };
     //Divide and round up.
     std::uint64_t content_count{ (batch_size + content_size_max_base64 - 1) / content_size_max_base64 };
-    chunk.m_content_id = blob_queue->get(content_count);
+    chunk.m_content_id = task_ids(file->m_task, blob_queue, "content:" + chunk.m_id, content_count);
     chunk.m_size = batch_size;
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
@@ -784,14 +879,12 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
         ++file->m_chunk_transfer_end_progress;
     }
     task->m_progress += chunk.m_size;
-    task->m_progress_text->set_text
-    (
-        task->m_type + "：" +
-        std::to_string(task->m_progress) + "B/" +
-        std::to_string(task->m_size) + "B " +
-        task->m_name,
-        false
-    );
+    if (task->m_journal)
+        task->m_journal->set("progress", std::max(task->m_saved_progress, task->m_progress));
+    task->m_progress_text->set_text(task->m_type + "：" +
+                                        std::to_string(std::max(task->m_saved_progress, task->m_progress)) +
+                                        "B/" + std::to_string(task->m_size) + "B " + task->m_name,
+                                    false);
     upload_complete(file);
     return;
 }
@@ -849,7 +942,7 @@ auto upload_folder_load_begin
         if (blob.m_content.value().size() == 100 || blob.m_content.value().dump().size() > content_size_max)
         {
             blob.m_content.value().erase(blob.m_content.value().end() - 1);
-            folder->m_next_id = blob_queue->get();
+            folder->m_next_id = task_ids(folder->m_task, blob_queue, "folder-page:" + blob.m_id).front();
             break;
         }
         ++folder->m_folder_load_begin_progress;
@@ -936,6 +1029,7 @@ auto download_complete(download_file_t& file) -> void
         if (task.m_progress != task.m_size)
             throw std::runtime_error{ "Downloaded size differs from the declared size: " + task.m_name };
         task.m_state->m_progress_column->remove_object(task.m_progress_div);
+        task_done(task);
         task.m_state->m_task_list.erase(task.m_self_i);
     }
 }
@@ -1159,7 +1253,12 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
         for (std::uint64_t i{ 0 }; i < chunk_filesystem.m_content.size(); ++i)
         {
             chunk_filesystem.m_content[i] = base64url_decode(chunk_filesystem.m_content[i]);
-            content_stream.write(chunk_filesystem.m_content[i].data(), chunk_filesystem.m_content[i].size());
+            const auto offset{file->m_written + filesystem_size};
+            if (offset >= file->m_resume_written)
+                content_stream.write(chunk_filesystem.m_content[i].data(),
+                                     chunk_filesystem.m_content[i].size());
+            else if (offset + chunk_filesystem.m_content[i].size() > file->m_resume_written)
+                throw std::runtime_error{"Invalid saved download boundary."};
             filesystem_size += chunk_filesystem.m_content[i].size();
             chunk_filesystem.m_content[i].clear();
             chunk_filesystem.m_content[i].shrink_to_fit();
@@ -1171,17 +1270,22 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
     content_stream.close();
     if (!content_stream) throw std::runtime_error{ "Cannot finish writing download file: " + file->m_path_local };
     file->m_written += filesystem_size;
-    //Update progress.
-    download_task_t& task{ *chunk.m_file->m_task };
+    if (file->m_task->m_journal)
+    {
+        // FlushFileBuffers is also needed for the output, before publishing its
+        // prefix in task state. Atomic checkpoint writes alone cannot flush it.
+        storage_flush_file(file->m_path_local);
+        file->m_task->m_journal->set("written:" + file->m_path_local, file->m_written);
+    }
+    // Update progress.
+    download_task_t& task{*chunk.m_file->m_task};
     task.m_progress += filesystem_size;
-    task.m_progress_text->set_text
-    (
-        task.m_type + "：" +
-        std::to_string(task.m_progress) + "B/" +
-        std::to_string(task.m_size) + "B " +
-        task.m_name,
-        false
-    );
+    if (task.m_journal)
+        task.m_journal->set("progress", std::max(task.m_saved_progress, task.m_progress));
+    task.m_progress_text->set_text(task.m_type + "：" +
+                                       std::to_string(std::max(task.m_saved_progress, task.m_progress)) +
+                                       "B/" + std::to_string(task.m_size) + "B " + task.m_name,
+                                   false);
 
     download_complete(*file);
 

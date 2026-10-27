@@ -17,6 +17,8 @@ export
         auto clear() -> void override;
         auto prepare() -> bool override;
         auto resume() -> void override;
+        auto authentication_failure() const -> bool override;
+        auto manual_retry() -> void override;
     protected:
         // Batch requests can carry a 401 inside an otherwise successful response.
         virtual auto authorization_rejected() const -> bool;

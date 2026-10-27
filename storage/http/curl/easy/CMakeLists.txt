@@ -13,6 +13,7 @@ target_sources(
 target_link_libraries(
     storage.http.curl.easy
     PRIVATE
+        storage.state
         common
         external.curl
         lgo.dev

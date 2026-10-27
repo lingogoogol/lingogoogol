@@ -36,5 +36,7 @@ export
         // Interrupt socket waits, join the worker and discard pending results.
         // Idempotent; call before destroying transfer tasks or GUI resources.
         auto stop() -> void;
+        auto interrupt() -> void;
+        auto pending(const std::shared_ptr<request_control_t>& control) const -> bool;
     };
 }

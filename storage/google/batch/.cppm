@@ -36,6 +36,8 @@ export
         virtual auto parse() -> void;
         virtual auto valid() -> bool override;
         virtual auto resume() -> void override;
+        auto saved_response() -> std::string override;
+        auto restore_response(std::string_view value) -> void override;
     protected:
         auto authorization_rejected() const -> bool override;
     private:

@@ -16,11 +16,13 @@ import storage.http.curl.multi;
 
 struct curl_multi_worker_t::implementation_t
 {
+    std::mutex stop_mutex;
     std::mutex mutex;
     std::condition_variable changed;
     std::deque<std::unique_ptr<curl_easy_t>> pending;
     std::deque<std::unique_ptr<curl_easy_t>> completed;
     std::map<CURL*, std::uint64_t> progress;
+    std::map<CURL *, std::shared_ptr<request_control_t>> controls;
     std::exception_ptr error;
     std::uint64_t failures{};
     std::atomic_bool stopping{};
@@ -60,7 +62,7 @@ struct curl_multi_worker_t::implementation_t
 
     static auto transfer_progress(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept -> int
     {
-        return static_cast<implementation_t*>(data)->stopping.load() ? 1 : 0;
+        return static_cast<curl_easy_t *>(data)->cancelled() ? 1 : 0;
     }
 
     auto configure(curl_easy_t& easy, bool enabled) -> void
@@ -71,7 +73,7 @@ struct curl_multi_worker_t::implementation_t
         api_curl(curl_easy_setopt(handle, CURLOPT_CLOSESOCKETFUNCTION, enabled ? &close_socket : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_CLOSESOCKETDATA, enabled ? this : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, enabled ? &transfer_progress : nullptr));
-        api_curl(curl_easy_setopt(handle, CURLOPT_XFERINFODATA, enabled ? this : nullptr));
+        api_curl(curl_easy_setopt(handle, CURLOPT_XFERINFODATA, enabled ? &easy : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_NOPROGRESS, enabled ? 0L : 1L));
     }
 
@@ -172,6 +174,7 @@ auto curl_multi_worker_t::submit(std::unique_ptr<curl_easy_t> easy) -> void
     if (m_impl->stopping) throw std::logic_error{ "Cannot submit to a stopped transfer worker." };
     if (m_impl->progress.contains(easy->interface_get()))
         throw std::logic_error{ "Curl request is already submitted." };
+    m_impl->controls[easy->interface_get()] = easy->m_control;
     m_impl->progress.emplace(easy->interface_get(), 0);
     m_impl->pending.push_back(std::move(easy));
     lock.unlock();
@@ -205,15 +208,32 @@ auto curl_multi_worker_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
     auto result{ std::move(m_impl->completed.front()) };
     m_impl->completed.pop_front();
     m_impl->progress.erase(result->interface_get());
+    m_impl->controls.erase(result->interface_get());
     return result;
 }
 
 auto curl_multi_worker_t::stop() -> void
 {
+    std::lock_guard stop_lock{m_impl->stop_mutex};
     m_impl->request_stop();
     if (m_impl->thread.joinable()) m_impl->thread.join();
     std::unique_lock lock{ m_impl->mutex };
     m_impl->pending.clear();
     m_impl->completed.clear();
     m_impl->progress.clear();
+}
+
+auto curl_multi_worker_t::interrupt() -> void
+{
+    std::lock_guard lock{m_impl->sockets_mutex};
+    // Cached connections may be shared across task handles. Wake all socket
+    // waits; unrelated idempotent requests follow their normal retry path.
+    for (auto socket : m_impl->sockets)
+        ::shutdown(socket, SD_BOTH);
+    m_impl->changed.notify_all();
+}
+auto curl_multi_worker_t::pending(const std::shared_ptr<request_control_t> &control) const -> bool
+{
+    std::lock_guard lock{m_impl->mutex};
+    return std::ranges::any_of(m_impl->controls, [&](const auto &entry) { return entry.second == control; });
 }

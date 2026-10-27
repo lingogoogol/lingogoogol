@@ -15,6 +15,7 @@ target_link_libraries(
     PRIVATE
         common
         lgo.io.file
+        storage.http.curl.worker
         storage.http.curl
         storage.google.account
         storage.google.batch

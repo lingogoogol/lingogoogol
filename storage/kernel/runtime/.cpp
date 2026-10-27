@@ -1,0 +1,182 @@
+module;
+#include <nlohmann/json.hpp>
+module storage.kernel.runtime;
+import std;
+import storage.kernel.load;
+import storage.google;
+import storage.http;
+import storage.state;
+
+namespace
+{
+    auto queue_path(std::string_view address) -> std::filesystem::path
+    {
+        if (!std::filesystem::exists("blob_queue.account"))
+            storage_atomic_write("blob_queue.account", address);
+        if (storage_read("blob_queue.account") == address)
+            return "blob_queue";
+        return "blob_queue." + storage_digest(address);
+    }
+    auto clear_path(std::string_view address) -> std::filesystem::path
+    {
+        return "clear." + storage_digest(address);
+    }
+    class delete_request_t : public google_easy_t
+    {
+      public:
+        auto valid() -> bool override
+        {
+            return google_easy_t::valid() || m_response_code == 404;
+        }
+    };
+} // namespace
+auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
+    -> std::shared_ptr<blob_queue_t>
+{
+    auto& queue{m_queues[session->address]};
+    if (!queue)
+    {
+        queue = std::make_shared<blob_queue_t>(queue_path(session->address), session->account.get(), m_close);
+        if (std::filesystem::exists(clear_path(session->address)))
+            queue->clear_begin();
+    }
+    return queue;
+}
+auto storage_runtime_t::open(const storage_settings_t& settings,
+                             const std::shared_ptr<request_control_t>& control, std::string expected_email,
+                             std::string saved_root) -> std::shared_ptr<storage_session_t>
+{
+    const auto credential = nlohmann::json::parse(storage_read(settings.account_path));
+    const auto address{credential.at("client_email").get<std::string>()};
+    if (!expected_email.empty() && expected_email != address)
+        throw std::runtime_error{"Saved task account no longer matches its credential file."};
+    auto session{std::make_shared<storage_session_t>()};
+    session->clearing = std::filesystem::exists(clear_path(address));
+    session->address = address;
+    session->account_path = settings.account_path;
+    session->root_path = settings.root_path;
+    {
+        std::lock_guard lock{m_mutex};
+        if (*m_close)
+            throw std::runtime_error{"Application is closing."};
+        auto& account{
+            m_accounts[address + ":" + storage_digest(credential.at("private_key").get<std::string>())]};
+        if (!account)
+            account =
+                std::make_shared<google_account_t>(address, credential.at("private_key").get<std::string>());
+        session->account = account;
+        session->queue = queue(session);
+        m_sessions.push_back(session);
+    }
+    if (!saved_root.empty())
+        session->root = std::move(saved_root);
+    else if (std::filesystem::exists(settings.root_path))
+        session->root = storage_read(settings.root_path);
+    else
+    {
+        google_easy_t request;
+        request.m_account_context = session->account;
+        request.control_set(control);
+        session->root = folder_root_create(request);
+        storage_atomic_write(settings.root_path, session->root);
+    }
+    if (session->root.empty())
+        throw std::runtime_error{"Root file is empty."};
+    return session;
+}
+auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
+                              const std::shared_ptr<request_control_t>& control,
+                              std::atomic_uint64_t& progress, std::atomic_uint64_t& total) -> std::string
+{
+    // Stop replenishment and wait for its requests before collecting the full
+    // account inventory. Deleting while paging would skip entries.
+    session->queue->stop();
+    google_easy_t request;
+    request.m_account_context = session->account;
+    request.control_set(control);
+    const auto marker{clear_path(session->address)};
+    std::vector<std::string> ids;
+    if (std::filesystem::exists(marker))
+    {
+        const auto saved = nlohmann::json::parse(storage_read(marker));
+        ids = saved.at("ids").get<std::vector<std::string>>();
+        progress = saved.at("progress").get<std::uint64_t>();
+        total = ids.size();
+    }
+    else
+    {
+        std::string page;
+        do
+        {
+            request.clear();
+            request.path_set("/drive/v3/files");
+            request.query_set("pageSize", "1000");
+            request.query_set("fields", "nextPageToken,files(id)");
+            if (!page.empty())
+                request.query_set("pageToken", page);
+            request.method_get();
+            request.run();
+            const auto response = nlohmann::json::parse(request.payload());
+            for (const auto& file : response.at("files"))
+                ids.push_back(file.at("id").get<std::string>());
+            page = response.value("nextPageToken", "");
+            total = ids.size();
+        } while (!page.empty());
+        storage_atomic_write(marker, nlohmann::json{{"ids", ids}, {"progress", 0}}.dump());
+    }
+    // Empty the durable reserve before the first DELETE, so a crash cannot
+    // restore IDs belonging to files that have already been removed.
+    session->queue->clear_end();
+    session->queue->clear_begin();
+    for (std::size_t index{progress.load()}; index < ids.size(); ++index)
+    {
+        const auto& id{ids[index]};
+        delete_request_t remove;
+        remove.m_account_context = session->account;
+        remove.control_set(control);
+        remove.path_set("/drive/v3/files/" + id);
+        remove.method_delete();
+        remove.run();
+        ++progress;
+        storage_atomic_write(marker, nlohmann::json{{"ids", ids}, {"progress", progress.load()}}.dump());
+    }
+    // The app needs a fresh empty root after literally all Drive files are removed.
+    auto root{folder_root_create(request)};
+    storage_atomic_write(session->root_path, root);
+    std::filesystem::remove(marker);
+    return root;
+}
+auto storage_runtime_t::cleared(const std::shared_ptr<storage_session_t>& session, std::string root) -> void
+{
+    std::lock_guard lock{m_mutex};
+    m_queues.erase(session->address);
+    auto replacement{queue(session)};
+    for (auto& context : m_sessions)
+        if (context->address == session->address)
+        {
+            context->queue = replacement;
+            context->clearing = false;
+            if (context->root_path == session->root_path)
+                context->root = root;
+            else
+            {
+                context->root = root;
+                storage_atomic_write(context->root_path, root);
+            }
+        }
+}
+auto storage_runtime_t::stop() -> void
+{
+    std::lock_guard lock{m_mutex};
+    for (auto& [email, account] : m_accounts)
+        account->stop();
+    for (auto& [email, queue] : m_queues)
+        queue->stop();
+}
+
+auto storage_runtime_t::retry_accounts() -> void
+{
+    std::lock_guard lock{m_mutex};
+    for (auto& [email, account] : m_accounts)
+        account->retry();
+}

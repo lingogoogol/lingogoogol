@@ -110,11 +110,30 @@ struct google_account_t::implementation_t
     std::unique_ptr<curl_multi_worker_t> worker;
 };
 
-auto google_account_t::default_set(google_account_t account) -> void { default_get() = std::move(account); }
-auto google_account_t::default_get() -> google_account_t&
+namespace
 {
-    static google_account_t account;
-    return account;
+std::mutex default_account_mutex;
+std::shared_ptr<google_account_t> default_account;
+} // namespace
+auto google_account_t::default_set(google_account_t account) -> void
+{
+    default_shared_set(std::make_shared<google_account_t>(std::move(account)));
+}
+auto google_account_t::default_shared_set(std::shared_ptr<google_account_t> account) -> void
+{
+    std::lock_guard lock{default_account_mutex};
+    default_account = std::move(account);
+}
+auto google_account_t::default_shared() -> std::shared_ptr<google_account_t>
+{
+    std::lock_guard lock{default_account_mutex};
+    if (!default_account)
+        default_account = std::make_shared<google_account_t>();
+    return default_account;
+}
+auto google_account_t::default_get() -> google_account_t &
+{
+    return *default_shared();
 }
 
 google_account_t::google_account_t() : m_impl{ std::make_unique<implementation_t>() } {}
@@ -206,4 +225,25 @@ auto google_account_t::stop() -> void
     }
     // Never hold the account mutex across socket shutdown or thread joins.
     if (worker) worker->stop();
+}
+
+auto google_account_t::retry() -> void
+{
+    std::unique_ptr<curl_multi_worker_t> failed;
+    {
+        std::lock_guard lock{m_impl->mutex};
+        if (!m_impl->error || m_impl->stopped)
+            return;
+        m_impl->error = {};
+        m_impl->refreshing = false;
+        failed = std::move(m_impl->worker);
+    }
+    if (failed)
+        failed->stop();
+}
+
+auto google_account_t::address() const -> std::string
+{
+    std::lock_guard lock{m_impl->mutex};
+    return m_impl->address;
 }

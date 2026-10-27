@@ -86,7 +86,39 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
     {
         if (cancelled && cancelled->load()) return 0;
         auto& easy{ *m_added.at(*entry) };
-        if (!easy.prepare()) { ++entry; continue; }
+        if (easy.cancelled())
+        {
+            m_ready.emplace(*entry);
+            entry = m_waiting.erase(entry);
+            continue;
+        }
+        if (!easy.runnable())
+        {
+            ++entry;
+            continue;
+        }
+        try
+        {
+            if (easy.replay())
+            {
+                m_ready.emplace(*entry);
+                entry = m_waiting.erase(entry);
+                continue;
+            }
+            if (!easy.prepare())
+            {
+                ++entry;
+                continue;
+            }
+        }
+        catch (const std::exception &error)
+        {
+            if (!easy.m_control)
+                throw;
+            easy.m_control->fail(error.what());
+            ++entry;
+            continue;
+        }
         curl_easy_multi_access_t::response_code_get(easy) = 0;
         api_curlm(curl_multi_add_handle(m_interface, *entry));
         entry = m_waiting.erase(entry);
@@ -135,8 +167,14 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                         lgo::log_file(e.message() + "\n");
                     }
                     if (cancelled && cancelled->load()) return failed_count;
+                    if (easy_ptr->cancelled())
+                    {
+                        m_ready.emplace(message->easy_handle);
+                        break;
+                    }
                     if (successful && easy_ptr->valid())
                     {
+                        easy_ptr->checkpoint();
                         m_ready.emplace(message->easy_handle);
                     }
                     else
@@ -148,7 +186,9 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
                             "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + "\n"
                         );
-                        easy_ptr->resume();
+                        easy_ptr->failed(
+                            "Network request failed (HTTP " +
+                            std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + ").");
                         m_waiting.emplace(message->easy_handle);
                         ++failed_count;
                     }

@@ -33,7 +33,9 @@ auto google_easy_t::method() -> void
 
 auto google_easy_t::prepare() -> bool
 {
-    auto token{ google_account_t::default_get().try_token() };
+    if (!m_account_context)
+        m_account_context = google_account_t::default_shared();
+    auto token{std::static_pointer_cast<google_account_t>(m_account_context)->try_token()};
     if (!token) return false;
     m_sent_token = std::move(*token);
     header_set("Authorization", "Bearer " + m_sent_token);
@@ -50,7 +52,18 @@ auto google_easy_t::resume() -> void
     {
         if (m_auth_retries++ != 0)
             throw std::runtime_error{ "Google API rejected refreshed credentials (HTTP 401)." };
-        google_account_t::default_get().reject_token(m_sent_token);
+        std::static_pointer_cast<google_account_t>(m_account_context)->reject_token(m_sent_token);
     }
     curl_easy_t::resume();
+}
+
+auto google_easy_t::authentication_failure() const -> bool
+{
+    return authorization_rejected();
+}
+
+auto google_easy_t::manual_retry() -> void
+{
+    m_auth_retries = 0;
+    resume();
 }

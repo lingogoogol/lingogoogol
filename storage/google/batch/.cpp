@@ -1,3 +1,5 @@
+module;
+#include <nlohmann/json.hpp>
 module storage.google.batch;
 
 import std;
@@ -245,4 +247,25 @@ auto google_batch_t::body_generate() -> void
     m_body.pop_back();
     m_body += "--\r\n";
     return;
+}
+
+auto google_batch_t::saved_response() -> std::string
+{
+    auto parts = nlohmann::json::object();
+    for (const auto &[id, part] : m_part)
+        parts[std::to_string(id)] = part.m_response.body_get();
+    return parts.dump();
+}
+auto google_batch_t::restore_response(std::string_view value) -> void
+{
+    const auto parts = nlohmann::json::parse(value);
+    if (parts.size() != m_part.size())
+        throw std::runtime_error{"Saved batch size differs."};
+    for (auto &[id, part] : m_part)
+    {
+        part.m_response =
+            http_response_t{"HTTP/1.1 200 OK\r\n\r\n" + parts.at(std::to_string(id)).get<std::string>()};
+        part.m_valid = true;
+    }
+    m_response_code = 200;
 }

@@ -26,10 +26,12 @@ add_subdirectory(fun)
 add_subdirectory(focus)
 add_subdirectory(menu)
 add_subdirectory(virt)
+add_subdirectory(dialog)
 
 target_link_libraries(
     lgo.GUI.object
     PRIVATE
+        lgo.GUI.object.dialog
         common
         lgo.GUI.object.state
         lgo.GUI.object.depth_tracker

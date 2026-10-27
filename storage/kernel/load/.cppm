@@ -74,8 +74,23 @@ export
     struct download_file_t;
     struct download_chunk_t;
 
+    struct storage_session_t {
+        std::shared_ptr<google_account_t> account;
+        std::shared_ptr<blob_queue_t> queue;
+        std::string account_path;
+        std::string address;
+        std::string root_path;
+        std::string root;
+        bool clearing{};
+    };
+
     struct load_state_t
     {
+        std::shared_ptr<storage_session_t> m_session;
+        storage_settings_t m_settings;
+        std::function<void(std::string, std::function<void(bool)>)> m_confirm;
+        std::function<void()> m_settings_page;
+        std::function<void()> m_clear_page;
         std::list<std::shared_ptr<load_task_t>> m_task_list{};
         std::map<CURL*, std::function<void(std::unique_ptr<curl_easy_t>&)>> m_end{};
         std::shared_ptr<lgo::divy_soft_t> m_progress_column{};
@@ -89,6 +104,16 @@ export
     {
         virtual ~load_task_t() = default;
 
+        std::shared_ptr<storage_session_t> m_session;
+        std::shared_ptr<request_control_t> m_control{ std::make_shared<request_control_t>() };
+        std::shared_ptr<task_journal_t> m_journal;
+        std::string m_label;
+        std::uint64_t m_saved_progress{};
+        bool m_cancel_saved{};
+        bool m_preparation_failed{};
+        std::function<void()> m_retry_prepare;
+        std::shared_ptr<lgo::button_classic_std_t> m_retry_button;
+        std::shared_ptr<lgo::button_classic_std_t> m_cancel_button;
         load_state_t* m_state{};
         std::list<std::shared_ptr<load_task_t>>::iterator m_self_i{};
         std::string m_type{};
@@ -199,6 +224,7 @@ export
         std::string m_path_local{};
         std::uint64_t m_size{};
         std::uint64_t m_written{};
+        std::uint64_t m_resume_written{};
         //`m_idle` means this file can send more requests for now.
         //If `m_idle` is false, the file must wait for a response from the server before it can send more requests.
         //Specifically, m_idle does not mean that the file is not running tranfers.

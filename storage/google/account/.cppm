@@ -11,6 +11,8 @@ export
     public:
         static auto default_set(google_account_t account) -> void;
         static auto default_get() -> google_account_t&;
+        static auto default_shared() -> std::shared_ptr<google_account_t>;
+        static auto default_shared_set(std::shared_ptr<google_account_t> account) -> void;
 
         google_account_t();
         google_account_t(std::string address, std::string_view key);
@@ -29,5 +31,7 @@ export
         auto reject_token(std::string_view rejected) -> void;
         // Wake network waits and make credential waiters fail before joining tasks.
         auto stop() -> void;
+        auto retry() -> void;
+        auto address() const -> std::string;
     };
 }

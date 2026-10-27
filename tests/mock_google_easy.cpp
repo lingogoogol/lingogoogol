@@ -2,6 +2,7 @@ module storage.google.easy;
 import std;
 import external.curl;
 import storage.http.curl.easy;
+import storage.google.account;
 namespace {
     std::mutex owner_mutex;
     std::map<google_easy_t*, std::thread::id> thread_local_owners;
@@ -30,6 +31,13 @@ auto google_easy_t::clear() -> void {
 }
 auto google_easy_t::method() -> void { curl_easy_setopt(interface_get(), CURLOPT_VERBOSE, 0L); curl_easy_t::method(); }
 
-auto google_easy_t::prepare() -> bool { return true; }
+auto google_easy_t::prepare() -> bool {
+    if (m_account_context) header_set("X-Fixture-Account",std::static_pointer_cast<google_account_t>(m_account_context)->address());
+    curl_easy_t::method(); return true;
+}
 auto google_easy_t::resume() -> void { curl_easy_t::resume(); }
 auto google_easy_t::authorization_rejected() const -> bool { return false; }
+
+auto google_easy_t::authentication_failure() const -> bool { return false; }
+
+auto google_easy_t::manual_retry() -> void { resume(); }

@@ -1,6 +1,7 @@
 module;
 
 #include <stdio.h>
+#include <nlohmann/json.hpp>
 
 module storage.http.curl.easy;
 
@@ -45,17 +46,14 @@ curl_easy_t::curl_easy_t(CURL* in)
     return;
 }
 
-curl_easy_t::curl_easy_t(curl_easy_t&& in)
-:
-    m_interface{ in.m_interface },
-    m_path{ std::move(in.m_path) },
-    m_host{ std::move(in.m_host) },
-    m_query{ std::move(in.m_query) },
-    m_header{ std::move(in.m_header) },
-    m_read{ std::move(in.m_read) },
-    m_write{ std::move(in.m_write) },
-    m_response_code{ in.m_response_code },
-    m_header_curl{ in.m_header_curl }
+curl_easy_t::curl_easy_t(curl_easy_t &&in)
+    : m_account_context{std::move(in.m_account_context)}, m_control{std::move(in.m_control)},
+      m_journal{std::move(in.m_journal)}, m_verb{std::move(in.m_verb)},
+      m_cache_key{std::move(in.m_cache_key)}, m_failures{in.m_failures}, m_epoch{in.m_epoch},
+      m_retry_at{in.m_retry_at}, m_interface{in.m_interface}, m_path{std::move(in.m_path)},
+      m_host{std::move(in.m_host)}, m_query{std::move(in.m_query)}, m_header{std::move(in.m_header)},
+      m_read{std::move(in.m_read)}, m_write{std::move(in.m_write)}, m_response_code{in.m_response_code},
+      m_header_curl{in.m_header_curl}
 {
     in.m_interface = nullptr;
     in.m_header_curl = nullptr;
@@ -64,6 +62,14 @@ curl_easy_t::curl_easy_t(curl_easy_t&& in)
 
 auto curl_easy_t::operator=(curl_easy_t&& in) -> curl_easy_t&
 {
+    m_account_context = std::move(in.m_account_context);
+    m_control = std::move(in.m_control);
+    m_journal = std::move(in.m_journal);
+    m_verb = std::move(in.m_verb);
+    m_cache_key = std::move(in.m_cache_key);
+    m_failures = in.m_failures;
+    m_epoch = in.m_epoch;
+    m_retry_at = in.m_retry_at;
     m_interface = in.m_interface;
     m_path = std::move(in.m_path);
     m_host = std::move(in.m_host);
@@ -125,6 +131,10 @@ curl_easy_t::operator bool() const
 
 auto curl_easy_t::clear() -> void
 {
+    m_cache_key.clear();
+    m_verb.clear();
+    m_failures = 0;
+    m_retry_at = {};
     m_host.clear();
     m_path.clear();
     m_query.clear();
@@ -178,6 +188,9 @@ auto curl_easy_t::header_set(std::string name, std::string val) -> void
 
 auto curl_easy_t::method_get() -> void
 {
+    m_verb = "GET";
+    m_cache_key.clear();
+    m_read->m_payload.clear();
     method();
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, nullptr));
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 0L));
@@ -188,6 +201,8 @@ auto curl_easy_t::method_get() -> void
 
 auto curl_easy_t::method_post(std::string payload) -> void
 {
+    m_verb = "POST";
+    m_cache_key.clear();
     method();
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, nullptr));
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 0L));
@@ -200,6 +215,8 @@ auto curl_easy_t::method_post(std::string payload) -> void
 
 auto curl_easy_t::method_patch(std::string payload) -> void
 {
+    m_verb = "PATCH";
+    m_cache_key.clear();
     method();
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, "PATCH"));
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_UPLOAD, 1L));
@@ -210,7 +227,6 @@ auto curl_easy_t::method_patch(std::string payload) -> void
 
 auto curl_easy_t::run() -> void
 {
-    std::chrono::seconds sleep_duration{ 1 };
     while (true)
 	{
 		run_try();
@@ -229,8 +245,8 @@ auto curl_easy_t::run() -> void
         );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
         //folder publication retries send an empty body after the first attempt.
-        resume();
-	}
+        failed("HTTP request failed (status " + std::to_string(m_response_code) + ").");
+        }
 	return;
 }
 
@@ -238,7 +254,37 @@ auto curl_easy_t::run_try() -> void
 {
     while (true)
     {
-        while (!prepare()) std::this_thread::sleep_for(std::chrono::milliseconds{ 5 });
+        while (!runnable())
+        {
+            if (cancelled())
+                throw std::runtime_error{"Task cancelled."};
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        if (replay())
+            return;
+        bool prepared{};
+        while (!prepared)
+        {
+            if (cancelled())
+                throw std::runtime_error{"Task cancelled."};
+            if (!runnable())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+                continue;
+            }
+            try
+            {
+                prepared = prepare();
+            }
+            catch (const std::exception &error)
+            {
+                if (!m_control)
+                    throw;
+                m_control->fail(error.what());
+            }
+            if (!prepared)
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
         m_response_code = 0;
         m_write = std::make_unique<write_t>();
         api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
@@ -251,12 +297,14 @@ auto curl_easy_t::run_try() -> void
         {
             lgo::log_file(std::string{ error.what() } + "\n");
             //A connection failure can also leave a partially consumed request body.
-            resume();
+            failed("Network connection failed.");
             continue;
         }
         break;
     }
     parse();
+    if (valid())
+        checkpoint();
     return;
 }
 
@@ -383,4 +431,128 @@ auto curl_easy_t::method() -> void
     }
     api_curl(curl_easy_setopt(m_interface, CURLOPT_HTTPHEADER, m_header_curl));
     return;
+}
+
+auto curl_easy_t::method_delete() -> void
+{
+    method_get();
+    m_verb = "DELETE";
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_CUSTOMREQUEST, "DELETE"));
+}
+auto curl_easy_t::control_set(std::shared_ptr<request_control_t> control) -> void
+{
+    m_control = std::move(control);
+    m_epoch = m_control ? m_control->epoch.load() : 0;
+    if (!m_control)
+    {
+        api_curl(curl_easy_setopt(m_interface, CURLOPT_OPENSOCKETFUNCTION, nullptr));
+        api_curl(curl_easy_setopt(m_interface, CURLOPT_CLOSESOCKETFUNCTION, nullptr));
+        api_curl(curl_easy_setopt(m_interface, CURLOPT_NOPROGRESS, 1L));
+        return;
+    }
+    // Synchronous preparation/listing workers need the same Schannel wake-up
+    // as the main multi worker, otherwise their future can delay shutdown 300s.
+    api_curl(curl_easy_setopt(
+        m_interface, CURLOPT_OPENSOCKETFUNCTION,
+        +[](void *context, curlsocktype, curl_sockaddr *address) -> curl_socket_t
+        {
+            return static_cast<curl_socket_t>(static_cast<request_control_t *>(context)->socket_open(
+                address->family, address->socktype, address->protocol));
+        }));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_OPENSOCKETDATA, m_control.get()));
+    api_curl(curl_easy_setopt(
+        m_interface, CURLOPT_CLOSESOCKETFUNCTION, +[](void *context, curl_socket_t socket) -> int
+        { return static_cast<request_control_t *>(context)->socket_close(socket); }));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_CLOSESOCKETDATA, m_control.get()));
+    api_curl(curl_easy_setopt(
+        m_interface, CURLOPT_XFERINFOFUNCTION,
+        +[](void *context, curl_off_t, curl_off_t, curl_off_t, curl_off_t) -> int
+        { return context && static_cast<request_control_t *>(context)->cancelled ? 1 : 0; }));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_XFERINFODATA, m_control.get()));
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_NOPROGRESS, m_control ? 0L : 1L));
+}
+auto curl_easy_t::runnable() -> bool
+{
+    if (m_control)
+    {
+        if (m_epoch != m_control->epoch)
+        {
+            m_epoch = m_control->epoch;
+            m_failures = 0;
+            m_retry_at = {};
+            manual_retry();
+        }
+        if (m_control->cancelled || m_control->paused)
+            return false;
+    }
+    return std::chrono::steady_clock::now() >= m_retry_at;
+}
+auto curl_easy_t::manual_retry() -> void
+{
+    resume();
+}
+auto curl_easy_t::authentication_failure() const -> bool
+{
+    return m_response_code == 401;
+}
+auto curl_easy_t::failed(std::string reason) -> void
+{
+    const bool auth{authentication_failure()};
+    try
+    {
+        resume();
+    }
+    catch (const std::exception &error)
+    {
+        if (!m_control)
+            throw;
+        m_control->fail(error.what());
+        return;
+    }
+    if (m_control && !auth)
+    {
+        const int limit{m_control->retry_limit};
+        if (limit >= 0 && m_failures++ >= static_cast<unsigned>(limit))
+            m_control->fail(std::move(reason));
+        else
+            m_retry_at =
+                std::chrono::steady_clock::now() + std::chrono::seconds{std::min(30u, m_failures + 1)};
+    }
+}
+auto curl_easy_t::replay() -> bool
+{
+    if (!m_journal)
+        return false;
+    if (m_cache_key.empty())
+    {
+        std::string request{m_verb + " " + m_host + m_path + "\n"};
+        for (const auto &[name, value] : m_query)
+            request += name + "=" + value + "\n";
+        request += m_read->m_payload;
+        m_cache_key = storage_digest(request);
+    }
+    if (auto saved{m_journal->response(m_cache_key)})
+    {
+        restore_response(*saved);
+        return true;
+    }
+    return false;
+}
+auto curl_easy_t::checkpoint() -> void
+{
+    if (m_journal && !m_cache_key.empty())
+        m_journal->response(m_cache_key, saved_response());
+}
+auto curl_easy_t::saved_response() -> std::string
+{
+    return nlohmann::json{{"status", m_response_code}, {"body", m_write->m_payload}}.dump();
+}
+auto curl_easy_t::restore_response(std::string_view value) -> void
+{
+    const auto saved = nlohmann::json::parse(value);
+    m_response_code = saved.at("status").get<long>();
+    m_write->m_payload = saved.at("body").get<std::string>();
+    parse();
+    if (!valid())
+        throw std::runtime_error{"Invalid saved HTTP response."};
 }

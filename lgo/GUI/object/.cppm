@@ -18,3 +18,5 @@ export import lgo.GUI.object.fun;
 export import lgo.GUI.object.focus;
 export import lgo.GUI.object.menu;
 export import lgo.GUI.object.virt;
+
+export import lgo.GUI.object.dialog;
