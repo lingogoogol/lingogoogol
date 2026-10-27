@@ -11,6 +11,7 @@ target_sources(
 target_link_libraries(
     lgo.GUI.object.text_input
     PRIVATE
+        external.GLFW
         common
         lgo.io.file
         lgo.math.vec

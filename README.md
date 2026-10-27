@@ -112,6 +112,8 @@ OAuth access token 的簽署與取得也由背景 worker 處理。建立請求�
 
 程式入口除 `std::exception` 外也有 `catch (...)`，非標準 C++ 例外會記錄未知例外訊息並回報失敗。
 
+lgo.GUI 文字欄位支援 UTF-8 中文輸入、Backspace、Ctrl+A 全選、Ctrl+C 複製及 Ctrl+V 貼上。
+
 ### 5. 關閉與保留狀態
 
 傳輸完成後，使用視窗右上角的叉叉正常關閉程式。請保留以下檔案：

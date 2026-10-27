@@ -12,7 +12,8 @@ namespace lgo
         {
             current = *i;
             m_on.erase(i);
-            (*current)();
+            std::unique_ptr<std::function<void()>> callback{current};
+            (*callback)();
         }
         --m_depth;
         if (!m_depth)

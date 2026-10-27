@@ -28,6 +28,21 @@ constexpr auto GLFW_ICONIFIED_export{ GLFW_ICONIFIED };
 constexpr auto GLFW_DONT_CARE_export{ GLFW_DONT_CARE };
 #undef GLFW_DONT_CARE
 
+constexpr auto GLFW_REPEAT_export{ GLFW_REPEAT };
+#undef GLFW_REPEAT
+constexpr auto GLFW_KEY_BACKSPACE_export{ GLFW_KEY_BACKSPACE };
+#undef GLFW_KEY_BACKSPACE
+constexpr auto GLFW_KEY_DELETE_export{ GLFW_KEY_DELETE };
+#undef GLFW_KEY_DELETE
+constexpr auto GLFW_MOD_CONTROL_export{ GLFW_MOD_CONTROL };
+#undef GLFW_MOD_CONTROL
+constexpr auto GLFW_KEY_A_export{ GLFW_KEY_A };
+#undef GLFW_KEY_A
+constexpr auto GLFW_KEY_C_export{ GLFW_KEY_C };
+#undef GLFW_KEY_C
+constexpr auto GLFW_KEY_V_export{ GLFW_KEY_V };
+#undef GLFW_KEY_V
+
 export
 {
     using ::VkSurfaceKHR;
@@ -57,6 +72,8 @@ export
     using ::glfwGetCursorPos;
     using ::glfwGetMouseButton;
     using ::glfwGetKey;
+    using ::glfwGetClipboardString;
+    using ::glfwSetClipboardString;
     using ::glfwSetCursorPosCallback;
     using ::glfwSetCursorEnterCallback;
     using ::glfwSetMouseButtonCallback;
@@ -67,6 +84,14 @@ export
     using ::glfwPollEvents;
     using ::glfwWaitEventsTimeout;
     using ::glfwWindowShouldClose;
+
+    constexpr auto GLFW_REPEAT{ GLFW_REPEAT_export };
+    constexpr auto GLFW_KEY_BACKSPACE{ GLFW_KEY_BACKSPACE_export };
+    constexpr auto GLFW_KEY_DELETE{ GLFW_KEY_DELETE_export };
+    constexpr auto GLFW_MOD_CONTROL{ GLFW_MOD_CONTROL_export };
+    constexpr auto GLFW_KEY_A{ GLFW_KEY_A_export };
+    constexpr auto GLFW_KEY_C{ GLFW_KEY_C_export };
+    constexpr auto GLFW_KEY_V{ GLFW_KEY_V_export };
 
     constexpr auto GLFW_ICONIFIED{ GLFW_ICONIFIED_export };
     constexpr auto GLFW_DONT_CARE{ GLFW_DONT_CARE_export };
