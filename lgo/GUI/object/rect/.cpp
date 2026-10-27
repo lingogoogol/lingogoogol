@@ -138,6 +138,7 @@ namespace lgo
         m_texture_axis_x = texture_axis_x;
         m_texture_axis_y = texture_axis_y;
         m_texture_enable = true;
+        m_clip_enabled = true;
         return;
     }
 
@@ -157,9 +158,35 @@ namespace lgo
         if (m_primitive)
         {
             m_primitive->set_pos(pos);
-            m_depth_tracker->update(m_depth_id, m_pos, m_size);
+            update_hit_area();
         }
         return;
+    }
+
+    auto rect_t::set_clip(pos_2D pos, size_2D size) -> void
+    {
+        std::unique_lock lock{m_mutex};
+        m_clip_pos = pos;
+        m_clip_size = size;
+        m_clip_enabled = true;
+        if (m_primitive)
+        {
+            m_primitive->set_clip(&m_clip_pos, &m_clip_size);
+            update_hit_area();
+        }
+    }
+
+    auto rect_t::update_hit_area() -> void
+    {
+        auto pos{m_pos};
+        auto size{m_size};
+        if (m_clip_enabled)
+        {
+            pos = {std::max(m_pos.x, m_clip_pos.x), std::max(m_pos.y, m_clip_pos.y)};
+            size = {std::max<std::int64_t>(0, std::min(m_pos.x + m_size.x, m_clip_pos.x + m_clip_size.x) - pos.x),
+                    std::max<std::int64_t>(0, std::min(m_pos.y + m_size.y, m_clip_pos.y + m_clip_size.y) - pos.y)};
+        }
+        m_depth_tracker->update(m_depth_id, pos, size);
     }
 
     auto rect_t::get_size() const -> size_2D
@@ -176,7 +203,7 @@ namespace lgo
         if (m_primitive)
         {
             m_primitive->set_size(size);
-            m_depth_tracker->update(m_depth_id, m_pos, m_size);
+            update_hit_area();
         }
         return;
     }
@@ -270,8 +297,8 @@ namespace lgo
                 .pos{ pos },
                 .size{ size },
                 .depth{ depth_range.near },
-                .clip_pos{},//...
-                .clip_size{},//...
+                .clip_pos{m_clip_enabled ? &m_clip_pos : nullptr},
+                .clip_size{m_clip_enabled ? &m_clip_size : nullptr},
                 .color{ color },
                 .image_view{ m_image_view },
                 .texture_pos{ m_texture_pos },
@@ -287,6 +314,8 @@ namespace lgo
                 .pos{ pos },
                 .size{ size },
                 .depth{ depth_range.near },
+                .clip_pos{m_clip_enabled ? &m_clip_pos : nullptr},
+                .clip_size{m_clip_enabled ? &m_clip_size : nullptr},
                 .color{ color },
                 .name{ m_name + ".m_primitive" }
             });
@@ -294,6 +323,7 @@ namespace lgo
         lock.lock();
         m_primitive = primitive;
         m_depth_id = m_depth_tracker->add(m_pos, m_size, m_depth_range.near, true);
+        update_hit_area();
         show_end(base);
         return;
     }
@@ -314,4 +344,5 @@ namespace lgo
         hide_end(base);
         return;
     }
+
 }

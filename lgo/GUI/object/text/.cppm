@@ -85,6 +85,8 @@ export namespace lgo
         auto set_color(color_t color) -> void;
         auto set_frame_color(color_t) -> void;
         auto get_text_size() const -> size_2D;
+        auto get_text_offset() const -> size_2D;
+        auto set_text_offset(size_2D offset) -> void;
 
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
@@ -100,6 +102,9 @@ export namespace lgo
     protected:
         auto resize_text(size_2D size) -> void;
         engine_t* m_engine{};
+        // Called after deferred glyph layout/font reload as well as eager loads.
+        virtual auto text_layout_changed() -> void {}
+
     private:
         struct glyph_t
         {
@@ -115,6 +120,8 @@ export namespace lgo
         static auto restore_gpu(engine_t* engine) -> void;
         static auto upload_glyph(glyph_t& glyph, engine_t* engine, vk::raii::CommandBuffer& commands) -> void;
         auto load_gpu() -> void;
+        auto update_glyph_clips() -> void;
+        size_2D m_text_offset{};
 
         //Populate m_div and m_glyph based on other members.
         auto load() -> void;

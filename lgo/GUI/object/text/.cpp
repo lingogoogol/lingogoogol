@@ -106,14 +106,15 @@ namespace lgo
     auto text_line_t::get_pos() const -> pos_2D
     {
         std::unique_lock lock{ m_mutex };
-        return m_div.get_pos();
+        return m_div.get_pos() - m_text_offset;
     }
 
     auto text_line_t::set_pos(pos_2D pos) -> void
     {
         std::unique_lock lock{ m_mutex };
-        m_clip_pos = m_clip_pos + (pos - m_div.get_pos());
-        m_div.set_pos(pos);
+        m_clip_pos = m_clip_pos + (pos - get_pos());
+        m_div.set_pos(pos + m_text_offset);
+        update_glyph_clips();
         return;
     }
 
@@ -137,6 +138,7 @@ namespace lgo
         std::unique_lock lock{ m_mutex };
         m_div.set_size(size);
         m_clip_size = size;
+        update_glyph_clips();
     }
 
     auto text_line_t::get_margin() const -> size_1D
@@ -184,11 +186,11 @@ namespace lgo
         return m_clip_pos;
     }
 
-    auto text_line_t::set_clip_pos(pos_2D clip_pos, bool load_now) -> void
+    auto text_line_t::set_clip_pos(pos_2D clip_pos, bool /*load_now*/) -> void
     {
         std::unique_lock lock{ m_mutex };
         m_clip_pos = clip_pos;
-        load_try(load_now);
+        update_glyph_clips();
         return;
     }
 
@@ -198,11 +200,11 @@ namespace lgo
         return m_clip_size;
     }
 
-    auto text_line_t::set_clip_size(size_2D clip_size, bool load_now) -> void
+    auto text_line_t::set_clip_size(size_2D clip_size, bool /*load_now*/) -> void
     {
         std::unique_lock lock{ m_mutex };
         m_clip_size = clip_size;
-        load_try(load_now);
+        update_glyph_clips();
         return;
     }
 
@@ -223,6 +225,28 @@ namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         return size_2D{ m_div.len().x, (*m_font_preference)[0]->leading_get() };
+    }
+
+    auto text_line_t::get_text_offset() const -> size_2D
+    {
+        std::unique_lock lock{m_mutex};
+        return m_text_offset;
+    }
+
+    auto text_line_t::set_text_offset(size_2D offset) -> void
+    {
+        std::unique_lock lock{m_mutex};
+        auto pos{get_pos()};
+        m_text_offset = offset;
+        m_div.set_pos(pos + offset);
+        // Moving glyph cells must not move the fixed viewport with them.
+        update_glyph_clips();
+    }
+
+    auto text_line_t::update_glyph_clips() -> void
+    {
+        for (auto id : m_rect_id)
+            m_div.get_object_shared<rect_t>(id)->set_clip(m_clip_pos, m_clip_size);
     }
 
     auto text_line_t::show_impl(bool base) -> void
@@ -437,6 +461,8 @@ namespace lgo
                 m_color
             );
         }
+        update_glyph_clips();
+        text_layout_changed();
         return;
     }
 

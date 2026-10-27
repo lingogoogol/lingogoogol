@@ -98,6 +98,12 @@ export namespace lgo
         
         auto set_pos(pos_2D pos) -> void;
         auto set_size(size_2D size) -> void;
+        auto set_clip(const pos_2D* pos, const size_2D* size) -> void
+        {
+            std::unique_lock lock{m_mutex};
+            m_clip_pos = pos;
+            m_clip_size = size;
+        }
         auto set_color(color_t color) -> void;
         auto set_image_view(image_view_t& image_view) -> void;
         auto color_enable() -> void;

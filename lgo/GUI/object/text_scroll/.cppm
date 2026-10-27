@@ -1,361 +1,175 @@
 export module lgo.GUI.object.text_scroll;
 
 import std;
-
+import external.GLFW;
 import lgo.io.file;
 import lgo.math.vec;
+import lgo.math.op;
 import lgo.GUI.misc;
 import lgo.GUI.primitive;
 import lgo.GUI.object.depth_tracker;
 import lgo.GUI.object.object;
 import lgo.GUI.object.rect;
 import lgo.GUI.object.text;
-import lgo.GUI.object.click_area;
 
 export namespace lgo
 {
+    // A single text line has one horizontal viewport, independent of glyph
+    // positions. The track keeps its original 2px thickness and reserves no Y bar.
     template<typename t_text>
     class text_scroll_impl_t: public t_text
     {
-    private:
         size_2D m_size{};
-        rect_t m_scrollbar_x{};
-        rect_t m_scrollbar_y{};
-        bool m_scroll_horizontal{};
-        click_area_t m_click_area{};
-        std::function<void(size_2D)>* m_callback_mouse_scroll_key{};
+        rect_t m_track{}, m_thumb{};
+        depth_tracker_t* m_depth_tracker{};
+        std::uint64_t m_depth_id{};
+        float m_depth{};
+        bool m_initialized{}, m_dragging{};
+        std::int64_t m_grab_offset{};
+        engine_t::callback_mouse_scroll_t* m_scroll_key{};
+        engine_t::callback_mouse_move_t* m_move_key{};
+        engine_t::callback_mouse_button_t* m_button_key{};
+        static constexpr std::int64_t bar_height{2};
+        static constexpr std::int64_t scroll_speed{32};
 
-        constexpr static size_1D scrollbar_width{ 0x2 };
-        constexpr static std::int64_t scroll_speed{ 0x10 };
-
-        static auto scrollbar_height(std::int64_t render_size, std::int64_t clip_size) -> std::int64_t;
-
-        auto text_scroll_callback_scroll(size_2D scroll_size) -> void;
-        auto text_scroll_callback_click_area() -> void;
-        auto constrain_text_pos(pos_2D& pos) -> void;
-        auto update_scrollbar_pos() -> void;
-        auto update_scrollbar_size() -> void;
-    public:
+        auto max_scroll() const -> std::int64_t
+        {
+            return std::max<std::int64_t>(0, this->get_text_size().x - this->get_clip_size().x);
+        }
+        auto update_bar() -> void
+        {
+            const auto pos{get_pos()};
+            const auto height{std::min(bar_height, m_size.y)};
+            const auto y{pos.y + m_size.y - height};
+            m_track.set_pos({pos.x, y});
+            m_track.set_size({m_size.x, height});
+            const auto content{std::max<std::int64_t>(1, this->get_text_size().x)};
+            const auto width{max_scroll() ? std::clamp(m_size.x * m_size.x / content,
+                std::min<std::int64_t>(24, m_size.x), m_size.x) : m_size.x};
+            const auto offset{max_scroll() ? -this->get_text_offset().x * (m_size.x - width) / max_scroll() : 0};
+            m_thumb.set_pos({pos.x + offset, y});
+            m_thumb.set_size({width, height});
+        }
+        auto hit(pos_2D pos) const -> bool
+        {
+            return inside(get_pos(), m_size, pos) && m_depth_tracker->top(pos, m_depth_id);
+        }
+        auto drag(pos_2D pos) -> void
+        {
+            const auto travel{m_size.x - m_thumb.get_size().x};
+            if (travel > 0)
+            {
+                const auto x{std::clamp(pos.x - get_pos().x - m_grab_offset, std::int64_t{}, travel)};
+                set_scroll_offset(x * max_scroll() / travel);
+            }
+        }
+        auto mouse_button(int button, int action, int) -> void
+        {
+            if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+            if (action == GLFW_RELEASE) { m_dragging = false; return; }
+            const auto pos{this->m_engine->cursor_pos_get()};
+            if (action != GLFW_PRESS || !hit(pos) ||
+                !inside(m_track.get_pos(), m_track.get_size(), pos) || !max_scroll()) return;
+            m_dragging = true;
+            m_grab_offset = inside(m_thumb.get_pos(), m_thumb.get_size(), pos)
+                ? pos.x - m_thumb.get_pos().x : m_thumb.get_size().x / 2;
+            drag(pos);
+        }
+      protected:
+        auto text_layout_changed() -> void override
+        {
+            if (!m_initialized) return;
+            set_scroll_offset(-this->get_text_offset().x);
+        }
+      public:
         text_scroll_impl_t() = default;
-
         template<typename... t_arg>
-        text_scroll_impl_t
-        (
-            engine_t* engine,
-            depth_tracker_t* depth_tracker,
-            depth_range_t depth_range,
-            pos_2D pos,
-            std::string text,
-            size_2D size,
-            color_t frame_color,
-            t_arg&&... arg
-        );
-
-        auto get_pos() const -> pos_2D override;
-        auto set_pos(pos_2D pos) -> void override;
-        auto get_size() const -> size_2D override;
-        auto set_size(size_2D size) -> void override;
-        auto get_margin() const -> size_1D override;
-        virtual auto log(std::uint32_t tab_count) const -> void override;
-
-        auto set_text(std::string text, bool load_now = true) -> void;
-        auto set_frame_color(color_t color) -> void;
-        auto set_scrollbar_color(color_t color) -> void;
-
-        auto show_impl(bool base) -> void override;
-        auto hide_impl(bool base) -> void override;
+        text_scroll_impl_t(engine_t* engine, depth_tracker_t* tracker, depth_range_t depth,
+                           pos_2D pos, std::string text, size_2D size, color_t color, t_arg&&... arg)
+            : m_size{std::max<std::int64_t>(0, size.x), std::max<std::int64_t>(0, size.y)},
+              m_depth_tracker{tracker}, m_depth{depth.near}
+        {
+            t_text::init(engine, tracker, depth, pos, std::move(text),
+                size_2D{m_size.x, std::max<std::int64_t>(0, m_size.y - bar_height)},
+                std::forward<t_arg>(arg)...);
+            m_track = rect_t{engine, tracker, depth_range_t{(depth.near + depth.far) / 2, depth.far},
+                             pos, size_2D{}, color_t{.15f,.15f,.15f}};
+            m_thumb = rect_t{engine, tracker, depth, pos, size_2D{}, color};
+            m_initialized = true;
+            update_bar();
+        }
+        ~text_scroll_impl_t() override { this->hide(); }
+        auto get_pos() const -> pos_2D override { return t_text::get_pos(); }
+        auto get_size() const -> size_2D override { return m_size; }
+        auto get_margin() const -> size_1D override { return size_1D{0}; }
+        auto scrollbar_pos() const -> pos_2D { return m_thumb.get_pos(); }
+        auto scrollbar_size() const -> size_2D { return m_thumb.get_size(); }
+        auto scroll_offset() const -> std::int64_t { return -this->get_text_offset().x; }
+        auto set_scroll_offset(std::int64_t offset) -> void
+        {
+            std::unique_lock lock{this->m_mutex};
+            this->set_text_offset({-std::clamp(offset, std::int64_t{}, max_scroll()), 0});
+            update_bar();
+        }
+        auto set_pos(pos_2D pos) -> void override
+        {
+            std::unique_lock lock{this->m_mutex};
+            t_text::set_pos(pos);
+            update_bar();
+            if (this->status() == this->shown) m_depth_tracker->update(m_depth_id, pos, m_size);
+        }
+        auto set_size(size_2D size) -> void override
+        {
+            std::unique_lock lock{this->m_mutex};
+            size = {std::max<std::int64_t>(0, size.x), std::max<std::int64_t>(0, size.y)};
+            GUI_object_t::set_size(size);
+            m_size = size;
+            this->resize_text({size.x, std::max<std::int64_t>(0, size.y - bar_height)});
+            set_scroll_offset(scroll_offset());
+            if (this->status() == this->shown) m_depth_tracker->update(m_depth_id, get_pos(), size);
+        }
+        auto set_text(std::string text, bool load_now = true) -> void
+        {
+            // Repeated status updates must not rebuild glyphs or reset scrolling.
+            if (text == this->get_text()) return;
+            t_text::set_text(std::move(text), load_now);
+        }
+        auto set_frame_color(color_t color) -> void { set_scrollbar_color(color); }
+        auto set_scrollbar_color(color_t color) -> void { m_thumb.set_color(color); }
+        auto log(std::uint32_t tab_count) const -> void override { t_text::log(tab_count); }
+        auto show_impl(bool base) -> void override
+        {
+            if (!this->show_begin(base)) return;
+            t_text::show_impl(false);
+            m_track.show(); m_thumb.show();
+            m_depth_id = m_depth_tracker->add(get_pos(), m_size, m_depth, false);
+            m_scroll_key = this->m_engine->callback_mouse_scroll_add([this](size_2D delta)
+            {
+                if (hit(this->m_engine->cursor_pos_get()))
+                    set_scroll_offset(scroll_offset() - scroll_speed * (delta.x ? delta.x : delta.y));
+            });
+            // Capture movement until release, even outside the track/viewport.
+            m_move_key = this->m_engine->callback_mouse_move_add([this](pos_2D pos)
+                { if (m_dragging) drag(pos); });
+            m_button_key = this->m_engine->callback_mouse_button_add([this](int b, int a, int m)
+                { mouse_button(b, a, m); });
+            this->show_end(base);
+        }
+        auto hide_impl(bool base) -> void override
+        {
+            if (!this->hide_begin(base)) return;
+            m_dragging = false;
+            this->m_engine->callback_mouse_scroll_remove(m_scroll_key);
+            this->m_engine->callback_mouse_move_remove(m_move_key);
+            this->m_engine->callback_mouse_button_remove(m_button_key);
+            m_depth_tracker->remove(m_depth_id);
+            m_thumb.hide(); m_track.hide();
+            t_text::hide_impl(false);
+            this->hide_end(base);
+        }
     };
 
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::scrollbar_height(std::int64_t render_size, std::int64_t clip_size) -> std::int64_t
-    {
-        return render_size ? std::min(clip_size * clip_size / render_size, clip_size) : clip_size;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::text_scroll_callback_scroll(size_2D /*scroll_size*/) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        /*if (inside(this->get_clip_pos(), this->get_clip_size(), cursor_pos))
-        {
-            pos_2D text_pos{ this->get_text_pos() };
-            if (m_scroll_horizontal)
-            {
-                text_pos.x += scroll_speed * scroll_size.x;
-            }
-            else
-            {
-                text_pos.y += scroll_speed * scroll_size.x;
-            }
-            constrain_text_pos(text_pos);
-            this->set_text_pos(text_pos);
-            update_scrollbar_pos();
-        }*///...
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::text_scroll_callback_click_area() -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        m_scroll_horizontal = !m_scroll_horizontal;
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::constrain_text_pos(pos_2D& pos) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        std::int64_t scroll_y{ std::max(this->get_render_size().y, this->get_clip_size().y) };
-        if (pos.y > this->get_clip_pos().y)
-        {
-            pos.y = this->get_clip_pos().y;
-        }
-        else if (pos.y + scroll_y < this->get_clip_pos().y + this->get_clip_size().y)
-        {
-            pos.y = this->get_clip_pos().y + this->get_clip_size().y - scroll_y;
-        }
-        std::int64_t scroll_x{ std::max(this->get_render_size().x, this->get_clip_size().x) };
-        if (pos.x > this->get_clip_pos().x)
-        {
-            pos.x = this->get_clip_pos().x;
-        }
-        else if (pos.x + scroll_x < this->get_clip_pos().x + this->get_clip_size().x)
-        {
-            pos.x = this->get_clip_pos().x + this->get_clip_size().x - scroll_x;
-        }
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::update_scrollbar_pos() -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        pos_2D text_pos{ this->get_pos() };
-        std::int64_t scroll_y{ std::max<std::int64_t>({ 1, this->get_text_size().y, this->get_clip_size().y }) };
-        m_scrollbar_y.set_pos
-        (
-            pos_2D
-            {
-                m_scrollbar_y.get_pos().x,
-                this->get_clip_pos().y - (text_pos.y - this->get_clip_pos().y) * this->get_clip_size().y / scroll_y
-            }
-        );
-        std::int64_t scroll_x{ std::max<std::int64_t>({ 1, this->get_text_size().x, this->get_clip_size().x }) };
-        m_scrollbar_x.set_pos
-        (
-            pos_2D
-            {
-                this->get_clip_pos().x - (text_pos.x - this->get_clip_pos().x) * this->get_clip_size().x / scroll_x,
-                m_scrollbar_x.get_pos().y
-            }
-        );
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::update_scrollbar_size() -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        size_2D render_size{ this->get_text_size() };
-        std::int64_t scrollbar_height_x{ scrollbar_height(render_size.x, this->get_clip_size().x) };
-        std::int64_t scrollbar_height_y{ scrollbar_height(render_size.y, this->get_clip_size().y) };
-        m_scrollbar_x.set_size(size_2D{ scrollbar_height_x, scrollbar_width.x });
-        m_scrollbar_y.set_size(size_2D{ scrollbar_width.x, scrollbar_height_y });
-        return;
-    }
-
-    template<typename t_text>
-    template<typename... t_arg>
-    text_scroll_impl_t<t_text>::text_scroll_impl_t
-    (
-        engine_t* engine,
-        depth_tracker_t* depth_tracker,
-        depth_range_t depth_range,
-        pos_2D pos,
-        std::string text,
-        size_2D size,
-        color_t frame_color,
-        t_arg&&... arg
-    ):
-        m_size{ size },
-        m_click_area
-        {
-            engine,
-            depth_tracker,
-            depth_range,
-            pos,
-            size,
-            [] () {},
-            [] (pos_2D) {},
-            [] (pos_2D) {},
-            [] (pos_2D) {},
-            std::bind(&text_scroll_impl_t::text_scroll_callback_click_area, this)
-        }
-    {
-        size_2D text_size{ m_size.x - scrollbar_width.x, m_size.y - scrollbar_width.x };
-        t_text::init(engine, depth_tracker, depth_range, pos, text, text_size, std::forward<t_arg>(arg)...);
-        m_scrollbar_x = rect_t
-        {
-            engine,
-            depth_tracker,
-            depth_range,
-            pos_2D{ pos.x, pos.y + m_size.y - scrollbar_width.x },
-            size_2D{},
-            frame_color
-        };
-        m_scrollbar_y = rect_t
-        {
-            engine,
-            depth_tracker,
-            depth_range,
-            pos_2D{ pos.x + m_size.x - scrollbar_width.x, pos.y },
-            size_2D{},
-            frame_color
-        };
-        update_scrollbar_size();
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::get_pos() const -> pos_2D
-    {
-        return t_text::get_pos();
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_pos(pos_2D pos) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        size_2D offset{ pos - t_text::get_pos() };
-        t_text::set_pos(pos);
-        m_click_area.set_pos(pos);
-        m_scrollbar_x.set_pos(m_scrollbar_x.get_pos() + offset);
-        m_scrollbar_y.set_pos(m_scrollbar_y.get_pos() + offset);
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::get_size() const -> size_2D
-    {
-        std::unique_lock lock{ this->m_mutex };
-        return m_size;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_size(size_2D size) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        // Notify once with the outer size; the inner text excludes the scrollbar border.
-        GUI_object_t::set_size(size);
-        m_size = size;
-        this->resize_text
-        (
-            size_2D{ std::max<std::int64_t>(0, size.x - scrollbar_width.x),
-                std::max<std::int64_t>(0, size.y - scrollbar_width.x) }
-        );
-        m_click_area.set_size(size);
-        const auto pos{ get_pos() };
-        m_scrollbar_x.set_pos(pos_2D{ pos.x, pos.y + size.y - scrollbar_width.x });
-        m_scrollbar_y.set_pos(pos_2D{ pos.x + size.x - scrollbar_width.x, pos.y });
-        update_scrollbar_size();
-        update_scrollbar_pos();
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::get_margin() const -> size_1D
-    {
-        return size_1D{ 0 };
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::log(std::uint32_t tab_count) const -> void
-    {
-        if constexpr (!gui_object_names_enabled) return;
-        log_file(tab(tab_count) + "{\n");
-        log_file(tab(tab_count + 1) + "type: text_scroll_impl_t<>\n");
-        t_text::log(tab_count + 1);
-        log_file(tab(tab_count + 1) + "size: " + to_string(m_size) + "\n");
-        log_file(tab(tab_count + 1) + "scrollbar_x:\n");
-        m_scrollbar_x.log(tab_count + 1);
-        log_file(tab(tab_count + 1) + "scrollbar_y:\n");
-        m_scrollbar_y.log(tab_count + 1);
-        log_file(tab(tab_count + 1) + "scroll_horizontal: " + std::to_string(m_scroll_horizontal) + "\n");
-        log_file(tab(tab_count + 1) + "click_area:\n");
-        m_click_area.log(tab_count + 1);
-        log_file(tab(tab_count) + "}\n");
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_text(std::string text, bool load_now) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        t_text::set_text(text, load_now);
-        /*pos_2D text_pos{ this->get_text_pos() };
-        constrain_text_pos(text_pos);
-        this->set_text_pos(text_pos);
-        update_scrollbar_pos();
-        update_scrollbar_size();*///...
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_frame_color(color_t color) -> void
-    {
-        set_scrollbar_color(color);
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::set_scrollbar_color(color_t color) -> void
-    {
-        std::unique_lock lock{ this->m_mutex };
-        m_scrollbar_x.set_color(color);
-        m_scrollbar_y.set_color(color);
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::show_impl(bool base) -> void
-    {
-        if (!this->show_begin(base))
-        {
-            return;
-        }
-        std::unique_lock lock{ this->m_mutex };
-        t_text::show_impl(false);
-        m_click_area.show();
-        m_scrollbar_x.show();
-        m_scrollbar_y.show();
-        m_callback_mouse_scroll_key = t_text::m_engine->callback_mouse_scroll_add
-        (
-            std::bind(&text_scroll_impl_t<t_text>::text_scroll_callback_scroll, this, std::placeholders::_1)
-        );
-        this->show_end(base);
-        return;
-    }
-
-    template<typename t_text>
-    auto text_scroll_impl_t<t_text>::hide_impl(bool base) -> void
-    {
-        if (!this->hide_begin(base))
-        {
-            return;
-        }
-        std::unique_lock lock{ this->m_mutex };
-        m_click_area.hide();
-        m_scrollbar_x.hide();
-        m_scrollbar_y.hide();
-        t_text::m_engine->callback_mouse_scroll_remove(m_callback_mouse_scroll_key);
-        t_text::hide_impl(false);
-        this->hide_end(base);
-        return;
-    }
-
     using text_line_scroll_t = text_scroll_impl_t<text_line_t>;
-    //using text_block_scroll_t = text_scroll_impl_t<text_block_t>;
-
     class text_line_scroll_std_t: public text_line_scroll_t
     {
     public:

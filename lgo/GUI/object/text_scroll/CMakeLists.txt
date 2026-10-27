@@ -14,6 +14,8 @@ target_link_libraries(
     lgo.GUI.object.text_scroll
     PRIVATE
         common
+        external.GLFW
+        lgo.math.op
         lgo.io.file
         lgo.math.vec
         lgo.GUI.misc

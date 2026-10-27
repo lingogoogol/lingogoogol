@@ -30,6 +30,8 @@ export namespace lgo
         rect_primitive_t* m_primitive{};
         pos_2D m_clip_pos{};
         size_2D m_clip_size{};
+        bool m_clip_enabled{};
+        auto update_hit_area() -> void;
     public:
         rect_t() = default;
 
@@ -96,6 +98,7 @@ export namespace lgo
         auto set_size(size_2D size) -> void override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
         
+        auto set_clip(pos_2D pos, size_2D size) -> void;
         auto set_color(color_t color) -> void;
         auto set_image_view(image_view_t* image_view) -> void;
         auto color_enable() -> void;
