@@ -92,7 +92,9 @@ export namespace lgo
         //Always lock m_mutex before m_load_mutex to prevent deadlock.
         static std::mutex m_load_mutex;
         static std::set<text_line_t*> m_pending;
+        static std::set<text_line_t*> m_live;
 
+        static auto reload_fonts() -> void;
         static auto pending_load() -> void;
         static auto free() -> void;
     protected:

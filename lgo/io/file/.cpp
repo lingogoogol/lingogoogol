@@ -158,8 +158,17 @@ namespace lgo
     {
         const auto parent{ std::filesystem::path{ path }.parent_path() };
         if (!parent.empty()) std::filesystem::create_directories(parent);
+        std::ofstream next{path, std::ios::binary | std::ios::app};
+        if (!next)
+            throw std::runtime_error{"Cannot open log file: " + path};
+        auto &state{logfile()};
+        std::lock_guard lock{state.mutex};
         get_logfile_path() = path;
-        log_file(get_logfile_string());
+        state.path = path;
+        state.stream = std::move(next);
+        state.stream << get_logfile_string();
+        state.stream.flush();
+        get_logfile_string().clear();
         return true;
     }
 

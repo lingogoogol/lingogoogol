@@ -23,6 +23,7 @@ namespace lgo
 {
     std::mutex text_line_t::m_load_mutex{};
     std::set<text_line_t*> text_line_t::m_pending{};
+    std::set<text_line_t *> text_line_t::m_live{};
     std::map<const font_face_t*, std::map<char32_t, text_line_t::glyph_t>> text_line_t::m_font{};
     std::uint64_t text_line_t::m_font_heap_index{ 0 };
 
@@ -50,6 +51,10 @@ namespace lgo
         m_margin{ margin },
         m_color{ color }
     {
+        {
+            std::lock_guard live_lock{m_load_mutex};
+            m_live.insert(this);
+        }
         load_try(load_now);
         return;
     }
@@ -80,6 +85,10 @@ namespace lgo
         m_margin = margin;
         m_clip_pos = pos;
         m_clip_size = size;
+        {
+            std::lock_guard live_lock{m_load_mutex};
+            m_live.insert(this);
+        }
         load_try(load_now);
         return;
     }
@@ -88,11 +97,9 @@ namespace lgo
     {
         //Always lock m_mutex before m_load_mutex to prevent deadlock.
         std::unique_lock lock{ m_mutex };
-        if (m_load_pending)
-        {
-            std::unique_lock pending_lock{ m_load_mutex };
-            m_pending.erase(this);
-        }
+        std::unique_lock pending_lock{m_load_mutex};
+        m_live.erase(this);
+        m_pending.erase(this);
         return;
     }
 
@@ -240,6 +247,22 @@ namespace lgo
         m_div.hide();
         hide_end(base);
         return;
+    }
+
+    auto text_line_t::reload_fonts() -> void
+    {
+        std::vector<text_line_t *> texts;
+        {
+            std::lock_guard lock{m_load_mutex};
+            texts.assign(m_live.begin(), m_live.end());
+        }
+        // Called on the GUI thread after replacing the shared font preference.
+        // Old faces stay alive until all cached glyphs have been released.
+        for (auto *text : texts)
+        {
+            std::lock_guard lock{text->m_mutex};
+            text->load_try(false);
+        }
     }
 
     auto text_line_t::pending_load() -> void

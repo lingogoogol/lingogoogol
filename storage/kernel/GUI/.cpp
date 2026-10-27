@@ -559,6 +559,60 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         lgo::depth_range_t{0.0f, 1.0f}, lgo::pos_2D{0, 0}, engine->get_window_size(), lgo::size_1D{0},
         lgo::alignment_2D{lgo::alignment_x::center, lgo::alignment_y::center})};
 
+    load_state->m_settings_page = [=]
+    {
+        persistent->m_dialog_queue.push_back(
+            [=]
+            {
+                const auto settings{load_state->m_settings};
+                persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                    engine, state->get_depth_tracker(), "設定",
+                    std::vector<std::string>{"設定立即生效；進行中的傳輸繼續使用原帳戶。"},
+                    std::vector<std::pair<std::string, std::string>>{
+                        {"日誌資料夾", settings.logfile_path},
+                        {"字型檔案", settings.font_path},
+                        {"帳戶檔案", settings.account_path},
+                        {"根目錄檔案", settings.root_path},
+                        {"網路失敗重試次數（整數或無限）",
+                         settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)}});
+                persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
+                {
+                    if (!accepted)
+                        return true;
+                    auto settings{load_state->m_settings};
+                    try
+                    {
+                        for (const auto& value : values)
+                            if (value.empty())
+                                throw std::runtime_error{"路徑與重試次數不可留空"};
+                        settings.logfile_path = values[0];
+                        settings.font_path = values[1];
+                        settings.account_path = values[2];
+                        settings.root_path = values[3];
+                        if (values[4] == "無限" || values[4] == "-1")
+                            settings.network_retries = -1;
+                        else
+                        {
+                            int count{};
+                            const auto [end, error]{std::from_chars(
+                                values[4].data(), values[4].data() + values[4].size(), count)};
+                            if (error != std::errc{} || end != values[4].data() + values[4].size() ||
+                                count < 0)
+                                throw std::runtime_error{"重試次數必須是非負整數或無限"};
+                            settings.network_retries = count;
+                        }
+                        if (persistent->m_apply_settings)
+                            persistent->m_apply_settings(settings);
+                        return true;
+                    }
+                    catch (const std::exception& error)
+                    {
+                        persistent->m_dialog->error(error.what());
+                        return false;
+                    }
+                };
+            });
+    };
     menu_right->add_object<lgo::button_classic_std_t>(
         lgo::depth_range_t{0, .5f},
         [=]
@@ -571,6 +625,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             persistent->m_refresh();
         },
         "重新整理");
+    menu_right->add_object<lgo::button_classic_std_t>(lgo::depth_range_t{0, .5f}, load_state->m_settings_page,
+                                                      "設定");
     menu_right->add_object<lgo::button_classic_std_t>(
         lgo::depth_range_t{0.0f, 0.5f}, std::bind(&folder_create_callback, engine, state, pos), "新增資料夾");
     menu_right->add_object<lgo::button_classic_std_t>(
