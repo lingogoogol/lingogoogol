@@ -9,6 +9,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -18,6 +19,37 @@ from urllib.parse import urlparse
 source = Path(__file__).resolve().parents[1]
 build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
+
+# Run inside the same X display as Wine; operate actual click areas, rather
+# than invoking callbacks directly. The fixture contains no live credentials.
+ui_driver = r'''
+import json
+from pathlib import Path
+import subprocess
+import sys
+import time
+app = subprocess.Popen(['wine64', sys.argv[1], 'pause-controls'])
+step = 0
+while app.poll() is None:
+    request = Path('click.json')
+    if request.exists():
+        value = json.loads(request.read_text())
+        if value['step'] > step:
+            window = subprocess.check_output(['xdotool', 'search', '--onlyvisible', '--name',
+                                              'Task lifecycle regression'], text=True).splitlines()[0]
+            subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
+            if 'key' in value:
+                subprocess.run(['xdotool', value['key'], 'F3'], check=True)
+            else:
+                subprocess.run(['xdotool', 'mousemove', '--window', window, str(value['x']), str(value['y']),
+                                'click', '1'], check=True)
+            step = value['step']
+            time.sleep(.1)
+            from PIL import ImageGrab
+            ImageGrab.grab().save(f'/tmp/storage-pause-controls-{step}.png')
+    time.sleep(.02)
+sys.exit(app.wait())
+'''
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
@@ -43,6 +75,8 @@ class Handler(BaseHTTPRequestHandler):
         try: self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError): pass
     def resource(self, method, path, body):
+        if self.server.phase == 'pause-controls':
+            time.sleep(.02)
         identifier = urlparse(path).path.rsplit('/', 1)[-1]
         account=self.headers.get('X-Fixture-Account','mock@example.invalid')
         blobs=self.server.other if account=='second@example.invalid' else self.server.blobs
@@ -113,11 +147,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200,{'id':identifier})
         parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--\+)', body, re.S)
         response=[]
+        has_content = False
         for identifier, request in parts:
             header, _, payload = request.partition('\r\n\r\n')
             method, path, *_ = header.splitlines()[0].split(' ')
             status,value=self.resource(method,path,payload)
+            has_content |= (method == 'PATCH' and len(payload) > 20000 or
+                            method == 'GET' and len(value.get('description', '')) > 20000)
             response.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n'+json.dumps(value)+'\r\n')
+        if self.server.phase == 'pause-controls' and has_content and len(parts) < 100:
+            # Keep the final partial chunk in flight while full chunks publish
+            # nonzero progress. GUI clicks must not race an already finished task.
+            time.sleep(4)
         if self.server.phase == 'download-crash' and parts:
             with self.server.lock:
                 self.server.download_batches += 1; index=self.server.download_batches
@@ -155,12 +196,14 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     server.gets={};server.upload_calls=server.download_batches=server.retry=server.reserves=0;server.phase=''
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
-        for phase in ('upload-crash','resume-upload','download-crash','resume-download','features','account-switch','clear-crash','resume-clear'):
+        for phase in ('upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','pause-controls','features','account-switch','clear-crash','resume-clear'):
             server.phase=phase
             # xvfb-run can leave Wine children alive if only the wrapper is killed.
             # Give each trial its own process group so timeout cleanup is complete.
+            launch = ([sys.executable, '-c', ui_driver, str(test / 'test.exe')]
+                      if phase == 'pause-controls' else ['wine64', str(test / 'test.exe'), phase])
             process = subprocess.Popen(
-                ['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64', str(test / 'test.exe'), phase],
+                ['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', *launch],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:

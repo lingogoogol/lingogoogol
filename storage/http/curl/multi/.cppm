@@ -46,6 +46,7 @@ export
         std::map<CURL*, std::unique_ptr<curl_easy_t>> m_added{};
         std::set<CURL*> m_ready{};
         std::set<CURL*> m_waiting{};
+        std::set<CURL*> m_active{};
     };
 }
 

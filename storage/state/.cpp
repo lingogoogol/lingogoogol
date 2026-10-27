@@ -229,10 +229,22 @@ auto request_control_t::cancel() -> void
     for (const auto socket : sockets)
         ::shutdown(static_cast<SOCKET>(socket), SD_BOTH);
 }
+auto request_control_t::pause(bool value) -> void
+{
+    std::lock_guard lock{mutex};
+    if (user_paused.exchange(value) == value) return;
+    if (value)
+    {
+        // Generation survives a rapid Pause/Continue before the curl owner wakes.
+        ++pause_epoch;
+        for (const auto socket : sockets)
+            ::shutdown(static_cast<SOCKET>(socket), SD_BOTH);
+    }
+}
 auto request_control_t::socket_open(int family, int type, int protocol) -> std::uintptr_t
 {
     std::lock_guard lock{mutex};
-    if (cancelled)
+    if (cancelled || user_paused)
         return INVALID_SOCKET;
     const auto socket{::socket(family, type, protocol)};
     if (socket != INVALID_SOCKET)

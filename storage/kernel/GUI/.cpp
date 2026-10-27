@@ -95,12 +95,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
                 if (task->m_journal)
                     task->m_journal->finish();
                 task->m_cancel_saved = true;
-                multi->interrupt();
                 task->m_progress_text->set_text("已取消：" + task->m_label, false);
-                if (task->m_retry_button)
-                    task->m_retry_button->hide();
-                if (task->m_cancel_button)
-                    task->m_cancel_button->hide();
             }
         }
         else if (task->m_control->paused)
@@ -109,11 +104,26 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             if (!download || download->m_error.empty())
                 task->m_progress_text->set_text(
                     "網路失敗：" + task->m_label + "（" + task->m_control->reason() + "）", false);
-            if (task->m_retry_button)
-                task->m_retry_button->show();
         }
-        else if (task->m_retry_button)
-            task->m_retry_button->hide();
+        else if (task->m_control->user_paused)
+        {
+            task->m_progress_text->set_text("已暫停：" + task->m_paused_text, false);
+        }
+        const bool cancelled{task->m_control->cancelled};
+        const bool failed{task->m_control->paused};
+        const bool paused{task->m_control->user_paused};
+        auto visible = [](const auto& button, bool show)
+        {
+            if (button)
+            {
+                if (show) button->show();
+                else button->hide();
+            }
+        };
+        visible(task->m_retry_button, !cancelled && failed);
+        visible(task->m_pause_button, !cancelled && !failed && !paused);
+        visible(task->m_resume_button, !cancelled && !failed && paused);
+        visible(task->m_cancel_button, !cancelled && (failed || paused));
     }
 
     if (load_state->m_session)
@@ -213,9 +223,13 @@ namespace
         {
             const auto saved = task->m_journal->data();
             task->m_saved_progress = saved.value("progress", std::uint64_t{});
+            task->m_control->user_paused = saved.value("user_paused", false);
             if (task->m_saved_progress)
                 text = "續傳：" + std::to_string(task->m_saved_progress) + "B " + text;
+            if (task->m_control->user_paused)
+                text = saved.value("paused_text", text);
         }
+        task->m_paused_text = text;
         task->m_control->retry_limit = state->m_settings.network_retries;
         task->m_progress_div = state->m_progress_column->add_object<lgo::divy_flex_soft_t>(
             storage_content_depth, state->m_progress_column->space_x(lgo::std_margin), lgo::std_margin,
@@ -224,12 +238,32 @@ namespace
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
             storage_content_depth, text, lgo::std_green_light, lgo::size_1D{256}, false);
         const std::weak_ptr<load_task_t> weak{task};
-        task->m_retry_button = row->add_object_shared<lgo::button_classic_std_t>(
+        // All three primary actions occupy the same slot. Ghost children do
+        // not reserve extra width when hidden; the cancel slot stays fixed.
+        auto actions{row->add_object_shared<lgo::divx_soft_t>(
+            storage_content_depth, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
+            row->space_x(lgo::std_margin),
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+        task->m_pause_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+            storage_content_depth, [weak]
+            {
+                if (auto task{weak.lock()})
+                    task->pause(true);
+            }, "暫停");
+        task->m_resume_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+            storage_content_depth, [weak]
+            {
+                if (auto task{weak.lock()})
+                    task->pause(false);
+            }, "繼續");
+        task->m_resume_button->hide();
+        task->m_retry_button = actions->add_object_shared<lgo::button_classic_std_t>(
             storage_content_depth,
             [weak]
             {
                 if (auto task{weak.lock()})
                 {
+                    task->pause(false);
                     if (task->m_session)
                     {
                         task->m_session->account->retry();
@@ -245,7 +279,7 @@ namespace
             },
             "重試");
         task->m_retry_button->hide();
-        task->m_cancel_button = row->add_object_shared<lgo::button_classic_std_t>(
+        task->m_cancel_button = actions->add_object_shared<lgo::button_classic_std_t>(
             storage_content_depth,
             [weak]
             {
@@ -253,6 +287,11 @@ namespace
                     task->m_control->cancel();
             },
             "取消");
+        task->m_cancel_button->hide();
+        // A div applies leading margins differently to its first ghost child.
+        // Anchor all primary actions explicitly to the reserved retry slot.
+        task->m_pause_button->set_pos(task->m_retry_button->get_pos());
+        task->m_resume_button->set_pos(task->m_retry_button->get_pos());
         task->m_self_i = state->m_task_list.emplace(state->m_task_list.end(), task);
     }
 } // namespace

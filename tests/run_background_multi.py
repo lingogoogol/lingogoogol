@@ -57,7 +57,39 @@ class Response(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def do_GET(self):
+        if self.path == '/pause-download':
+            self.send_response(200)
+            self.send_header('Content-Length', '524288')
+            self.end_headers()
+            try:
+                for unused in range(64):
+                    self.wfile.write(b'd' * 8192)
+                    self.wfile.flush()
+                    time.sleep(.025)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         data = b'background-ok'
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_POST(self):
+        if self.headers.get('Transfer-Encoding') == 'chunked':
+            body = b''
+            while True:
+                line = self.rfile.readline().strip()
+                if not line: return  # Intentional pause aborts an incomplete POST.
+                length = int(line.split(b';')[0], 16)
+                if not length:
+                    self.rfile.readline()
+                    break
+                body += self.rfile.read(length)
+                self.rfile.read(2)
+        else:
+            body = self.rfile.read(int(self.headers['Content-Length']))
+        data = b'upload-ok' if body == b'u' * 524288 else b'bad-upload'
         self.send_response(200)
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
@@ -72,7 +104,10 @@ class Upload(socketserver.BaseRequestHandler):
         try:
             with self.server.context.wrap_socket(self.request, server_side=True) as connection:
                 connection.settimeout(2)
-                connection.recv(8192)
+                headers = connection.recv(8192)
+                if headers.startswith(b'GET /probe '):
+                    connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nbackground-ok')
+                    return
                 connection.sendall(b'HTTP/1.1 100 Continue\r\n\r\n')
                 start = time.monotonic()
                 while not self.server.done.is_set():
@@ -136,7 +171,7 @@ with tempfile.TemporaryDirectory(prefix='storage-background-test-') as directory
         cleanup.callback(lambda: subprocess.run([wineserver, '-k', '-w'], env=env, **credentials))
 
     def run(mode, port, fault=None):
-        scheme = 'http' if mode == 'ownership' else 'https'
+        scheme = 'http' if mode in ('ownership', 'pause') else 'https'
         wine = ['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64',
                 str(test / 'test.exe'), mode, f'{scheme}://127.0.0.1:{port}/']
         process = subprocess.Popen(wine, cwd=test, env=env, text=True, stdout=subprocess.PIPE,
@@ -180,7 +215,8 @@ with tempfile.TemporaryDirectory(prefix='storage-background-test-') as directory
                     raise error
         except BaseException:
             import signal
-            os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
             process.communicate()
             raise
         finally:
@@ -196,6 +232,7 @@ with tempfile.TemporaryDirectory(prefix='storage-background-test-') as directory
     threading.Thread(target=http.serve_forever, daemon=True).start()
     try:
         run('ownership', http.server_port)
+        run('pause', http.server_port)
     finally:
         http.shutdown()
         http.server_close()
@@ -210,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix='storage-background-test-') as directory
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             print(f'TRIAL {trial}: {fault or "TLS backpressure"}', flush=True)
-            run('stalled', server.server_address[1], fault)
+            run('stalled' if fault else 'stalled-pause', server.server_address[1], fault)
         finally:
             server.done.set()
             server.shutdown()

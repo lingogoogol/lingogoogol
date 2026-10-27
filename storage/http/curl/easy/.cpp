@@ -26,10 +26,13 @@ curl_easy_t::curl_easy_t()
 curl_easy_t::curl_easy_t(CURL* in)
 : m_interface{ in }, m_read{ std::make_unique<read_t>() }, m_write{ std::make_unique<write_t>() }
 {
-    if (!m_interface)
-    {
-        throw;
-    }
+    configure_transport();
+}
+
+auto curl_easy_t::configure_transport() -> void
+{
+    if (!m_interface) throw std::runtime_error{"Cannot create curl handle."};
+    curl_easy_reset(m_interface);
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_READFUNCTION, &curl_easy_t::read_callback));
 	api_curl(curl_easy_setopt(m_interface, CURLOPT_READDATA, static_cast<void*>(m_read.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_SEEKFUNCTION, &curl_easy_t::seek_callback));
@@ -48,10 +51,11 @@ curl_easy_t::curl_easy_t(CURL* in)
 
 curl_easy_t::curl_easy_t(curl_easy_t &&in)
     : m_account_context{std::move(in.m_account_context)}, m_control{std::move(in.m_control)},
-      m_journal{std::move(in.m_journal)}, m_verb{std::move(in.m_verb)},
-      m_cache_key{std::move(in.m_cache_key)}, m_failures{in.m_failures}, m_epoch{in.m_epoch},
-      m_retry_at{in.m_retry_at}, m_interface{in.m_interface}, m_path{std::move(in.m_path)},
-      m_host{std::move(in.m_host)}, m_query{std::move(in.m_query)}, m_header{std::move(in.m_header)},
+      m_journal{std::move(in.m_journal)}, m_suspended{in.m_suspended}, m_sync_multi{std::move(in.m_sync_multi)},
+      m_sync_pause_epoch{in.m_sync_pause_epoch}, m_verb{std::move(in.m_verb)},
+      m_cache_key{std::move(in.m_cache_key)}, m_failures{in.m_failures}, m_epoch{in.m_epoch}, m_pause_epoch{in.m_pause_epoch},
+      m_retry_at{in.m_retry_at}, m_interface{in.m_interface}, m_host{std::move(in.m_host)},
+      m_path{std::move(in.m_path)}, m_query{std::move(in.m_query)}, m_header{std::move(in.m_header)},
       m_read{std::move(in.m_read)}, m_write{std::move(in.m_write)}, m_response_code{in.m_response_code},
       m_header_curl{in.m_header_curl}
 {
@@ -62,13 +66,19 @@ curl_easy_t::curl_easy_t(curl_easy_t &&in)
 
 auto curl_easy_t::operator=(curl_easy_t&& in) -> curl_easy_t&
 {
+    if (this == &in) return *this;
+    free();
     m_account_context = std::move(in.m_account_context);
     m_control = std::move(in.m_control);
     m_journal = std::move(in.m_journal);
+    m_sync_multi = std::move(in.m_sync_multi);
+    m_sync_pause_epoch = in.m_sync_pause_epoch;
     m_verb = std::move(in.m_verb);
     m_cache_key = std::move(in.m_cache_key);
     m_failures = in.m_failures;
     m_epoch = in.m_epoch;
+    m_pause_epoch = in.m_pause_epoch;
+    m_suspended = in.m_suspended;
     m_retry_at = in.m_retry_at;
     m_interface = in.m_interface;
     m_path = std::move(in.m_path);
@@ -93,8 +103,11 @@ curl_easy_t::~curl_easy_t()
 
 auto curl_easy_t::free() -> void
 {
+    // Socket callbacks still refer to m_control until the connection cache dies.
+    m_sync_multi.reset();
     //Passing in a nullptr makes curl_easy_cleanup return immediately with no action.
-    curl_easy_cleanup(m_interface);
+    curl_easy_cleanup(std::exchange(m_interface, nullptr));
+    curl_slist_free_all(std::exchange(m_header_curl, nullptr));
     return;
 }
 
@@ -102,6 +115,43 @@ auto curl_easy_t::release() -> void
 {
     m_interface = nullptr;
     return;
+}
+
+auto curl_easy_t::take_transport() -> CURL*
+{
+    m_sync_multi.reset();
+    return std::exchange(m_interface, nullptr);
+}
+
+auto curl_easy_t::bind_transport(CURL* handle) -> void
+{
+    if (m_interface || !handle) throw std::logic_error{"Invalid curl transport handoff."};
+    m_interface = handle;
+    configure_transport();
+    // Reconstruct only transport options. Calling the virtual method builders
+    // here would reset Google authentication retries and batch request state.
+    curl_easy_t::method();
+    if (m_verb == "POST")
+        api_curl(curl_easy_setopt(handle, CURLOPT_POST, 1L));
+    else if (m_verb == "PATCH")
+    {
+        api_curl(curl_easy_setopt(handle, CURLOPT_UPLOAD, 1L));
+        api_curl(curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, "PATCH"));
+    }
+    else if (m_verb == "DELETE")
+        api_curl(curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, "DELETE"));
+    m_suspended = false;
+    acknowledge_pause();
+}
+
+auto curl_easy_t::interrupted() const -> bool
+{
+    return m_control && (m_control->user_paused || m_control->pause_epoch != m_pause_epoch);
+}
+
+auto curl_easy_t::acknowledge_pause() -> void
+{
+    m_pause_epoch = m_control ? m_control->pause_epoch.load() : 0;
 }
 
 auto curl_easy_t::interface_get() const -> CURL*
@@ -134,6 +184,7 @@ auto curl_easy_t::clear() -> void
     m_cache_key.clear();
     m_verb.clear();
     m_failures = 0;
+    m_suspended = false;
     m_retry_at = {};
     m_host.clear();
     m_path.clear();
@@ -254,6 +305,7 @@ auto curl_easy_t::run_try() -> void
 {
     while (true)
     {
+        acknowledge_pause();
         while (!runnable())
         {
             if (cancelled())
@@ -285,12 +337,78 @@ auto curl_easy_t::run_try() -> void
             if (!prepared)
                 std::this_thread::sleep_for(std::chrono::milliseconds{5});
         }
+        if (interrupted()) continue;
         m_response_code = 0;
         m_write = std::make_unique<write_t>();
         api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
         try
         {
-            api_curl(curl_easy_perform(m_interface));
+            if (!m_control)
+                api_curl(curl_easy_perform(m_interface));
+            else
+            {
+                // Preparation and publication run on their own threads. Drive a
+                // local multi so user pause can abort in-flight chunk/preparation I/O;
+                // sleeping in a curl callback would prevent cancellation/polling.
+                // A quick Pause/Continue also invalidates cached connections
+                // after a completed request; never reuse a shutdown socket.
+                if (m_sync_multi && m_sync_pause_epoch != m_pause_epoch)
+                    m_sync_multi.reset();
+                if (!m_sync_multi)
+                {
+                    m_sync_multi.reset(curl_multi_init());
+                    m_sync_pause_epoch = m_pause_epoch;
+                }
+                auto* multi{m_sync_multi.get()};
+                if (!multi)
+                    throw std::runtime_error{"Cannot create controlled curl multi."};
+                auto checked = [](CURLMcode result)
+                {
+                    if (result != CURLM_OK)
+                        throw lgo::error_t{curl_multi_strerror(result)};
+                };
+                checked(curl_multi_add_handle(multi, m_interface));
+                bool aborted{};
+                bool finished{};
+                CURLcode result{CURLE_OK};
+                try
+                {
+                    int running{1};
+                    while (running && !cancelled() && !interrupted())
+                    {
+                        checked(curl_multi_perform(multi, &running));
+                        if (running)
+                            checked(curl_multi_poll(multi, nullptr, 0, 5, nullptr));
+                    }
+                    aborted = interrupted();
+                    int remaining{};
+                    while (auto* message{curl_multi_info_read(multi, &remaining)})
+                        if (message->msg == CURLMSG_DONE)
+                        {
+                            result = message->data.result;
+                            finished = true;
+                        }
+                }
+                catch (...)
+                {
+                    curl_multi_remove_handle(multi, m_interface);
+                    throw;
+                }
+                checked(curl_multi_remove_handle(multi, m_interface));
+                if (aborted && !(finished && result == CURLE_OK))
+                {
+                    // Intentional abort is not a network/authentication failure.
+                    curl_easy_t::resume();
+                    m_response_code = 0;
+                    // No active transfer or idle connection is retained while paused.
+                    m_sync_multi.reset();
+                    acknowledge_pause();
+                    continue;
+                }
+                if (cancelled())
+                    throw std::runtime_error{"Task cancelled."};
+                api_curl(result);
+            }
 		    api_curl(curl_easy_getinfo(m_interface, CURLINFO_RESPONSE_CODE, &m_response_code));
         }
         catch (lgo::error_t error)
@@ -441,8 +559,13 @@ auto curl_easy_t::method_delete() -> void
 }
 auto curl_easy_t::control_set(std::shared_ptr<request_control_t> control) -> void
 {
+    // Close cached sockets before releasing the callback context that opened
+    // them. An easy may be reused with another task/account on its next request.
+    if (control != m_control)
+        m_sync_multi.reset();
     m_control = std::move(control);
     m_epoch = m_control ? m_control->epoch.load() : 0;
+    acknowledge_pause();
     if (!m_control)
     {
         api_curl(curl_easy_setopt(m_interface, CURLOPT_OPENSOCKETFUNCTION, nullptr));
@@ -482,11 +605,12 @@ auto curl_easy_t::runnable() -> bool
             m_retry_at = {};
             manual_retry();
         }
-        if (m_control->cancelled || m_control->paused)
+        if (m_control->cancelled || m_control->paused || m_control->user_paused)
             return false;
     }
     return std::chrono::steady_clock::now() >= m_retry_at;
 }
+
 auto curl_easy_t::manual_retry() -> void
 {
     resume();

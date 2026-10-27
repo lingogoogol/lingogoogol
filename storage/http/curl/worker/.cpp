@@ -28,7 +28,14 @@ struct curl_multi_worker_t::implementation_t
     std::atomic_bool stopping{};
 
     std::mutex sockets_mutex;
-    std::set<SOCKET> sockets;
+    std::map<SOCKET, std::shared_ptr<request_control_t>> sockets;
+    struct socket_context_t
+    {
+        implementation_t* worker;
+        std::shared_ptr<request_control_t> control;
+    };
+    // Stable contexts outlive every multi connection cache, including idle sockets.
+    std::map<std::shared_ptr<request_control_t>, socket_context_t> socket_contexts;
     // Last: the thread must not observe partially constructed queue state.
     std::thread thread;
 
@@ -36,15 +43,23 @@ struct curl_multi_worker_t::implementation_t
 
     static auto open_socket(void* data, curlsocktype, curl_sockaddr* address) noexcept -> curl_socket_t
     {
-        auto& self{ *static_cast<implementation_t*>(data) };
+        auto& context{*static_cast<socket_context_t*>(data)};
+        auto& self{*context.worker};
         try
         {
             std::unique_lock lock{ self.sockets_mutex };
             if (self.stopping) return CURL_SOCKET_BAD;
-            SOCKET socket{ ::socket(address->family, address->socktype, address->protocol) };
+            SOCKET socket{context.control
+                ? static_cast<SOCKET>(context.control->socket_open(address->family, address->socktype, address->protocol))
+                : ::socket(address->family, address->socktype, address->protocol)};
             if (socket == INVALID_SOCKET) return CURL_SOCKET_BAD;
-            try { self.sockets.emplace(socket); }
-            catch (...) { ::closesocket(socket); return CURL_SOCKET_BAD; }
+            try { self.sockets.emplace(socket, context.control); }
+            catch (...)
+            {
+                if (context.control) context.control->socket_close(socket);
+                else ::closesocket(socket);
+                return CURL_SOCKET_BAD;
+            }
             return socket;
         }
         catch (...) { return CURL_SOCKET_BAD; }
@@ -56,20 +71,25 @@ struct curl_multi_worker_t::implementation_t
         // Keep unregister, close and cancellation serialized to avoid shutting
         // down an unrelated socket that reused the same numeric handle.
         std::unique_lock lock{ self.sockets_mutex };
-        self.sockets.erase(socket);
-        return ::closesocket(socket);
+        auto entry{self.sockets.find(socket)};
+        if (entry == self.sockets.end()) return ::closesocket(socket);
+        auto control{std::move(entry->second)};
+        self.sockets.erase(entry);
+        return control ? control->socket_close(socket) : ::closesocket(socket);
     }
 
     static auto transfer_progress(void* data, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept -> int
     {
-        return static_cast<curl_easy_t *>(data)->cancelled() ? 1 : 0;
+        auto& easy{*static_cast<curl_easy_t*>(data)};
+        return easy.cancelled() || easy.interrupted() ? 1 : 0;
     }
 
     auto configure(curl_easy_t& easy, bool enabled) -> void
     {
         auto* handle{ easy.interface_get() };
+        auto& context{socket_contexts.try_emplace(easy.m_control, this, easy.m_control).first->second};
         api_curl(curl_easy_setopt(handle, CURLOPT_OPENSOCKETFUNCTION, enabled ? &open_socket : nullptr));
-        api_curl(curl_easy_setopt(handle, CURLOPT_OPENSOCKETDATA, enabled ? this : nullptr));
+        api_curl(curl_easy_setopt(handle, CURLOPT_OPENSOCKETDATA, enabled ? &context : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_CLOSESOCKETFUNCTION, enabled ? &close_socket : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_CLOSESOCKETDATA, enabled ? this : nullptr));
         api_curl(curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, enabled ? &transfer_progress : nullptr));
@@ -83,8 +103,16 @@ struct curl_multi_worker_t::implementation_t
         {
             // Construct and destroy CURLM on this thread, including its cache of
             // idle connections. Socket callbacks stay alive through destruction.
-            curl_multi_t multi;
-            std::set<CURL*> active;
+            // A connection cache belongs to one task. Sharing CURLM across
+            // controls would let socket shutdown abort another task (or HTTP/2
+            // stream), and could spend its independent network retry budget.
+            // Pause shuts down all task sockets, even idle ones. A generation
+            // change retires that cache even if Continue was clicked before
+            // this worker observed the paused flag.
+            using group_key_t = std::pair<std::shared_ptr<request_control_t>, unsigned>;
+            std::map<group_key_t, std::unique_ptr<curl_multi_t>> multis;
+            std::map<CURL*, curl_multi_t*> active;
+            std::map<group_key_t, std::chrono::steady_clock::time_point> last_used;
             while (!stopping)
             {
                 std::deque<std::unique_ptr<curl_easy_t>> additions;
@@ -99,25 +127,51 @@ struct curl_multi_worker_t::implementation_t
                     if (stopping) break;
                     configure(*easy, true);
                     auto* key{ easy->interface_get() };
-                    multi.add(std::move(easy));
-                    active.emplace(key);
+                    const group_key_t group{easy->m_control, easy->pause_generation()};
+                    auto& multi{multis[group]};
+                    if (!multi) multi = std::make_unique<curl_multi_t>();
+                    last_used[group] = std::chrono::steady_clock::now();
+                    multi->add(std::move(easy));
+                    active.emplace(key, multi.get());
                 }
 
                 // No queue mutex is held across curl, TLS waits, parsing or retry.
-                auto failed{ multi.run(&stopping) };
-                if (stopping) break;
+                std::uint64_t failed{};
                 std::map<CURL*, std::uint64_t> snapshot;
-                for (auto* key : active) snapshot.emplace(key, multi.read_progress(key));
                 std::deque<std::unique_ptr<curl_easy_t>> results;
-                while (multi.ready_nonempty())
+                for (auto& [group, multi] : multis)
                 {
-                    auto easy{ multi.ready_get_unique() };
-                    active.erase(easy->interface_get());
-                    // The GUI can destroy/reuse this handle as soon as it is
-                    // published. Remove pointers into our worker before handing it off.
-                    configure(*easy, false);
-                    results.push_back(std::move(easy));
+                    failed += multi->run(&stopping);
+                    if (stopping) break;
+                    while (multi->ready_nonempty())
+                    {
+                        auto easy{multi->ready_get_unique()};
+                        active.erase(easy->interface_get());
+                        configure(*easy, false);
+                        results.push_back(std::move(easy));
+                    }
                 }
+                if (stopping) break;
+                for (auto [key, multi] : active) snapshot.emplace(key, multi->read_progress(key));
+                // Paused task caches must release their idle connections too.
+                std::erase_if(multis, [&](const auto& entry)
+                {
+                    const bool busy{std::ranges::any_of(active, [&](const auto& request)
+                        { return request.second == entry.second.get(); })};
+                    if (busy) last_used[entry.first] = std::chrono::steady_clock::now();
+                    const bool expired{std::chrono::steady_clock::now() - last_used.at(entry.first) > std::chrono::seconds{30}};
+                    const auto& [control, generation]{entry.first};
+                    const bool retired{control && (control->cancelled || control->user_paused ||
+                                                   control->pause_epoch != generation)};
+                    const bool remove{!busy && (expired || retired)};
+                    if (remove) last_used.erase(entry.first);
+                    return remove;
+                });
+                std::erase_if(socket_contexts, [&](const auto& entry)
+                {
+                    return !std::ranges::any_of(multis,
+                        [&](const auto& group) { return group.first.first == entry.first; });
+                });
                 {
                     std::unique_lock lock{ mutex };
                     failures += failed;
@@ -153,7 +207,7 @@ struct curl_multi_worker_t::implementation_t
         }
         {
             std::unique_lock lock{ sockets_mutex };
-            for (auto socket : sockets) ::shutdown(socket, SD_BOTH);
+            for (const auto& [socket, control] : sockets) ::shutdown(socket, SD_BOTH);
         }
         changed.notify_all();
     }
@@ -174,6 +228,9 @@ auto curl_multi_worker_t::submit(std::unique_ptr<curl_easy_t> easy) -> void
     if (m_impl->stopping) throw std::logic_error{ "Cannot submit to a stopped transfer worker." };
     if (m_impl->progress.contains(easy->interface_get()))
         throw std::logic_error{ "Curl request is already submitted." };
+    // Latch on the submitting thread. A Pause/Continue while queued must still
+    // abort this submission, rather than silently adopting a shutdown cache.
+    easy->acknowledge_pause();
     m_impl->controls[easy->interface_get()] = easy->m_control;
     m_impl->progress.emplace(easy->interface_get(), 0);
     m_impl->pending.push_back(std::move(easy));
@@ -204,8 +261,8 @@ auto curl_multi_worker_t::ready_nonempty() const -> bool
 auto curl_multi_worker_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
 {
     std::unique_lock lock{ m_impl->mutex };
-    if (m_impl->completed.empty()) throw std::logic_error{ "No completed transfer is available." };
-    auto result{ std::move(m_impl->completed.front()) };
+    if (m_impl->completed.empty()) throw std::logic_error{"No completed transfer is available."};
+    auto result{std::move(m_impl->completed.front())};
     m_impl->completed.pop_front();
     m_impl->progress.erase(result->interface_get());
     m_impl->controls.erase(result->interface_get());
@@ -226,9 +283,9 @@ auto curl_multi_worker_t::stop() -> void
 auto curl_multi_worker_t::interrupt() -> void
 {
     std::lock_guard lock{m_impl->sockets_mutex};
-    // Cached connections may be shared across task handles. Wake all socket
-    // waits; unrelated idempotent requests follow their normal retry path.
-    for (auto socket : m_impl->sockets)
+    // Explicit global interruption (for whole-account clearing). Ordinary
+    // pause/cancel shuts down only the sockets registered with that control.
+    for (const auto& [socket, control] : m_impl->sockets)
         ::shutdown(socket, SD_BOTH);
     m_impl->changed.notify_all();
 }

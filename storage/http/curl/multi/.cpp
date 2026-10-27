@@ -70,6 +70,7 @@ auto curl_multi_t::add(std::unique_ptr<curl_easy_t> easy) -> void
 {
     if (!easy || !easy->nonempty()) throw std::invalid_argument{ "Cannot submit an empty curl request." };
     CURL* key{ easy->interface_get() };
+    easy->m_suspended = false;
     if (m_added.contains(key)) throw std::logic_error{ "Curl request is already submitted." };
     curl_easy_multi_access_t::write_get(*easy) = std::make_unique<curl_easy_t::write_t>();
     api_curl(curl_easy_setopt(key, CURLOPT_WRITEDATA,
@@ -81,13 +82,29 @@ auto curl_multi_t::add(std::unique_ptr<curl_easy_t> easy) -> void
 
 auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
 {
+    // Abort on the curl owner thread; never invoke completion callbacks for a
+    // partial response or charge an intentional pause to the retry budget.
+    for (auto entry{m_active.begin()}; entry != m_active.end();)
+    {
+        auto& easy{*m_added.at(*entry)};
+        if (easy.cancelled() || easy.interrupted())
+        {
+            api_curlm(curl_multi_remove_handle(m_interface, *entry));
+            easy.m_suspended = !easy.cancelled();
+            if (easy.m_suspended) easy.curl_easy_t::resume();
+            m_ready.emplace(*entry);
+            entry = m_active.erase(entry);
+        }
+        else ++entry;
+    }
     // Waiting for credentials must not stall other transfers in this multi.
     for (auto entry{ m_waiting.begin() }; entry != m_waiting.end();)
     {
         if (cancelled && cancelled->load()) return 0;
         auto& easy{ *m_added.at(*entry) };
-        if (easy.cancelled())
+        if (easy.cancelled() || easy.interrupted())
         {
+            easy.m_suspended = !easy.cancelled();
             m_ready.emplace(*entry);
             entry = m_waiting.erase(entry);
             continue;
@@ -121,6 +138,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
         }
         curl_easy_multi_access_t::response_code_get(easy) = 0;
         api_curlm(curl_multi_add_handle(m_interface, *entry));
+        m_active.emplace(*entry);
         entry = m_waiting.erase(entry);
     }
     api_curlm(curl_multi_perform(m_interface, &m_running_count));
@@ -143,6 +161,18 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                     bool handle_removed{ false };
                     try
                     {
+                        // A task-owned socket shutdown may have woken Schannel.
+                        // Detach before interpreting the intentional abort.
+                        if (easy_ptr->cancelled() || (message->data.result != CURLE_OK && easy_ptr->interrupted()))
+                        {
+                            curl_multi_remove_handle(m_interface, message->easy_handle);
+                            handle_removed = true;
+                            easy_ptr->m_suspended = !easy_ptr->cancelled();
+                            if (easy_ptr->m_suspended) easy_ptr->curl_easy_t::resume();
+                            m_active.erase(message->easy_handle);
+                            m_ready.emplace(message->easy_handle);
+                            break;
+                        }
                         api_curl(message->data.result);
                         curl_multi_remove_handle(m_interface, message->easy_handle);
                         handle_removed = true;
@@ -167,6 +197,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                         lgo::log_file(e.message() + "\n");
                     }
                     if (cancelled && cancelled->load()) return failed_count;
+                    m_active.erase(message->easy_handle);
                     if (easy_ptr->cancelled())
                     {
                         m_ready.emplace(message->easy_handle);
@@ -175,6 +206,12 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                     if (successful && easy_ptr->valid())
                     {
                         easy_ptr->checkpoint();
+                        m_ready.emplace(message->easy_handle);
+                    }
+                    else if (easy_ptr->interrupted())
+                    {
+                        easy_ptr->m_suspended = true;
+                        easy_ptr->curl_easy_t::resume();
                         m_ready.emplace(message->easy_handle);
                     }
                     else

@@ -16,6 +16,8 @@ export
 
         auto submit(std::unique_ptr<curl_easy_t> easy) -> void;
     public:
+        // Resume a parked request without slicing its dynamic batch type.
+        auto add(std::unique_ptr<curl_easy_t> easy) -> void { submit(std::move(easy)); }
         curl_multi_worker_t();
         curl_multi_worker_t(const curl_multi_worker_t&) = delete;
         auto operator=(const curl_multi_worker_t&) -> curl_multi_worker_t& = delete;

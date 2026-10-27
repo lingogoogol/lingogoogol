@@ -93,6 +93,13 @@ export
         std::function<void()> m_clear_page;
         std::list<std::shared_ptr<load_task_t>> m_task_list{};
         std::map<CURL*, std::function<void(std::unique_ptr<curl_easy_t>&)>> m_end{};
+        struct parked_request_t
+        {
+            std::unique_ptr<curl_easy_t> request;
+            std::function<void(std::unique_ptr<curl_easy_t>&)> complete;
+        };
+        // Logical requests and callbacks remain; no curl handles or pool slots.
+        std::deque<parked_request_t> m_parked;
         std::shared_ptr<lgo::divy_soft_t> m_progress_column{};
         //Serialize read/modify/write publication to existing folders to avoid lost entries.
         std::shared_future<void> m_upload_linked{};
@@ -108,10 +115,32 @@ export
         std::shared_ptr<request_control_t> m_control{ std::make_shared<request_control_t>() };
         std::shared_ptr<task_journal_t> m_journal;
         std::string m_label;
+        // GUI-thread snapshot: pause must retain the current progress/phase,
+        // rather than replacing it with the original preparation label.
+        std::string m_paused_text;
         std::uint64_t m_saved_progress{};
         bool m_cancel_saved{};
         bool m_preparation_failed{};
         std::function<void()> m_retry_prepare;
+        auto pause(bool value) -> void
+        {
+            const bool changed{value != m_control->user_paused.load()};
+            if (value && changed && m_progress_text)
+                m_paused_text = m_progress_text->get_text();
+            // Persist first: restarting the application must not restart a task
+            // that the user explicitly paused.
+            if (m_journal)
+            {
+                if (value && changed)
+                    m_journal->set("paused_text", m_paused_text);
+                m_journal->set("user_paused", value);
+            }
+            m_control->pause(value);
+            if (changed && m_progress_text && !m_control->paused && !m_control->cancelled)
+                m_progress_text->set_text(value ? "已暫停：" + m_paused_text : m_paused_text, false);
+        }
+        std::shared_ptr<lgo::button_classic_std_t> m_pause_button;
+        std::shared_ptr<lgo::button_classic_std_t> m_resume_button;
         std::shared_ptr<lgo::button_classic_std_t> m_retry_button;
         std::shared_ptr<lgo::button_classic_std_t> m_cancel_button;
         load_state_t* m_state{};

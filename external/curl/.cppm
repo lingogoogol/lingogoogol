@@ -44,6 +44,7 @@ export
     using ::curl_global_cleanup;
 
     using ::curl_easy_init;
+    using ::curl_easy_reset;
     using ::curl_easy_cleanup;
     using ::curl_easy_getinfo;
     using ::curl_easy_strerror;

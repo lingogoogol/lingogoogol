@@ -34,6 +34,12 @@ export
         auto free() -> void;
         //Make this a null handle without calling curl_easy_cleanup.
         auto release() -> void;
+        // Detached requests can surrender their physical pool slot while paused.
+        auto take_transport() -> CURL*;
+        auto bind_transport(CURL* handle) -> void;
+        auto interrupted() const -> bool;
+        auto acknowledge_pause() -> void;
+        auto pause_generation() const -> unsigned { return m_pause_epoch; }
 
         auto interface_get() const -> CURL*;
         operator CURL*() const;
@@ -71,6 +77,7 @@ export
         std::shared_ptr<void> m_account_context{};
         std::shared_ptr<request_control_t> m_control{};
         std::shared_ptr<task_journal_t> m_journal{};
+        bool m_suspended{};
         auto control_set(std::shared_ptr<request_control_t> control) -> void;
         auto runnable() -> bool;
         auto replay() -> bool;
@@ -87,14 +94,20 @@ export
         }
 
       private:
+        // Retain synchronous connection reuse across preparation/publication
+        // requests; creating/destroying a multi per request loses its TLS cache.
+        std::unique_ptr<CURLM, decltype(&curl_multi_cleanup)> m_sync_multi{nullptr, curl_multi_cleanup};
+        unsigned m_sync_pause_epoch{};
         std::string m_verb;
         std::string m_cache_key;
         unsigned m_failures{};
         unsigned m_epoch{};
+        unsigned m_pause_epoch{};
         std::chrono::steady_clock::time_point m_retry_at{};
 
       public:
       protected:
+        auto configure_transport() -> void;
         static auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void*) -> int;
         static auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t;
         static auto seek_callback(void* read_void, curl_off_t offset, int origin) -> int;

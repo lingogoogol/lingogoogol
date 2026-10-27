@@ -33,6 +33,15 @@ namespace
         if (task.m_journal)
             task.m_journal->finish();
     }
+    auto task_progress(load_task_t& task, std::uint64_t completed, std::uint64_t size,
+                       const std::string& name) -> void
+    {
+        if (!task.m_progress_text)
+            return; // Scheduler-only callers may have no GUI progress row.
+        task.m_progress_text->set_text(
+            std::format("{}：{}B/{}B {}", task.m_type == "upload" ? "上傳" : "下載",
+                        std::max(task.m_saved_progress, completed), size, name), false);
+    }
 } // namespace
 
 auto download_fail(download_task_t& task, const std::exception& error) -> void
@@ -350,9 +359,49 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
 {
     using namespace std::chrono_literals;
 
+    for (auto entry{state->m_parked.begin()}; entry != state->m_parked.end();)
+    {
+        auto& request{entry->request};
+        const auto owner{std::ranges::find_if(state->m_task_list,
+            [&](const auto& task) { return task->m_control == request->m_control; })};
+        const auto download{owner == state->m_task_list.end() ? nullptr :
+                            std::dynamic_pointer_cast<download_task_t>(*owner)};
+        if (request->cancelled() || (download && !download->m_error.empty()))
+        {
+            // Failed downloads drain old callbacks without scheduling more I/O.
+            entry = state->m_parked.erase(entry);
+            continue;
+        }
+        if (request->m_control && (request->m_control->user_paused || request->m_control->paused))
+        {
+            ++entry;
+            continue;
+        }
+        // A completed result must survive a manual network retry unchanged.
+        if (request->m_suspended && !request->runnable())
+        {
+            ++entry;
+            continue;
+        }
+        auto parked{std::move(*entry)};
+        state->m_parked.erase(entry);
+        if (!parked.request->m_suspended)
+        {
+            // A fully successful response raced with Pause. Apply it once,
+            // after Continue, without issuing the remote mutation again.
+            parked.complete(parked.request);
+            return false;
+        }
+        auto* key{easy.take_transport()};
+        parked.request->bind_transport(key);
+        state->m_end.emplace(key, std::move(parked.complete));
+        multi.add(std::move(parked.request));
+        return true;
+    }
+
     for (auto& task_ptr : state->m_task_list)
     {
-        if (task_ptr->m_control->cancelled || task_ptr->m_control->paused ||
+        if (task_ptr->m_control->cancelled || task_ptr->m_control->paused || task_ptr->m_control->user_paused ||
             (task_ptr->m_session && task_ptr->m_session->clearing))
             continue;
         if (task_ptr->m_session)
@@ -411,6 +460,10 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                     upload_task_ptr->m_control->fail(error.what());
                     continue;
                 }
+                // Preparation has computed the complete file/folder size. Show
+                // 0B/size now, before waiting for the first successful chunk.
+                task_progress(*upload_task_ptr, upload_task_ptr->m_progress,
+                              upload_task_ptr->m_size, upload_task_ptr->m_name);
             }
             // Downloads consume no reserved blobs. Apply the upload reserve only here.
             if (blob_queue->count() <= 10000) continue;
@@ -472,10 +525,8 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 }
                 download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
                 download_task_ptr->m_files_remaining = download_task_ptr->m_file_arr.size();
-                download_task_ptr->m_progress_text->set_text(
-                    "下載：" + std::to_string(download_task_ptr->m_saved_progress) + "B/" +
-                        std::to_string(download_task_ptr->m_size) + "B " + download_task_ptr->m_name,
-                    false);
+                task_progress(*download_task_ptr, download_task_ptr->m_progress,
+                              download_task_ptr->m_size, download_task_ptr->m_name);
                 if (!download_task_ptr->m_files_remaining)
                 {
                     // An empty directory tree is complete once its directories exist.
@@ -529,9 +580,18 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
 // and updates the loading state.
 auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> void
 {
-    if (!easy->cancelled())
-        state->m_end.at(easy->interface_get())(easy);
-    state->m_end.erase(easy->interface_get());
+    auto* key{easy->interface_get()};
+    auto callback{state->m_end.extract(key)};
+    if (callback.empty()) throw std::logic_error{"Missing transfer completion callback."};
+    if (!easy->cancelled() && (easy->m_suspended || (easy->m_control && easy->m_control->user_paused)))
+    {
+        // Transfer the detached physical handle back to the 64-slot pool. The
+        // parked object retains batch state, account, IDs, retries and callback.
+        auto idle{std::make_unique<google_easy_t>(curl_easy_t{easy->take_transport()})};
+        state->m_parked.push_back({std::move(easy), std::move(callback.mapped())});
+        easy = std::move(idle);
+    }
+    else if (!easy->cancelled()) callback.mapped()(easy);
 	return;
 }
 
@@ -881,10 +941,7 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
     task->m_progress += chunk.m_size;
     if (task->m_journal)
         task->m_journal->set("progress", std::max(task->m_saved_progress, task->m_progress));
-    task->m_progress_text->set_text(task->m_type + "：" +
-                                        std::to_string(std::max(task->m_saved_progress, task->m_progress)) +
-                                        "B/" + std::to_string(task->m_size) + "B " + task->m_name,
-                                    false);
+    task_progress(*task, task->m_progress, task->m_size, task->m_name);
     upload_complete(file);
     return;
 }
@@ -1282,10 +1339,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
     task.m_progress += filesystem_size;
     if (task.m_journal)
         task.m_journal->set("progress", std::max(task.m_saved_progress, task.m_progress));
-    task.m_progress_text->set_text(task.m_type + "：" +
-                                       std::to_string(std::max(task.m_saved_progress, task.m_progress)) +
-                                       "B/" + std::to_string(task.m_size) + "B " + task.m_name,
-                                   false);
+    task_progress(task, task.m_progress, task.m_size, task.m_name);
 
     download_complete(*file);
 

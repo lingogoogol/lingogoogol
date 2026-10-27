@@ -25,12 +25,16 @@ export {
     {
         std::atomic_bool cancelled{};
         std::atomic_bool paused{};
+        // User pause is independent of an exhausted network retry budget.
+        std::atomic_bool user_paused{};
+        std::atomic_uint pause_epoch{};
         std::atomic_int retry_limit{-1};
         std::atomic_uint epoch{};
         mutable std::mutex mutex;
         std::string error;
         std::set<std::uintptr_t> sockets;
         auto cancel() -> void;
+        auto pause(bool value) -> void;
         auto socket_open(int family, int type, int protocol) -> std::uintptr_t;
         auto socket_close(std::uintptr_t socket) -> int;
         auto fail(std::string reason) -> void;
