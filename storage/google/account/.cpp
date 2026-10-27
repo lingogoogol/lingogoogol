@@ -54,7 +54,9 @@ namespace
             m_key.clear();
             host_set(token_endpoint);
             header_set("Content-Type", "application/x-www-form-urlencoded");
-            method_post("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Ajwt-bearer&assertion=" + assertion);
+            // RFC 7523 uses the full grant-type URN; omitting "grant-type:"
+            // makes the OAuth endpoint reject startup authentication with HTTP 400.
+            method_post("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + assertion);
             m_signed = true;
             m_attempt_started = std::chrono::steady_clock::now();
             return true;
