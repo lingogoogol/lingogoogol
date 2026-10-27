@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+    <link href='https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined' rel='stylesheet'/>
+    <script src='https://code.jquery.com/jquery-3.6.0.min.js'/>
+    <script async='async' src='https://www.googletagmanager.com/gtag/js?id=G-4T9Y4DPRBD'/>
+    <script>
+window.dataLayer = window.dataLayer || [];
+function gtag()
+{
+    window.dataLayer.push(arguments);
+};
+gtag('js', new Date());
+gtag('config', 'G-4T9Y4DPRBD');
+
+function base64url_encode(inp)
+{
+    return btoa(inp).replace(/\+/g, "-").replace(/\//g, "_");
+};
+
+function str_arrbuf(inp)
+{
+    return new Uint8Array(inp.split("").map(function(i)
+    {
+        return i.charCodeAt(0);
+    }));
+};
+
+function arrbuf_str(inp)
+{
+    const inpview = new DataView(inp);
+    let out = "";
+    for (let i = 0; i < inp.byteLength; i++)
+    {
+        out += String.fromCharCode(inpview.getUint8(i));
+    }
+    return out;
+};
+
+let token;
+let expire = 0;
+async function get_token()
+{
+    const time = Date.now() / 1000;
+    if(time < expire - 1800)
+        return token;
+    const keystr = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDhuOYPiqBJLtRf\npB1z8JHFFcWf14NsUrsdzd4ZrM3T9cbC3KD5bO0rwDGOFfuwEXx1miQtKD1R9nOe\nEUetHH8oUA0sOtR7SJe+1OTou/zHLK4YckjWP6HGktMKcqT650i3kpUCyBu0eB2z\nr8rFfk6PW1cEkTe9c2e07X0V5HG8dEZ43P3bueVgNamoP5s1N9hdKFfszLlU3zt1\nto2gxizPRCWDqOx8hIn478c+GCFkpvfmkkSqMDdlHe3hJyxwCAd/E73HORnAk7ww\nGDXi24S5jZDOm3kpNK6uXSaoWSOFYbduJY6x7s48nM1F+45rdP4IOerHOOGuRNft\nCBTXIZvZAgMBAAECggEABk3B3Qq/zbNpWm9spCWCiKjCP2PHJ5IK6Drs2jY1fFcn\nkR8UvsqAOCHSsHdkM0dVvLoMixdN2RljIrW0VP0P/wn3SDYvY28ET9/Fscs4NL7G\ncOfWKWeXBsLocmj/uwMVCI1nLG/2uBxHphJBfTD5FC9Wl4nPrvKHYanlPaSG2Z6v\nPoYfMAXCFY7oIBVlbZ935HfbwoWL0DIMlruxRZ6b82bsRvnYLhTCuKKapr7V0gwT\nYklBKEcyGznNCmoe+7669JwfFFt8Y7JMVbGurx7ulBBztC/5OckbmQrs+un5iuZC\n+kwlHjZKHtmTE826u2Joks834xxDYZjR5vJL3lRP4QKBgQD5i1oRf92LuoRF5ZZK\nbglq2H+wXmUEa0lve/hcQsyJvZzA0ZfB9zgwBgrwu4zcmMiT/3Nt3rJkpCG9Bi0h\nOJJ+uYNItNs9o8IlohnnLv0clUzh38zrDFSrOPrJd9KJAKeEl1xZBZFJ9abNACaT\nbGzjPrfzipMGNTVNBWQN0SIEqQKBgQDnj8f9ggSwLvppdiYLXTVHhFgOe8tac59o\nfMNm/8nKgtzVjRbGLFkkbXIjWv9IcxCULYbFhCR/Fi4NgfX3g3MO90cjWs+cYCQA\nyck+QqBhf4yzdYxff9KRMoW2n/mMlXgpUckvv642CNSm4HyueHSdrS2GmCNJ0PEe\n4v9I2bQrsQKBgFeCHJWiZ0iGobf5KNj0+Wx0e2KX14jTLq9fo9qGuj9bNMsRNMya\nKyP8Gn4M5vq8wSnVHN9chuZwADzPG6hYtFaoK3elpHRbJswXqkm92pjZalqTJsMO\nUeqxUpCv6i6NAjGm+oVlRGvRLysYcG6mSRDvf4ZyA9jbc9OMnmeR/QHxAoGBAOO8\nLo4N/xpfOXva7NOkWa/6Yrfr3DUbHZ2fhnWX/xeh2BpWZh2EpC8FTImlBwhz0cxJ\nchBzQ4mRgL1cIVHJ/7CqVVZaC3DZxM7ZpYgL8ruwu+oLI4EQr0CJlaPkdYNjxQeu\nHdVOCMGvsaRlh3n3kYk5Nlr26U3BpkIgMb2uDlohAoGBAOTI0j0YADYxCzUMOStD\n5IYy4ws33DUPu57NxoWVZRGaiPVAv/OmYdR++cZEAKeRNFMBLcJpKj1AFMVRAeyP\n2GVlqjPq81CsAClh+GZgRHwHyEGOo4OxecVUN7f2jW8p1tbPbc0Hd0EXfOoBwsKS\nWHB8uTlWqeZxM5LdFLOpGNr1";
+    const alg = "RSASSA-PKCS1-v1_5";
+    const decodedstr = atob(keystr.replace(/\\n/g, ""));
+    const decoded = str_arrbuf(decodedstr);
+    const header = JSON.stringify
+        ({
+            alg: "RS256",
+            typ: "JWT"
+        });
+    const claim = JSON.stringify
+        ({
+            iss: "public@lingogoogol.iam.gserviceaccount.com",
+            scope: "https://www.googleapis.com/auth/analytics https://www.googleapis.com/auth/drive",
+            aud: "https://oauth2.googleapis.com/token",
+            exp: time + 3600,
+            iat: time
+        });
+    const message = base64url_encode(header) + "." + base64url_encode(claim);
+    const messagebuf = str_arrbuf(message);
+    const key = await crypto.subtle.importKey("pkcs8", decoded,
+        {
+            name: alg,
+            hash: "SHA-256"
+        }, false, ["sign"]);
+    const signature = await crypto.subtle.sign(alg, key, messagebuf);
+    const jwt = message + "." + base64url_encode(arrbuf_str(signature));
+    const body = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&amp;assertion=" + jwt;
+    await $.ajax
+    ({
+        url: "https://oauth2.googleapis.com/token",
+        method: "POST",
+        data: encodeURI(body),
+        dataType: "json",
+        success: response =>
+            {
+                token = response.access_token;
+                expire = time + response.expires_in;
+            },
+        error: error =>
+            {
+                alert("錯誤&#65306;" + JSON.stringify(error));
+            }
+    });
+    return token;
+}
+
+async function token_header()
+{
+    return "Bearer " + await get_token();
+}
+
+async function display_views()
+{
+    const req =
+    {
+        dateRanges:
+        [{
+            startDate: "2022-01-01",
+            endDate: "today"
+        }],
+        dimensions:
+        [{
+            name: "pagePath"
+        }],
+        metrics:
+        [{
+            name: "screenPageViews"
+        }],
+        metricAggregations: ["TOTAL"]
+    };
+    await $.ajax
+    ({
+        url: "https://analyticsdata.googleapis.com/v1beta/properties/319337838:runReport",
+        method: "POST",
+        headers:
+        {
+            Authorization: await token_header()
+        },
+        contentType: "application/json",
+        data: JSON.stringify(req),
+        dataType: "json",
+        success: response =>
+        {
+            const t = response.totals[0];
+            $(".views").text(t.metricValues[t.dimensionValues.findIndex(e => e.value == "RESERVED_TOTAL")].value);
+        },
+        error: error =>
+        {
+            alert("錯誤：" + JSON.stringify(error));
+        }
+    });
+}
+
+$(document).ready
+(
+    () =>
+    {
+        display_views();
+        let index = 0;
+        let element1, element2;
+        const get_elements = () =>
+            {
+                const prefix = ".below-fixed" + index.toString() + "_";
+                element1 = $(prefix + "1");
+                element2 = $(prefix + "2");
+                return element1.length == 1 && element2.length == 1;
+            };
+        while (get_elements())
+        {
+            element2.css("margin-top", element1.outerHeight(true).toString() + "px");
+            index++;
+        }
+        $("a").filter(function(index)
+            {
+                return $(this).prop("href") === "<data:blog.url/>";
+            }).addClass("unavailable");
+    }
+);
+    </script>
+    <head>
+        <style>
+html
+{
+    font-family: sans-serif;
+    color: white;
+}
+
+html, body
+{
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+header
+{
+    width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: black;
+}
+
+h1
+{
+    font-size: 80px;
+    padding-top: 40px;
+}
+
+h2
+{
+    font-size: 60px;
+}
+
+p, li
+{
+    font-size: 35px;
+}
+
+a, button, header > nav > span > span
+{
+    font-size: 35px;
+    border: 3px solid transparent;
+    padding: 6px;
+    margin: 12px;
+    display: inline-block;
+}
+
+a, button
+{
+    background-color: transparent;
+    border-radius: 3px;
+    border-color: white;
+    text-decoration-line: none;
+    color: white;
+}
+
+a:hover
+{
+    color: yellow;
+    border-color: yellow;
+}
+
+.hide
+{
+    display: none;
+}
+
+.left-align
+{
+    float: left;
+}
+
+.right-align
+{
+    float: right;
+}
+
+.center-text
+{
+    text-align: center;
+}
+
+.unavailable
+{
+    color: gray;
+}
+
+.unavailable:is(a)
+{
+    border-color: gray;
+    pointer-events: none;
+}
+
+.post-body
+{
+    background: linear-gradient(180deg, #40C040, #FFFF00);
+    height: 100%;
+}
+
+.material-symbols-outlined
+{
+    font-size: 50px;
+}
+        </style>
+        <title class='title'></title>
+    </head>
+    <body>
+        <header class='below-fixed0_1'>
+            <nav>
+                <span class='left-align'>
+                    <a href='#top'><span class='material-symbols-outlined'>home</span> 頂端</a>
+                    <a href='#download'><span class="material-symbols-outlined">download</span> 下載</a>
+                    <a href='#policy'><span class="material-symbols-outlined">policy</span> 政策</a>
+                </span>
+                <span class='right-align'>
+                    <span><span class="material-symbols-outlined">visibility</span> 瀏覽次數：<span class='views'/></span>
+                </span>
+            </nav>
+        </header>
+        <div class='post-body'>
+            <h1 class='center-text' id="top">lingogoogol</h1>
+            <h2 class='center-text' id="download">下載</h2>
+            <h2 class='center-text' id="policy">政策</h2>
+            <ul>
+                <li>歡迎貢獻！</li>
+                <li><a href="https://github.com/lingogoogol/lingogoogol">Github</a></li>
+            </ul>
+        </div>
+    </body>
+</html>
