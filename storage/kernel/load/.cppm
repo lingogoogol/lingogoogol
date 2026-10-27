@@ -92,6 +92,9 @@ export
         std::function<void()> m_settings_page;
         std::function<void()> m_clear_page;
         std::list<std::shared_ptr<load_task_t>> m_task_list{};
+        // Terminal rows stay visible until acknowledged. Owners also outlive
+        // cancelled requests and asynchronous preparation/publication.
+        std::list<std::shared_ptr<load_task_t>> m_finished_tasks{};
         std::map<CURL*, std::function<void(std::unique_ptr<curl_easy_t>&)>> m_end{};
         struct parked_request_t
         {
@@ -107,6 +110,8 @@ export
         std::function<void(const std::string&)> m_on_upload_linked{};
     };
     
+    enum class task_result_t { active, cancelling, completed, cancelled, failed };
+
     struct load_task_t
     {
         virtual ~load_task_t() = default;
@@ -119,7 +124,9 @@ export
         // rather than replacing it with the original preparation label.
         std::string m_paused_text;
         std::uint64_t m_saved_progress{};
-        bool m_cancel_saved{};
+        task_result_t m_result{task_result_t::active};
+        bool m_dismissed{};
+        bool m_row_removed{};
         bool m_preparation_failed{};
         std::function<void()> m_retry_prepare;
         auto pause(bool value) -> void
@@ -139,6 +146,8 @@ export
             if (changed && m_progress_text && !m_control->paused && !m_control->cancelled)
                 m_progress_text->set_text(value ? "已暫停：" + m_paused_text : m_paused_text, false);
         }
+        std::shared_ptr<lgo::progress_bar_t> m_progress_bar;
+        std::shared_ptr<lgo::button_classic_std_t> m_confirm_button;
         std::shared_ptr<lgo::button_classic_std_t> m_pause_button;
         std::shared_ptr<lgo::button_classic_std_t> m_resume_button;
         std::shared_ptr<lgo::button_classic_std_t> m_retry_button;
@@ -302,6 +311,9 @@ export
         //The first file that can send more requests.
         std::vector<download_file_t>::iterator m_idle_first{};
     };
+
+    auto finish_task(load_task_t& task, task_result_t result, std::string text) -> void;
+    auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> void;
 
     auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::json;
 

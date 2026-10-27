@@ -97,6 +97,8 @@ auto app() -> void
             // Every task's last durable checkpoint stays available for next launch.
             for (auto& task : tasks.m_task_list)
                 task->m_control->cancel();
+            for (auto& task : tasks.m_finished_tasks)
+                task->m_control->cancel();
             runtime.stop();
             multi.stop();
         }
@@ -154,7 +156,9 @@ auto app() -> void
         for (auto& listing : persistent.m_listings)
             listing.control->cancel();
         std::vector<std::shared_ptr<load_task_t>> cancelled;
-        for (auto& task : load_state.m_task_list)
+        auto account_tasks{load_state.m_task_list};
+        account_tasks.insert(account_tasks.end(), load_state.m_finished_tasks.begin(), load_state.m_finished_tasks.end());
+        for (auto& task : account_tasks)
             if (task->m_session && task->m_session->address == clearing_session->address)
             {
                 task->m_control->cancel();

@@ -344,5 +344,39 @@ namespace lgo
         hide_end(base);
         return;
     }
+    progress_bar_t::progress_bar_t(engine_t* engine, depth_tracker_t* tracker, depth_range_t depth,
+                                  pos_2D pos, size_2D size, color_t color)
+        : m_track{engine, tracker, depth_range_t{(depth.near + depth.far) / 2, depth.far},
+                  pos, size, color_t{.12f,.12f,.12f}},
+          m_fill{engine, tracker, depth, pos, size_2D{0,size.y}, color}, m_size{size}
+    {}
+
+    auto progress_bar_t::set_pos(pos_2D pos) -> void
+    {
+        m_track.set_pos(pos); m_fill.set_pos(pos);
+    }
+    auto progress_bar_t::set_size(size_2D size) -> void
+    {
+        size = {std::max<std::int64_t>(0,size.x), std::max<std::int64_t>(0,size.y)};
+        GUI_object_t::set_size(size);
+        m_size = size;
+        m_track.set_size(size);
+        set_fraction(m_fraction);
+    }
+    auto progress_bar_t::set_fraction(double fraction) -> void
+    {
+        m_fraction = std::isfinite(fraction) ? std::clamp(fraction, 0., 1.) : 0.;
+        m_fill.set_size({static_cast<std::int64_t>(m_fraction * m_size.x), m_size.y});
+    }
+    auto progress_bar_t::show_impl(bool base) -> void
+    {
+        if (!show_begin(base)) return;
+        m_track.show(); m_fill.show(); show_end(base);
+    }
+    auto progress_bar_t::hide_impl(bool base) -> void
+    {
+        if (!hide_begin(base)) return;
+        m_fill.hide(); m_track.hide(); hide_end(base);
+    }
 
 }

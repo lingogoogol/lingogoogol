@@ -28,14 +28,11 @@ namespace
         return task->m_journal->allocate(std::move(key), count, [queue, task](std::size_t size)
                                          { return queue->get(size, &task->m_control->cancelled); });
     }
-    auto task_done(load_task_t& task) -> void
-    {
-        if (task.m_journal)
-            task.m_journal->finish();
-    }
     auto task_progress(load_task_t& task, std::uint64_t completed, std::uint64_t size,
                        const std::string& name) -> void
     {
+        if (task.m_progress_bar)
+            task.m_progress_bar->set_fraction(size ? double(std::max(task.m_saved_progress, completed)) / size : 0.);
         if (!task.m_progress_text)
             return; // Scheduler-only callers may have no GUI progress row.
         task.m_progress_text->set_text(
@@ -44,14 +41,80 @@ namespace
     }
 } // namespace
 
+auto finish_task(load_task_t& task, task_result_t result, std::string text) -> void
+{
+    if (task.m_result != task_result_t::active) return;
+    if (result != task_result_t::completed) task.m_control->cancel();
+    if (task.m_journal) task.m_journal->finish();
+    task.m_result = result == task_result_t::cancelled ? task_result_t::cancelling : result;
+    if (result == task_result_t::cancelled && text.starts_with("已取消："))
+        text.replace(0, std::string_view{"已取消："}.size(), "取消中：");
+    if (task.m_progress_text) task.m_progress_text->set_text(std::move(text), false);
+    if (task.m_progress_bar && result == task_result_t::completed)
+        task.m_progress_bar->set_fraction(1.);
+    for (const auto& button : {task.m_pause_button, task.m_resume_button, task.m_retry_button, task.m_cancel_button})
+        if (button) button->hide();
+    if (task.m_confirm_button && task.m_result != task_result_t::cancelling)
+        task.m_confirm_button->show();
+    auto& state{*task.m_state};
+    state.m_finished_tasks.splice(state.m_finished_tasks.end(), state.m_task_list, task.m_self_i);
+}
+
+auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> void
+{
+    using namespace std::chrono_literals;
+    for (auto entry{state.m_finished_tasks.begin()}; entry != state.m_finished_tasks.end();)
+    {
+        auto& task{**entry};
+        if (task.m_result != task_result_t::cancelling && !task.m_dismissed)
+        {
+            ++entry;
+            continue;
+        }
+        // Upload callbacks contain raw entity pointers. Removing a row must not
+        // free their owner before the worker, parked callbacks and futures drain.
+        const auto ready = [](const auto& future)
+            { return !future.valid() || future.wait_for(0s) == std::future_status::ready; };
+        bool busy{multi.pending(task.m_control)};
+        if (const auto upload{std::dynamic_pointer_cast<upload_task_t>(*entry)})
+            busy = busy || !ready(upload->m_prepared) || !ready(upload->m_linked);
+        if (const auto download{std::dynamic_pointer_cast<download_task_t>(*entry)})
+            busy = busy || !ready(download->m_prepared);
+        std::erase_if(state.m_parked, [&](const auto& parked)
+            { return parked.request->m_control == task.m_control; });
+        if (task.m_result == task_result_t::cancelling && !busy)
+        {
+            task.m_result = task_result_t::cancelled;
+            if (task.m_progress_text)
+                task.m_progress_text->set_text("已取消：" + task.m_label, false);
+            if (task.m_confirm_button) task.m_confirm_button->show();
+        }
+        if (task.m_dismissed && task.m_result != task_result_t::cancelling)
+        {
+            if (!task.m_row_removed)
+            {
+                if (state.m_progress_column) state.m_progress_column->remove_object(task.m_progress_div);
+                task.m_row_removed = true;
+            }
+            if (!busy) { entry = state.m_finished_tasks.erase(entry); continue; }
+        }
+        ++entry;
+    }
+}
+
 auto download_fail(download_task_t& task, const std::exception& error) -> void
 {
     if (!task.m_error.empty())
         return;
     task.m_error = error.what();
-    if (task.m_error.empty()) task.m_error = "Unknown download error.";
+    if (task.m_error.empty()) task.m_error = "未知下載錯誤";
     lgo::log_file("Download failed: " + task.m_name + "\n" + task.m_error + "\n");
-    task.m_progress_text->set_text("下載失敗：" + task.m_name + "（" + task.m_error + "）", false);
+    const auto text{"下載失敗：" + task.m_name + "（" + task.m_error + "）"};
+    if (task.m_preparation_failed)
+    {
+        if (task.m_progress_text) task.m_progress_text->set_text(text, false);
+    }
+    else finish_task(task, task_result_t::failed, text);
 }
 
 auto download_on_end(download_task_t& task, CURL* key,
@@ -436,9 +499,7 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                     {
                         state->m_on_upload_linked(upload_task_ptr->m_pos.m_main_id);
                     }
-                    state->m_progress_column->remove_object(upload_task_ptr->m_progress_div);
-                    task_done(*upload_task_ptr);
-                    state->m_task_list.erase(upload_task_ptr->m_self_i);
+                    finish_task(*upload_task_ptr, task_result_t::completed, "已完成：上傳 " + upload_task_ptr->m_name);
                     return false;
                 }
                 continue;
@@ -530,9 +591,7 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 if (!download_task_ptr->m_files_remaining)
                 {
                     // An empty directory tree is complete once its directories exist.
-                    state->m_progress_column->remove_object(download_task_ptr->m_progress_div);
-                    task_done(*download_task_ptr);
-                    state->m_task_list.erase(download_task_ptr->m_self_i);
+                    finish_task(*download_task_ptr, task_result_t::completed, "已完成：下載 " + download_task_ptr->m_name);
                     return false;
                 }
             }
@@ -663,7 +722,7 @@ auto upload_complete(upload_entity_t* entity) -> void
         {
             link["id"] = dynamic_cast<upload_folder_t*>(root)->m_main_id;
         }
-        task->m_progress_text->set_text("連結到目錄：" + task->m_name, false);
+        task->m_progress_text->set_text("上傳：更新目錄 " + task->m_name, false);
         //Each worker owns its easy handle. Waiting for the previous publication prevents
         //concurrent folder_add read/modify/write operations from overwriting each other.
         //Copy the inputs so the worker never accesses task or GUI state.
@@ -1085,9 +1144,7 @@ auto download_complete(download_file_t& file) -> void
     {
         if (task.m_progress != task.m_size)
             throw std::runtime_error{ "Downloaded size differs from the declared size: " + task.m_name };
-        task.m_state->m_progress_column->remove_object(task.m_progress_div);
-        task_done(task);
-        task.m_state->m_task_list.erase(task.m_self_i);
+        finish_task(task, task_result_t::completed, "已完成：下載 " + task.m_name);
     }
 }
 

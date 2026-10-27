@@ -110,6 +110,29 @@ export namespace lgo
         auto hide_impl(bool base) -> void override;
     };
 
+    class progress_bar_t: public GUI_object_t
+    {
+        rect_t m_track, m_fill;
+        size_2D m_size{};
+        double m_fraction{};
+      public:
+        progress_bar_t(engine_t* engine, depth_tracker_t* tracker, depth_range_t depth,
+                       pos_2D pos, size_2D size, color_t color = std_green);
+        ~progress_bar_t() override { hide(); }
+        auto get_pos() const -> pos_2D override { return m_track.get_pos(); }
+        auto get_size() const -> size_2D override { return m_size; }
+        auto get_margin() const -> size_1D override { return std_margin; }
+        auto set_pos(pos_2D pos) -> void override;
+        auto set_size(size_2D size) -> void override;
+        auto set_fraction(double fraction) -> void;
+        auto fraction() const -> double { return m_fraction; }
+        auto filled_size() const -> size_2D { return m_fill.get_size(); }
+        auto set_color(color_t color) -> void { m_fill.set_color(color); }
+        auto log(std::uint32_t tab_count) const -> void override { m_track.log(tab_count); }
+        auto show_impl(bool base) -> void override;
+        auto hide_impl(bool base) -> void override;
+    };
+
     template<bool is_y>
     class std_line_impl_t: public rect_t
     {

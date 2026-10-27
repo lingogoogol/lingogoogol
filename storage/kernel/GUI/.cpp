@@ -78,8 +78,10 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             persistent->m_directory_status->set_text("目錄更新失敗");
         entry = persistent->m_listings.erase(entry);
     }
-    for (auto& task : load_state->m_task_list)
+    collect_finished_tasks(*load_state, *multi);
+    for (auto entry{load_state->m_task_list.begin()}; entry != load_state->m_task_list.end();)
     {
+        auto task{*entry++};
         task->m_control->retry_limit = load_state->m_settings.network_retries;
         if (task->m_session)
         {
@@ -90,13 +92,8 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         }
         if (task->m_control->cancelled)
         {
-            if (!task->m_cancel_saved)
-            {
-                if (task->m_journal)
-                    task->m_journal->finish();
-                task->m_cancel_saved = true;
-                task->m_progress_text->set_text("已取消：" + task->m_label, false);
-            }
+            finish_task(*task, task_result_t::cancelled, "已取消：" + task->m_label);
+            continue;
         }
         else if (task->m_control->paused)
         {
@@ -229,6 +226,13 @@ namespace
             if (task->m_control->user_paused)
                 text = saved.value("paused_text", text);
         }
+        // Older task checkpoints used English operation prefixes. Preserve
+        // the filename and byte counts while normalizing only those prefixes.
+        for (const auto& [old, translated] : {std::pair{"upload：", "上傳："},
+                                             std::pair{"download：", "下載："},
+                                             std::pair{"upload: ", "上傳："},
+                                             std::pair{"download: ", "下載："}})
+            if (text.starts_with(old)) text.replace(0, std::string_view{old}.size(), translated);
         task->m_paused_text = text;
         task->m_control->retry_limit = state->m_settings.network_retries;
         task->m_progress_div = state->m_progress_column->add_object<lgo::divy_flex_soft_t>(
@@ -237,6 +241,8 @@ namespace
         auto row{state->m_progress_column->get_object_shared<lgo::divy_flex_soft_t>(task->m_progress_div)};
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
             storage_content_depth, text, lgo::std_green_light, lgo::size_1D{256}, false);
+        task->m_progress_bar = row->add_object_shared<lgo::progress_bar_t>(
+            storage_content_depth, lgo::size_2D{256, 10}, lgo::std_green);
         const std::weak_ptr<load_task_t> weak{task};
         // All three primary actions occupy the same slot. Ghost children do
         // not reserve extra width when hidden; the cancel slot stays fixed.
@@ -288,10 +294,19 @@ namespace
             },
             "取消");
         task->m_cancel_button->hide();
+        task->m_confirm_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+            storage_content_depth, [weak]
+            {
+                // Defer removal until input dispatch returns; destroying the
+                // clicked control inside its own callback is unsafe.
+                if (auto task{weak.lock()}) task->m_dismissed = true;
+            }, "確定");
+        task->m_confirm_button->hide();
         // A div applies leading margins differently to its first ghost child.
         // Anchor all primary actions explicitly to the reserved retry slot.
         task->m_pause_button->set_pos(task->m_retry_button->get_pos());
         task->m_resume_button->set_pos(task->m_retry_button->get_pos());
+        task->m_confirm_button->set_pos(task->m_retry_button->get_pos());
         task->m_self_i = state->m_task_list.emplace(state->m_task_list.end(), task);
     }
 } // namespace
@@ -353,12 +368,11 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
         task_row(state, task, "準備下載：" + path);
         auto launch = [task, folder, path, pos](bool accepted)
         {
+            if (task->m_control->cancelled) return;
             if (!accepted)
             {
                 task->m_error = "使用者未同意刪除已有的目的地";
-                task->m_progress_text->set_text("下載失敗：" + path + "（" + task->m_error + "）", false);
-                if (task->m_journal)
-                    task->m_journal->set("declined", true);
+                finish_task(*task, task_result_t::failed, "下載失敗：" + path + "（" + task->m_error + "）");
                 return;
             }
             task->m_retry_prepare = [task = task.get(), folder, path, pos]
