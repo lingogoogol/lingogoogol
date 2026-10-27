@@ -161,7 +161,7 @@ int main()
         auto healthy{ add("file-main", "output/after-failure.bin", false) };
         const auto failures{ std::array{ bad, bad_index, empty_chunk, bad_content, bad_encoding, wrong_size, bad_output, inflight } };
         const auto error_deadline{ std::chrono::steady_clock::now() + 10s };
-        while (loads.m_task_list.size() != failures.size() || !loads.m_end.empty() ||
+        while (healthy->m_result != task_result_t::completed || !loads.m_end.empty() ||
             std::ranges::any_of(failures, [](const auto& task) { return task->m_error.empty(); }))
         {
             check(std::chrono::steady_clock::now() < error_deadline, "Failed downloads blocked other tasks.");

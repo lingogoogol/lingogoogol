@@ -62,6 +62,8 @@ int main(int argc, char** argv)
                 close = true;
                 for (auto& task : loads.m_task_list)
                     task->m_control->cancelled = true;
+                for (auto& task : loads.m_finished_tasks)
+                    task->m_control->cancel();
                 runtime.stop();
                 multi.stop();
             }
@@ -144,8 +146,14 @@ int main(int argc, char** argv)
                 check(bytes() == 0, "Initial total size appeared after data had already completed.");
                 wait([&] { return bytes() > 0; }, "Transfer did not reach a nonzero checkpoint.");
                 check(bytes() < size, "Transfer completed before pause could be tested.");
+                const auto bar{task->m_progress_bar};
+                check(bar && bar->fraction() > 0. && bar->fraction() < 1., "Missing nonzero graphical progress.");
+                check(bar->get_pos().y >= task->m_progress_text->get_pos().y + task->m_progress_text->get_size().y &&
+                      bar->get_pos().y + bar->get_size().y <= task->m_pause_button->get_pos().y,
+                      "Progress bar is not between task text and actions.");
                 click(task->m_pause_button, [&] { return task->m_control->user_paused.load(); });
                 const auto progress{task->m_paused_text};
+                const auto fraction{task->m_progress_bar->fraction()};
                 check(progress.contains(std::to_string(bytes()) + "B/" + std::to_string(size) + "B"),
                       "Pause lost the completed byte count or total size.");
                 check(!progress.contains("準備"), "Pause reverted to the preparation label.");
@@ -159,6 +167,7 @@ int main(int argc, char** argv)
                     pump();
                 check(task->m_progress_text->get_text() == "已暫停：" + progress,
                       "The GUI loop replaced paused progress.");
+                check(task->m_progress_bar->fraction() == fraction, "Pause changed graphical progress.");
                 click(task->m_resume_button, [&] { return !task->m_control->user_paused; });
                 check(task->m_progress_text->get_text() == progress, "Continue did not restore progress.");
                 click(task->m_pause_button, [&] { return task->m_control->user_paused.load(); });
@@ -170,6 +179,81 @@ int main(int argc, char** argv)
                 click(task->m_cancel_button, [&] { return task->m_control->cancelled.load(); });
             pump();
             check(nlohmann::json::parse(storage_read("task")).empty(), "Paused cancellation retained tasks.");
+            for (auto task : {upload, download})
+            {
+                const auto cancel_deadline{std::chrono::steady_clock::now() + 10s};
+                while (task->m_result == task_result_t::cancelling)
+                {
+                    check(std::chrono::steady_clock::now() < cancel_deadline, "Cancellation did not drain.");
+                    pump();
+                }
+                check(task->m_result == task_result_t::cancelled && task->m_confirm_button,
+                      "Cancelled transfer has no acknowledgement.");
+                const auto fraction{task->m_progress_bar->fraction()};
+                check(fraction > 0., "Cancellation lost graphical progress.");
+                click(task->m_confirm_button, [&] { return task->m_dismissed; });
+                pump();
+                check(task->m_row_removed, "Acknowledged cancelled row remained visible.");
+            }
+            // Hold a preparation future to make cancellation cleanup visible
+            // deterministically, independently of local network speed.
+            storage_atomic_write("cancelling.bin", "keep");
+            loads.m_confirm = [](std::string, auto) {};
+            begin_task(&loads, session, "download-file", "cancelling.bin", "retry-file");
+            auto cancelling{std::dynamic_pointer_cast<download_task_t>(loads.m_task_list.back())};
+            std::promise<void> cleanup_gate;
+            cancelling->m_prepared = cleanup_gate.get_future();
+            cancelling->pause(true);
+            click(cancelling->m_cancel_button, [&] { return cancelling->m_control->cancelled.load(); });
+            for (int i{}; i < 10; ++i) pump();
+            check(cancelling->m_result == task_result_t::cancelling && !cancelling->m_row_removed &&
+                  cancelling->m_progress_text->get_text().starts_with("取消中："),
+                  "Cancellation cleanup was hidden or acknowledged before it finished.");
+            click(cancelling->m_confirm_button, [&]
+            {
+                return std::filesystem::exists("click.ack") && storage_read("click.ack") == std::to_string(step);
+            });
+            check(!cancelling->m_dismissed, "Cancelling row exposed an acknowledgement button.");
+            cleanup_gate.set_value();
+            pump();
+            check(cancelling->m_result == task_result_t::cancelled &&
+                  cancelling->m_progress_text->get_text().starts_with("已取消："),
+                  "Finished cleanup did not transition to cancelled.");
+            click(cancelling->m_confirm_button, [&] { return cancelling->m_dismissed; });
+            pump();
+            check(cancelling->m_row_removed, "Cleaned cancellation could not be acknowledged.");
+            std::println("PASS: cancelling row stays visible without acknowledgement until background cleanup completes");
+            // Both successful operations retain a full bar, including empty
+            // files/folders; use real clicks to acknowledge each terminal row.
+            begin_task(&loads, session, "upload-file", "second.bin", pos);
+            auto success_upload{loads.m_task_list.back()};
+            begin_task(&loads, session, "download-folder", "empty-success", "fast-folder");
+            auto success_download{loads.m_task_list.back()};
+            const auto complete_deadline{std::chrono::steady_clock::now() + 15s};
+            while (success_upload->m_result == task_result_t::active || success_download->m_result == task_result_t::active)
+            {
+                check(std::chrono::steady_clock::now() < complete_deadline, "Successful transfers did not complete.");
+                pump();
+            }
+            for (auto task : {success_upload, success_download})
+            {
+                check(task->m_result == task_result_t::completed && !task->m_row_removed,
+                      "Successful row was removed automatically.");
+                check(task->m_progress_text->get_text().starts_with("已完成：") && task->m_progress_bar->fraction() == 1.,
+                      "Successful row lost its Chinese completion status or full bar.");
+                click(task->m_confirm_button, [&] { return task->m_dismissed; });
+                pump();
+                check(task->m_row_removed, "Acknowledged success row remained visible.");
+            }
+            storage_atomic_write("refused.bin", "keep");
+            loads.m_confirm = [](std::string, auto done) { done(false); };
+            begin_task(&loads, session, "download-file", "refused.bin", "retry-file");
+            auto refused{loads.m_finished_tasks.back()};
+            check(refused->m_result == task_result_t::failed, "Refused overwrite was not terminal.");
+            click(refused->m_confirm_button, [&] { return refused->m_dismissed; });
+            pump();
+            check(refused->m_row_removed && storage_read("refused.bin") == "keep", "Refused overwrite acknowledgement failed.");
+            check(loads.m_finished_tasks.empty(), "Acknowledged terminal owners were not reclaimed.");
             glfwSetWindowSize(engine.window_get(), 800, 600);
             for (int i{}; i < 10; ++i)
                 pump();
@@ -191,7 +275,8 @@ int main(int argc, char** argv)
                 check(std::chrono::steady_clock::now() < deadline, "F3 panel did not close.");
                 pump();
             }
-            std::println("PASS: real GUI clicks pause, resume and cancel uploads and downloads");
+            std::println("PASS: real GUI clicks pause, resume, cancel and acknowledge uploads/downloads, success and refusal");
+            std::println("PASS: graphical progress stays between text and actions, survives pause/cancel and fills on completion");
             std::println("PASS: initial 0B/size is visible; pause and continue retain nonzero transfer progress");
             std::println("PASS: F3 opens, fits an 800x600 window, pages by mouse and closes on release");
             return 0;
@@ -345,7 +430,7 @@ int main(int argc, char** argv)
             storage_atomic_write("protected.bin", "keep me");
             loads.m_confirm = [](std::string, auto done) { done(false); };
             begin_task(&loads, session, "download-file", "protected.bin", "test-file");
-            auto declined{std::dynamic_pointer_cast<download_task_t>(loads.m_task_list.back())};
+            auto declined{std::dynamic_pointer_cast<download_task_t>(loads.m_finished_tasks.back())};
             check(!declined->m_error.empty(), "Declined overwrite has no failure reason.");
             check(storage_read("protected.bin") == "keep me",
                   "Declined overwrite destroyed the destination.");

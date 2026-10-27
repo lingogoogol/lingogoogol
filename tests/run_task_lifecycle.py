@@ -47,6 +47,7 @@ while app.poll() is None:
             time.sleep(.1)
             from PIL import ImageGrab
             ImageGrab.grab().save(f'/tmp/storage-pause-controls-{step}.png')
+            Path('click.ack').write_text(str(step))
     time.sleep(.02)
 sys.exit(app.wait())
 '''
