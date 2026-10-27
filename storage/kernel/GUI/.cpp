@@ -235,6 +235,35 @@ namespace
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
             lgo::depth_range_t{0, .5f}, text, lgo::std_green_light, lgo::size_1D{256}, false);
         const std::weak_ptr<load_task_t> weak{task};
+        task->m_retry_button = row->add_object_shared<lgo::button_classic_std_t>(
+            lgo::depth_range_t{0, .5f},
+            [weak]
+            {
+                if (auto task{weak.lock()})
+                {
+                    if (task->m_session)
+                    {
+                        task->m_session->account->retry();
+                        task->m_session->queue->retry();
+                    }
+                    task->m_control->retry();
+                    if (task->m_preparation_failed && task->m_retry_prepare)
+                    {
+                        task->m_preparation_failed = false;
+                        task->m_retry_prepare();
+                    }
+                }
+            },
+            "重試");
+        task->m_retry_button->hide();
+        task->m_cancel_button = row->add_object_shared<lgo::button_classic_std_t>(
+            lgo::depth_range_t{0, .5f},
+            [weak]
+            {
+                if (auto task{weak.lock()})
+                    task->m_control->cancel();
+            },
+            "取消");
         task->m_self_i = state->m_task_list.emplace(state->m_task_list.end(), task);
     }
 } // namespace
