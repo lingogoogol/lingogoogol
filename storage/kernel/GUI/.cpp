@@ -367,7 +367,19 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
             };
             task->m_retry_prepare();
         };
-        launch(true);
+        const auto saved = journal ? journal->data() : nlohmann::json::object();
+        if (saved.value("declined", false))
+            launch(false);
+        else if (!saved.value("destination_ready", false) &&
+                 std::filesystem::symlink_status(path).type() != std::filesystem::file_type::not_found)
+        {
+            if (state->m_confirm)
+                state->m_confirm("目的地已存在，是否刪除後下載？\n" + path, std::move(launch));
+            else
+                launch(false); // No GUI host is never implicit permission to delete.
+        }
+        else
+            launch(true);
     }
 }
 
@@ -588,6 +600,26 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         lgo::depth_range_t{0.0f, 1.0f}, lgo::pos_2D{0, 0}, engine->get_window_size(), lgo::size_1D{0},
         lgo::alignment_2D{lgo::alignment_x::center, lgo::alignment_y::center})};
 
+    load_state->m_confirm = [engine, state, persistent](std::string message, std::function<void(bool)> done)
+    {
+        persistent->m_dialog_queue.push_back(
+            [=]
+            {
+                std::vector<std::string> lines;
+                std::istringstream stream{message};
+                std::string line;
+                while (std::getline(stream, line))
+                    lines.push_back(line);
+                persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                    engine, state->get_depth_tracker(), "覆寫下載目的地", lines,
+                    std::vector<std::pair<std::string, std::string>>{}, "刪除並下載");
+                persistent->m_dialog_done = [done](bool accepted, const auto&)
+                {
+                    done(accepted);
+                    return true;
+                };
+            });
+    };
     load_state->m_settings_page = [=]
     {
         persistent->m_dialog_queue.push_back(
