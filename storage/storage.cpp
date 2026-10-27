@@ -123,9 +123,9 @@ auto app() -> void
         settings_control->cancelled = false;
         settings_control->retry_limit = candidate.network_retries;
         settings_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
-            lgo::depth_range_t{0, .5f}, "設定更新中", lgo::std_red, lgo::size_1D{256}, false);
+            storage_content_depth, "設定更新中", lgo::std_red, lgo::size_1D{256}, false);
         settings_retry = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f},
+            storage_content_depth,
             [&]
             {
                 runtime.retry_accounts();
@@ -134,7 +134,7 @@ auto app() -> void
             "重試");
         settings_retry->hide();
         settings_cancel = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f}, [&] { settings_control->cancel(); }, "取消");
+            storage_content_depth, [&] { settings_control->cancel(); }, "取消");
         persistent.m_switching = true;
         persistent.m_directory_status->set_text("目錄更新中");
         settings_job =
@@ -162,9 +162,9 @@ auto app() -> void
             }
         multi.interrupt();
         clear_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
-            lgo::depth_range_t{0, .5f}, "清除：列出全部 Drive 檔案", lgo::std_red, lgo::size_1D{256}, false);
+            storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red, lgo::size_1D{256}, false);
         clear_retry = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f},
+            storage_content_depth,
             [&]
             {
                 load_state.m_session->account->retry();
@@ -178,7 +178,7 @@ auto app() -> void
             "重試");
         clear_retry->hide();
         clear_cancel = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f}, [&] { clear_control->cancel(); }, "取消");
+            storage_content_depth, [&] { clear_control->cancel(); }, "取消");
         clear_job = std::async(std::launch::async,
                                [&, target = clearing_session, cancelled]
                                {

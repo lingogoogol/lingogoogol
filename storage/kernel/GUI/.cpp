@@ -143,20 +143,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     persistent->m_blob_queue_count->set_text(queue_error.empty()
                                                  ? "blob_queue_count: " + std::to_string(blob_queue->count())
                                                  : "預備佇列失敗：" + queue_error);
-    if (glfwGetKey(engine->window_get(), GLFW_KEY_F3))
-    {
-        for (auto& load_easy_status : load_easy_status_map)
-        {
-            persistent->m_load_easy_status[load_easy_status.second.m_text_index]->show();
-        }
-    }
-    else
-    {
-        for (auto& load_easy_status : load_easy_status_map)
-        {
-            persistent->m_load_easy_status[load_easy_status.second.m_text_index]->hide();
-        }
-    }
+    persistent->show_diagnostics(glfwGetKey(engine->window_get(), GLFW_KEY_F3));
     for (auto& load_easy_status : load_easy_status_map)
     {
         std::string status_str{};
@@ -167,12 +154,14 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         }
         else
         {
-            status_str = std::format("{:%T}, {}",
-                                     std::chrono::steady_clock::now() - load_easy_status.second.m_add_time,
-                                     multi->read_progress(load_easy_status.first));
+            status_str = std::format("{:.1f}s, {}B",
+                std::chrono::duration<double>{std::chrono::steady_clock::now() -
+                                              load_easy_status.second.m_add_time}.count(),
+                multi->read_progress(load_easy_status.first));
         }
         persistent->m_load_easy_status[load_easy_status.second.m_text_index]->set_text(
-            std::format("{:#018x}, {}", reinterpret_cast<std::uint64_t>(load_easy_status.first), status_str));
+            std::format("#{:02} {:#018x}, {}", load_easy_status.second.m_text_index + 1,
+                        reinterpret_cast<std::uint64_t>(load_easy_status.first), status_str), false);
     }
 
     // Submit at most one new request per frame; only the worker performs curl.
@@ -229,14 +218,14 @@ namespace
         }
         task->m_control->retry_limit = state->m_settings.network_retries;
         task->m_progress_div = state->m_progress_column->add_object<lgo::divy_flex_soft_t>(
-            lgo::depth_range_t{0, .5f}, state->m_progress_column->space_x(lgo::std_margin), lgo::std_margin,
+            storage_content_depth, state->m_progress_column->space_x(lgo::std_margin), lgo::std_margin,
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top});
         auto row{state->m_progress_column->get_object_shared<lgo::divy_flex_soft_t>(task->m_progress_div)};
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            lgo::depth_range_t{0, .5f}, text, lgo::std_green_light, lgo::size_1D{256}, false);
+            storage_content_depth, text, lgo::std_green_light, lgo::size_1D{256}, false);
         const std::weak_ptr<load_task_t> weak{task};
         task->m_retry_button = row->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f},
+            storage_content_depth,
             [weak]
             {
                 if (auto task{weak.lock()})
@@ -257,7 +246,7 @@ namespace
             "重試");
         task->m_retry_button->hide();
         task->m_cancel_button = row->add_object_shared<lgo::button_classic_std_t>(
-            lgo::depth_range_t{0, .5f},
+            storage_content_depth,
             [weak]
             {
                 if (auto task{weak.lock()})
@@ -476,33 +465,33 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             if (i["type"] == "folder")
             {
                 viewer_div->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
-                    lgo::depth_range_t{0.0f, 0.5f},
+                    storage_content_depth,
                     std::bind(&folder_button_callback, engine, persistent, multi, load_state, blob_queue,
                               viewer_div, pos, i["id"]),
                     "資料夾，名稱：" + i["name"].get<std::string>(), lgo::std_white,
                     lgo::size_1D{viewer_div->space_2D(lgo::std_margin).x});
                 viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>(
-                    lgo::depth_range_t{0.0f, 0.5f},
+                    storage_content_depth,
                     std::bind(&folder_download_callback, load_state, i["name"].get<std::string>(),
                               i["id"].get<std::string>()),
                     "下載", lgo::std_white, viewer_div->space_x(lgo::std_margin));
                 viewer_div->add_object<lgo::std_linex_t>(
-                    lgo::depth_range_t{0.0f, 0.5f}, viewer_div->space_x(lgo::std_margin), lgo::std_white);
+                    storage_content_depth, viewer_div->space_x(lgo::std_margin), lgo::std_white);
             }
             else if (i["type"] == "file")
             {
                 viewer_div->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
-                    lgo::depth_range_t{0.0f, 0.5f}, []() {},
+                    storage_content_depth, []() {},
                     "檔案，名稱：" + i["name"].get<std::string>() + "，大小：" +
                         std::to_string(i["size"].get<std::uint64_t>()),
                     lgo::std_white, lgo::size_1D{viewer_div->space_2D(lgo::std_margin).x});
                 viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>(
-                    lgo::depth_range_t{0.0f, 0.5f},
+                    storage_content_depth,
                     std::bind(&file_download_callback, load_state, i["name"].get<std::string>(),
                               i["id"].get<std::string>()),
                     "下載", lgo::std_white, viewer_div->space_x(lgo::std_margin));
                 viewer_div->add_object<lgo::std_linex_t>(
-                    lgo::depth_range_t{0.0f, 0.5f}, viewer_div->space_x(lgo::std_margin), lgo::std_white);
+                    storage_content_depth, viewer_div->space_x(lgo::std_margin), lgo::std_white);
             }
             else
             {
@@ -524,30 +513,30 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
 
     auto menu_left{main_div->add_object_ghost_shared<lgo::divx_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
+        storage_content_depth, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
         main_div->space_x(lgo::std_margin),
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::center})};
-    menu_left->add_object<lgo::text_line_std_t>(lgo::depth_range_t{0.0f, 0.5f}, "雲端硬碟", lgo::std_white,
+    menu_left->add_object<lgo::text_line_std_t>(storage_content_depth, "雲端硬碟", lgo::std_white,
                                                 main_div->space_x(lgo::std_margin));
 
     auto menu_right{main_div->add_object_shared<lgo::divx_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
+        storage_content_depth, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
         main_div->space_x(lgo::std_margin),
         lgo::alignment_2D{lgo::alignment_x::right, lgo::alignment_y::center})};
     persistent->m_directory_status = menu_right->add_object_shared<lgo::text_line_std_t>(
-        lgo::depth_range_t{0, .5f}, "", lgo::std_red, lgo::size_1D{112});
+        storage_content_depth, "", lgo::std_red, lgo::size_1D{112});
     auto header_line = main_div->add_object_shared<lgo::std_linex_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, main_div->space_x(lgo::std_margin), lgo::std_white);
+        storage_content_depth, main_div->space_x(lgo::std_margin), lgo::std_white);
     auto work_div{main_div->add_object_shared<lgo::divx_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, main_div->space_2D(lgo::std_margin), lgo::std_margin,
+        storage_content_depth, main_div->space_2D(lgo::std_margin), lgo::std_margin,
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
 
     auto state_div{work_div->add_object_ghost_shared<lgo::divy_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, lgo::size_2D{0x100, work_div->space_y(lgo::std_margin).x},
+        storage_content_depth, lgo::size_2D{0x100, work_div->space_y(lgo::std_margin).x},
         lgo::std_margin, lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
 
     persistent->m_frame_rate = state_div->add_object_shared<lgo::text_line_std_t>(
-        lgo::depth_range_t{0.0f, 0.0f}, "frame_rate: evaluating...", lgo::std_white, lgo::size_1D{0x100});
+        storage_content_depth, "frame_rate: evaluating...", lgo::std_white, lgo::size_1D{0x100});
     // The main application loop pauses during interactive resizing; update FPS before each repaint.
     engine->callback_frame_rate_set(
         [frame_rate = std::weak_ptr{persistent->m_frame_rate}](std::uint64_t rate)
@@ -562,32 +551,45 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             }
         });
     persistent->m_blob_queue_cycle_rate = state_div->add_object_shared<lgo::text_line_std_t>(
-        lgo::depth_range_t{0.0f, 0.0f}, "blob_queue_cycle_rate: evaluating...", lgo::std_white,
+        storage_content_depth, "blob_queue_cycle_rate: evaluating...", lgo::std_white,
         lgo::size_1D{0x100});
     persistent->m_blob_queue_count = state_div->add_object_shared<lgo::text_line_std_t>(
-        lgo::depth_range_t{0.0f, 0.0f}, "blob_queue_count: evaluating...", lgo::std_white,
+        storage_content_depth, "blob_queue_count: evaluating...", lgo::std_white,
         lgo::size_1D{0x100});
-    for (std::size_t i{0}; i < load_easy_count / 4; ++i)
+    // Diagnostics have their own opaque panel. Fixed-width ghost columns used
+    // to overflow into each other and into the transfer progress underneath.
+    persistent->m_diagnostics_backdrop = state->add_object_shared<lgo::rect_t>(
+        lgo::depth_range_t{.18f, .19f}, lgo::pos_2D{}, lgo::size_2D{},
+        lgo::color_t{.015f, .015f, .015f});
+    persistent->m_diagnostics_summary = state->add_object_shared<lgo::text_line_scroll_std_t>(
+        lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, "", lgo::std_white, lgo::size_1D{400});
+    persistent->m_load_easy_status.clear();
+    for (std::size_t i{}; i < load_easy_count; ++i)
+        persistent->m_load_easy_status.push_back(state->add_object_shared<lgo::text_line_scroll_std_t>(
+            lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, "", lgo::std_white, lgo::size_1D{400}));
+    auto change_page = [persistent](int delta)
     {
-        auto div{state_div->add_object_shared<lgo::divx_soft_t>(
-            lgo::depth_range_t{0.0f, 0.5f}, lgo::size_2D{0x100, 0x20}, lgo::std_margin,
-            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
-        for (std::size_t j{0}; j < 4; ++j)
-        {
-            persistent->m_load_easy_status.push_back(div->add_object_shared<lgo::text_line_std_t>(
-                lgo::depth_range_t{0.0f, 0.0f}, "load_easy_status: evaluating...", lgo::std_white,
-                lgo::size_1D{0x100}));
-        }
-    }
+        const auto count{(load_easy_count + persistent->m_diagnostics_page_size - 1) /
+                         persistent->m_diagnostics_page_size};
+        persistent->m_diagnostics_page = (persistent->m_diagnostics_page + count + delta) % count;
+        persistent->show_diagnostics(persistent->m_diagnostics_visible);
+    };
+    persistent->m_diagnostics_previous = state->add_object_shared<lgo::button_classic_std_t>(
+        lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, [=] { change_page(-1); }, "上一頁");
+    persistent->m_diagnostics_next = state->add_object_shared<lgo::button_classic_std_t>(
+        lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, [=] { change_page(1); }, "下一頁");
+    persistent->m_diagnostics_page_text = state->add_object_shared<lgo::text_line_std_t>(
+        lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, "", lgo::std_white, lgo::size_1D{400});
+    persistent->layout_diagnostics(work_div->get_pos(), work_div->get_size());
 
     *progress_column = work_div->add_object_shared<lgo::divy_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, lgo::size_2D{0x100, work_div->space_y(lgo::std_margin).x},
+        storage_content_depth, lgo::size_2D{0x100, work_div->space_y(lgo::std_margin).x},
         lgo::std_margin, lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::bottom}, true);
     load_state->m_progress_column = *progress_column;
     auto column_line = work_div->add_object_shared<lgo::std_liney_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, work_div->space_y(lgo::std_margin), lgo::std_white);
+        storage_content_depth, work_div->space_y(lgo::std_margin), lgo::std_white);
     auto viewer_div{work_div->add_object_shared<lgo::divy_soft_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, work_div->space_2D(lgo::std_margin), lgo::std_margin,
+        storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::std_margin,
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
 
     persistent->m_reset_view = [viewer_div, persistent]
@@ -732,7 +734,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             });
     };
     menu_right->add_object<lgo::button_classic_std_t>(
-        lgo::depth_range_t{0, .5f},
+        storage_content_depth,
         [=]
         {
             if (load_state->m_session)
@@ -743,18 +745,18 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             persistent->m_refresh();
         },
         "重新整理");
-    menu_right->add_object<lgo::button_classic_std_t>(lgo::depth_range_t{0, .5f}, load_state->m_settings_page,
+    menu_right->add_object<lgo::button_classic_std_t>(storage_content_depth, load_state->m_settings_page,
                                                       "設定");
     menu_right->add_object<lgo::button_classic_std_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, std::bind(&folder_create_callback, engine, state, pos), "新增資料夾");
+        storage_content_depth, std::bind(&folder_create_callback, engine, state, pos), "新增資料夾");
     menu_right->add_object<lgo::button_classic_std_t>(
-        lgo::depth_range_t{0.0f, 0.5f}, [load_state, blob_queue, pos]
+        storage_content_depth, [load_state, blob_queue, pos]
         { folder_upload_callback(load_state, blob_queue, *pos); }, "上傳資料夾");
     menu_right->add_object<lgo::button_classic_std_t>(
-        lgo::depth_range_t{0.0f, 0.5f},
+        storage_content_depth,
         [load_state, blob_queue, pos] { file_upload_callback(load_state, blob_queue, *pos); }, "上傳檔案");
     menu_right->add_object<lgo::button_classic_std_t>(
-        lgo::depth_range_t{0.0f, 0.5f},
+        storage_content_depth,
         std::bind(&delete_all_callback, center_div, *progress_column, load_state), "清除");
     // Weak references keep the engine callback from retaining an obsolete UI after clear_state().
     engine->callback_window_resize_set(
@@ -762,7 +764,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
          header = std::weak_ptr{header_line}, work = std::weak_ptr{work_div},
          status = std::weak_ptr{state_div}, progress = std::weak_ptr{*progress_column},
          separator = std::weak_ptr{column_line}, viewer = std::weak_ptr{viewer_div},
-         center = std::weak_ptr{center_div}](lgo::size_2D size)
+         center = std::weak_ptr{center_div}, persistent](lgo::size_2D size)
         {
             auto main_div{main.lock()};
             auto menu_left{left.lock()};
@@ -789,6 +791,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto work_size{main_div->space_2D(lgo::std_margin)};
             work_size.y += work_div->get_size().y;
             work_div->set_size(work_size);
+            persistent->layout_diagnostics(work_div->get_pos(), work_div->get_size());
             const auto height{work_div->space_y(lgo::std_margin).x};
             state_div->set_size(lgo::size_2D{state_div->get_size().x, height});
             progress_column->set_size(lgo::size_2D{progress_column->get_size().x, height});
@@ -803,6 +806,57 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     glfwSetWindowSizeLimits(engine->window_get(), 800, 600, GLFW_DONT_CARE, GLFW_DONT_CARE);
     list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos);
     return;
+}
+
+auto GUI_persistent_t::layout_diagnostics(lgo::pos_2D pos, lgo::size_2D size) -> void
+{
+    m_diagnostics_backdrop->set_pos(pos);
+    m_diagnostics_backdrop->set_size(size);
+    constexpr std::int64_t gap{16};
+    const auto columns{std::max<std::int64_t>(1, (size.x - gap) / 360)};
+    const auto width{(size.x - gap) / columns - gap};
+    const auto row_height{m_load_easy_status.front()->get_size().y + 8};
+    const auto rows_available{std::max<std::int64_t>(1, (size.y - 112) / row_height)};
+    const auto rows_needed{(static_cast<std::int64_t>(load_easy_count) + columns - 1) / columns};
+    const auto rows{std::min(rows_available, rows_needed)};
+    m_diagnostics_summary->set_pos({pos.x + gap, pos.y + gap});
+    m_diagnostics_summary->set_size({size.x - 2 * gap, m_diagnostics_summary->get_size().y});
+    m_diagnostics_page_size = columns * rows;
+    m_diagnostics_page = std::min(m_diagnostics_page, (load_easy_count - 1) / m_diagnostics_page_size);
+    for (std::size_t i{}; i < m_load_easy_status.size(); ++i)
+    {
+        auto& label{m_load_easy_status[i]};
+        const auto slot{i % m_diagnostics_page_size};
+        label->set_pos({pos.x + gap + static_cast<std::int64_t>(slot / rows) * (width + gap),
+                        pos.y + 64 + static_cast<std::int64_t>(slot % rows) * row_height});
+        label->set_size({width, label->get_size().y});
+    }
+    const auto footer_y{pos.y + size.y - 40};
+    m_diagnostics_previous->set_pos({pos.x + gap, footer_y});
+    m_diagnostics_next->set_pos({pos.x + gap + 112, footer_y});
+    m_diagnostics_page_text->set_pos({pos.x + gap + 240, footer_y});
+    show_diagnostics(m_diagnostics_visible);
+}
+
+auto GUI_persistent_t::show_diagnostics(bool show) -> void
+{
+    m_diagnostics_visible = show;
+    const auto pages{(load_easy_count + m_diagnostics_page_size - 1) / m_diagnostics_page_size};
+    m_diagnostics_page_text->set_text(std::format("F3 連線狀態  {}/{}", m_diagnostics_page + 1, pages), false);
+    m_diagnostics_summary->set_text(m_frame_rate->get_text() + "  |  " +
+        m_blob_queue_cycle_rate->get_text() + "  |  " + m_blob_queue_count->get_text(), false);
+    for (auto& object : std::vector<std::shared_ptr<lgo::GUI_object_t>>{
+             m_diagnostics_backdrop, m_diagnostics_summary, m_diagnostics_page_text,
+             m_diagnostics_previous, m_diagnostics_next})
+        if (show)
+            object->show();
+        else
+            object->hide();
+    for (std::size_t i{}; i < m_load_easy_status.size(); ++i)
+        if (show && i / m_diagnostics_page_size == m_diagnostics_page)
+            m_load_easy_status[i]->show();
+        else
+            m_load_easy_status[i]->hide();
 }
 
 GUI_persistent_t::~GUI_persistent_t()

@@ -123,6 +123,11 @@ try:
             ImageGrab.grab().save('/tmp/storage-' + name + '.png')
         except ImportError:
             pass
+    run('keydown', 'F3')
+    time.sleep(.3)
+    capture('f3-desktop')
+    run('keyup', 'F3')
+    time.sleep(.3)
     click(1064, 24)  # Settings
     capture('settings-dialog')
     click(936, 740)  # Cancel

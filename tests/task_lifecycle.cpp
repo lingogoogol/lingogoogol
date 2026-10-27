@@ -3,6 +3,7 @@ import std;
 import lgo.io;
 import lgo.math;
 import lgo.GUI;
+import external.GLFW;
 import storage.http;
 import storage.google;
 import storage.kernel;
@@ -146,6 +147,40 @@ int main(int argc, char** argv)
         }
         else if (phase == "features")
         {
+            const auto original_panel_size{persistent.m_diagnostics_backdrop->get_size()};
+            glfwSetWindowSize(engine.window_get(), 800, 600);
+            for (int i{}; i < 10; ++i)
+                pump();
+            check(persistent.m_diagnostics_backdrop->get_size().x < original_panel_size.x,
+                  "Window resize did not relayout the F3 panel.");
+            glfwSetWindowSize(engine.window_get(), 1536, 1024);
+            for (int i{}; i < 10; ++i)
+                pump();
+            // Every visible diagnostic cell must fit, at both desktop sizes.
+            for (auto size : {lgo::size_2D{1536, 940}, lgo::size_2D{768, 516}})
+            {
+                const lgo::pos_2D origin{16, 64};
+                persistent.layout_diagnostics(origin, size);
+                for (std::size_t i{}; i < std::min(load_easy_count, persistent.m_diagnostics_page_size); ++i)
+                {
+                    const auto& label{persistent.m_load_easy_status[i]};
+                    const auto a{label->get_pos()};
+                    const auto extent{label->get_size()};
+                    check(a.x >= origin.x && a.y >= origin.y &&
+                              a.x + extent.x <= origin.x + size.x &&
+                              a.y + extent.y <= origin.y + size.y - 40,
+                          "F3 diagnostic cell extends outside its panel.");
+                    for (std::size_t j{}; j < i; ++j)
+                    {
+                        const auto b{persistent.m_load_easy_status[j]->get_pos()};
+                        const auto other{persistent.m_load_easy_status[j]->get_size()};
+                        check(a.x >= b.x + other.x || b.x >= a.x + extent.x ||
+                                  a.y >= b.y + other.y || b.y >= a.y + extent.y,
+                              "F3 diagnostics overlap.");
+                    }
+                }
+            }
+            persistent.show_diagnostics(false);
             std::string utf8;
             lgo::text_line_std_input_t::constraint_default(&utf8, U'清');
             lgo::text_line_std_input_t::constraint_default(&utf8, U'除');

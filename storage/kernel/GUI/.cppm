@@ -6,12 +6,16 @@ import std;
 
 import external.curl;
 import lgo.GUI;
+import lgo.math.vec;
 
 import storage.http;
 import storage.google;
 import storage.kernel.load;
 
 export {
+    // Divs position children but do not transform their depth ranges. Keep
+    // ordinary content behind diagnostics (.16-.19) and modal dialogs (<.14).
+    constexpr lgo::depth_range_t storage_content_depth{.2f, .7f};
     struct easy_status_t
     {
         std::size_t m_text_index{};
@@ -44,7 +48,15 @@ export {
         std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
         std::shared_ptr<lgo::text_line_std_t> m_blob_queue_cycle_rate{};
         std::shared_ptr<lgo::text_line_std_t> m_blob_queue_count{};
-        std::vector<std::shared_ptr<lgo::text_line_std_t>> m_load_easy_status{};
+        std::vector<std::shared_ptr<lgo::text_line_scroll_std_t>> m_load_easy_status{};
+        std::shared_ptr<lgo::rect_t> m_diagnostics_backdrop;
+        std::shared_ptr<lgo::text_line_scroll_std_t> m_diagnostics_summary;
+        std::shared_ptr<lgo::button_classic_std_t> m_diagnostics_previous, m_diagnostics_next;
+        std::shared_ptr<lgo::text_line_std_t> m_diagnostics_page_text;
+        std::size_t m_diagnostics_page{}, m_diagnostics_page_size{64};
+        bool m_diagnostics_visible{};
+        auto layout_diagnostics(lgo::pos_2D pos, lgo::size_2D size) -> void;
+        auto show_diagnostics(bool show) -> void;
         // Handle ownership and status belong to this GUI/worker pair, never static storage.
         std::vector<google_easy_t> m_easy_idle{};
         std::map<CURL*, easy_status_t> m_easy_status{};
