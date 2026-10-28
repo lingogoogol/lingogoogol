@@ -170,6 +170,7 @@ export namespace lgo
     {
     private:
         button_template_t<t_type> m_button{};
+        bool m_enabled{true};
     public:
         button_t() = default;
         template<typename... u_arg>
@@ -183,6 +184,8 @@ export namespace lgo
             u_arg&&... arg
         );
 
+        auto set_enabled(bool enabled) -> void;
+        auto enabled() const -> bool { return m_enabled; }
         auto set_pos(pos_2D pos) -> void override;
         auto set_size(size_2D size) -> void override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
@@ -204,8 +207,20 @@ export namespace lgo
     )
     :
         t_type{ engine, depth_tracker, depth_range, pos, std::forward<u_arg>(arg)... },
-        m_button{ engine, depth_tracker, depth_range, callback, static_cast<t_type*>(this) }
+        m_button{ engine, depth_tracker, depth_range,
+            [this, callback = std::move(callback)] { if (m_enabled) callback(); }, static_cast<t_type*>(this) }
     {}
+
+    template<typename t_type>
+    auto button_t<t_type>::set_enabled(bool enabled) -> void
+    {
+        std::unique_lock lock{this->m_mutex};
+        if (m_enabled == enabled) return;
+        m_enabled = enabled;
+        if (!enabled) m_button.hide();
+        t_type::button_enabled(enabled);
+        if (enabled && this->status() == this->shown) m_button.show();
+    }
 
     template<typename t_type>
     auto button_t<t_type>::set_pos(pos_2D pos) -> void
@@ -245,7 +260,7 @@ export namespace lgo
             return;
         }
         std::unique_lock lock{ this->m_mutex };
-        m_button.show();
+        if (m_enabled) m_button.show();
         t_type::show_impl(false);
         this->show_end(base);
         return;
@@ -286,6 +301,7 @@ export namespace lgo
 
         auto depth_range_get() const -> depth_range_t;
 
+        auto button_enabled(bool enabled) -> void;
         auto button_move(pos_2D) -> void;
         auto button_leave() -> void;
         auto button_left_click(pos_2D) -> void;
@@ -313,6 +329,12 @@ export namespace lgo
     auto button_text_impl_t<t_text>::depth_range_get() const -> depth_range_t
     {
         return t_text::depth_range_get();
+    }
+
+    template<typename t_text>
+    auto button_text_impl_t<t_text>::button_enabled(bool enabled) -> void
+    {
+        t_text::set_color(enabled ? m_color : std_dark_gray);
     }
 
     template<typename t_text>
@@ -374,6 +396,7 @@ export namespace lgo
         auto depth_range_get() const -> depth_range_t;
         virtual auto log(std::uint32_t tab_count) const -> void override;
         
+        auto button_enabled(bool enabled) -> void;
         auto button_move(pos_2D) -> void;
         auto button_leave() -> void;
         auto button_left_click(pos_2D) -> void;

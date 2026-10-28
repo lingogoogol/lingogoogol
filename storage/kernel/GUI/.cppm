@@ -25,6 +25,7 @@ export {
     struct GUI_persistent_t
     {
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
+        std::shared_ptr<lgo::button_classic_std_t> m_paste_button;
         std::function<void()> m_refresh;
         std::function<void()> m_reset_view;
         std::function<void(storage_settings_t)> m_apply_settings;

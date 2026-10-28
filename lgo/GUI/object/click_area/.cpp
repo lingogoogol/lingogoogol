@@ -235,6 +235,9 @@ namespace lgo
         m_engine->callback_mouse_move_remove(m_callback_mouse_move_key);
         m_engine->callback_mouse_button_remove(m_callback_mouse_button_key);
         m_depth_tracker->remove(m_depth_id);
+        // Hidden/disabled buttons must not retain a press for a later release.
+        m_inside = false;
+        m_clicked_inside = false;
         hide_end(base);
         return;
     }

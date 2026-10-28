@@ -78,6 +78,10 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             persistent->m_directory_status->set_text("目錄更新失敗");
         entry = persistent->m_listings.erase(entry);
     }
+    if (persistent->m_paste_button)
+        persistent->m_paste_button->set_enabled(persistent->m_clipboard &&
+            persistent->m_clipboard->session == load_state->m_session &&
+            load_state->m_session && !load_state->m_session->clearing && !persistent->m_switching);
     collect_finished_tasks(*load_state, *multi);
     for (auto entry{load_state->m_task_list.begin()}; entry != load_state->m_task_list.end();)
     {
@@ -957,9 +961,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 };
             });
     };
-    menu_right->add_object_shared<progress_button_t>(
-        storage_content_depth, [=] { paste_dialog(engine, persistent, load_state, *pos); }, "貼上", lgo::std_white, lgo::size_1D{32});
-
+    persistent->m_paste_button = menu_right->add_object_shared<lgo::button_classic_std_t>(
+        storage_content_depth, [=] { paste_dialog(engine, persistent, load_state, *pos); }, "貼上");
+    persistent->m_paste_button->set_enabled(false);
     menu_right->add_object<lgo::button_classic_std_t>(
         storage_content_depth,
         [=]

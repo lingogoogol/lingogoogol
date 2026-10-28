@@ -98,6 +98,13 @@ namespace lgo
         return m_rect.depth_range_get();
     }
 
+    auto button_classic_impl_t::button_enabled(bool enabled) -> void
+    {
+        m_rect.content_set_color(std_black);
+        m_rect.border_set_color(enabled ? std_white : std_dark_gray);
+        m_text.set_color(enabled ? std_white : std_dark_gray);
+    }
+
     auto button_classic_impl_t::button_move(pos_2D) -> void
     {
         m_rect.border_set_color(std_yellow);
