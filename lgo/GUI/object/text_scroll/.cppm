@@ -146,7 +146,7 @@ export namespace lgo
             m_scroll_key = this->m_engine->callback_mouse_scroll_add([this](size_2D delta)
             {
                 if (hit(this->m_engine->cursor_pos_get()))
-                    set_scroll_offset(scroll_offset() - scroll_speed * (delta.x ? delta.x : delta.y));
+                    set_scroll_offset(scroll_offset() - scroll_speed * delta.x);
             });
             // Capture movement until release, even outside the track/viewport.
             m_move_key = this->m_engine->callback_mouse_move_add([this](pos_2D pos)

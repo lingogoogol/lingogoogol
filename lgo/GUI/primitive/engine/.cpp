@@ -111,6 +111,12 @@ namespace lgo {
     {
         auto ptr{ reinterpret_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
         if (ptr->m_recovering || ptr->m_refresh_error) return;
+        if (x == 0 && y != 0 && (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                                glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS))
+        {
+            x = y;
+            y = 0;
+        }
         try
         {
             call_callback

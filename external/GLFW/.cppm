@@ -46,6 +46,10 @@ constexpr auto GLFW_KEY_C_export{ GLFW_KEY_C };
 constexpr auto GLFW_KEY_V_export{ GLFW_KEY_V };
 #undef GLFW_KEY_V
 
+constexpr auto GLFW_KEY_LEFT_SHIFT_export{ GLFW_KEY_LEFT_SHIFT };
+#undef GLFW_KEY_LEFT_SHIFT
+constexpr auto GLFW_KEY_RIGHT_SHIFT_export{ GLFW_KEY_RIGHT_SHIFT };
+#undef GLFW_KEY_RIGHT_SHIFT
 
 export
 {
@@ -105,6 +109,8 @@ export
     constexpr auto GLFW_RESIZABLE{ GLFW_RESIZABLE_export };
     constexpr auto GLFW_FALSE{ GLFW_FALSE_export };
     constexpr auto GLFW_MOUSE_BUTTON_LEFT{ GLFW_MOUSE_BUTTON_LEFT_export };
+    constexpr auto GLFW_KEY_LEFT_SHIFT{ GLFW_KEY_LEFT_SHIFT_export };
+    constexpr auto GLFW_KEY_RIGHT_SHIFT{ GLFW_KEY_RIGHT_SHIFT_export };
     constexpr auto GLFW_KEY_F3{ GLFW_KEY_F3_export };
     constexpr auto GLFW_PRESS{ GLFW_PRESS_export };
     constexpr auto GLFW_RELEASE{ GLFW_RELEASE_export };
