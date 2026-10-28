@@ -219,7 +219,15 @@ export namespace lgo
         auto get_margin() const -> size_1D override { return m_margin; }
         auto set_pos(pos_2D pos) -> void override { m_pos = pos; layout(); }
         auto set_size(size_2D size) -> void override
-        { m_size = {std::max<std::int64_t>(0,size.x),std::max<std::int64_t>(0,size.y)}; layout(); GUI_object_t::set_size(m_size); }
+        {
+            size = {std::max<std::int64_t>(0,size.x),std::max<std::int64_t>(0,size.y)};
+            // Div parents compare get_size() with the requested size to update
+            // occupied space and sibling positions. Notify before changing it,
+            // as other GUI controls do, or repeated resizing corrupts layout.
+            GUI_object_t::set_size(size);
+            m_size = size;
+            layout();
+        }
         auto view_size() const -> size_2D
         { return {std::max<std::int64_t>(0,m_size.x - (y_enabled() ? bar_space : 0)),
                   std::max<std::int64_t>(0,m_size.y - (x_enabled() ? bar_space : 0))}; }

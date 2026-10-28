@@ -1039,9 +1039,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 0, 96), persistent->m_directory_status->get_size().y});
             header_line->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, header_line->get_size().y});
-            // space_2D() reports unused space; add back the existing child along the flow axis.
+            // space_2D() reserves a gap for another child. These are replacements
+            // of the last child, so reclaim both its size and that extra gap.
             auto work_size{main_div->space_2D(lgo::std_margin)};
-            work_size.y += work_div->get_size().y;
+            work_size.y += work_div->get_size().y + lgo::std_margin.x;
             work_div->set_size(work_size);
             persistent->layout_diagnostics(work_div->get_pos(), work_div->get_size());
             const auto height{work_div->space_y(lgo::std_margin).x};
@@ -1049,7 +1050,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             progress_column->set_size(lgo::size_2D{progress_column->get_size().x, height});
             column_line->set_size(lgo::size_2D{column_line->get_size().x, height});
             auto viewer_size{work_div->space_2D(lgo::std_margin)};
-            viewer_size.x += viewer_div->get_size().x;
+            viewer_size.x += viewer_div->get_size().x + lgo::std_margin.x;
             viewer_div->set_size(viewer_size);
             auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
             contents->set_size({viewer_div->view_size().x,contents->get_size().y});
