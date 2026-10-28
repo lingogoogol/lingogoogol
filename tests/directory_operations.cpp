@@ -3,6 +3,7 @@ import std;
 import lgo.io;
 import lgo.math;
 import lgo.GUI;
+import external.GLFW;
 import storage.http;
 import storage.google;
 import storage.kernel;
@@ -266,6 +267,38 @@ int main(int argc, char** argv)
             pos="nav-5"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-5"; });
             check(names()==std::vector<std::string>{"根目錄","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
+            const auto original_pos{viewer->get_pos()}, original_crumb_pos{crumbs->get_pos()};
+            const auto original_size{viewer->get_size()};
+            for (int cycle{}; cycle<2; ++cycle)
+            {
+                for (const auto size : {lgo::size_2D{800,600}, lgo::size_2D{1200,900},
+                                       lgo::size_2D{900,700}, lgo::size_2D{1536,1024}})
+                {
+                    // Resize through Win32/GLFW: changing only the X11 wrapper
+                    // with xdotool does not reliably deliver WM_SIZE under Wine.
+                    glfwSetWindowSize(engine.window_get(),static_cast<int>(size.x),static_cast<int>(size.y));
+                    wait([&] { return engine.get_window_size().x==size.x && engine.get_window_size().y==size.y; });
+                    check(crumbs->get_pos().x==viewer->get_pos().x && crumbs->get_size().x==viewer->get_size().x,
+                          "Breadcrumb and contents widths diverged after resize.");
+                    const auto at{viewer->get_pos()};
+                    const auto extent{viewer->get_size()};
+                    if (!(at.x>=0 && at.y>=crumbs->get_pos().y+crumbs->get_size().y &&
+                          extent.x>100 && extent.y>100 && at.x+extent.x<=size.x && at.y+extent.y<=size.y))
+                        throw std::runtime_error{std::format(
+                            "Resize to {}x{} left viewport at ({},{}) sized {}x{}, breadcrumbs at ({},{}) sized {}x{}.",
+                            size.x,size.y,at.x,at.y,extent.x,extent.y,crumbs->get_pos().x,crumbs->get_pos().y,
+                            crumbs->get_size().x,crumbs->get_size().y)};
+                    input(json::array()); // Check rendered path pixels at every size.
+                }
+                if (!(viewer->get_pos().x==original_pos.x && viewer->get_pos().y==original_pos.y &&
+                      viewer->get_size().x==original_size.x && viewer->get_size().y==original_size.y &&
+                      crumbs->get_pos().x==original_crumb_pos.x && crumbs->get_pos().y==original_crumb_pos.y))
+                    throw std::runtime_error{std::format(
+                        "Repeated resizing changed viewport ({},{}) {}x{} to ({},{}) {}x{}, breadcrumbs ({},{}) to ({},{}).",
+                        original_pos.x,original_pos.y,original_size.x,original_size.y,
+                        viewer->get_pos().x,viewer->get_pos().y,viewer->get_size().x,viewer->get_size().y,
+                        original_crumb_pos.x,original_crumb_pos.y,crumbs->get_pos().x,crumbs->get_pos().y)};
+            }
             input(json::array());
             persistent.m_reset_view();
             check(!crumbs->content() && persistent.m_breadcrumb_folder.empty(),"Reset retained an old account path.");

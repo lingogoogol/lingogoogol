@@ -61,6 +61,22 @@ int main()
             { return std::make_shared<lgo::divy_soft_t>(&engine,&depth,range,lgo::pos_2D{},size,lgo::size_1D{0},alignment); };
             auto paint = [&](auto contents, lgo::size_2D size, lgo::color_t color)
             { return contents->template add_object_ghost_shared<lgo::rect_t>(background,size,color); };
+            // A viewport participates in div layout just like any other child.
+            // Its size notification must expose the old size to the parent.
+            {
+                auto parent{body({400,300})};
+                auto scroll{parent->add_object_shared<lgo::scroll_t>(range,
+                    lgo::size_2D{200,100}, lgo::scroll_axes_t::y, lgo::size_1D{0})};
+                auto following{parent->add_object_shared<lgo::rect_t>(background,
+                    lgo::size_2D{100,20}, lgo::std_blue)};
+                const auto length{parent->len().x}, below{following->get_pos().y};
+                scroll->set_size({220,160});
+                check(parent->len().x==length+60 && following->get_pos().y==below+60,
+                      "Resizing a viewport did not update its parent's occupied length and following child.");
+                scroll->set_size({200,100});
+                check(parent->len().x==length && following->get_pos().y==below,
+                      "Restoring a viewport's size left layout drift.");
+            }
             auto pump = [&]
             {
                 check(!engine.message_loop(),"Window unexpectedly closed.");
