@@ -364,6 +364,23 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 if process.returncode:
                     shutil.copytree(test, '/tmp/storage-directory-failed', dirs_exist_ok=True)
                     raise RuntimeError('Directory GUI: ' + stderr)
+            server.blobs = {'root': blob('root', 'null', [entry('nav-0')])}
+            for i in range(8):
+                server.blobs[f'nav-{i}'] = blob(f'nav-{i}-' + 'long-folder-name-' * 5,
+                    'root' if i == 0 else f'nav-{i-1}', [entry(f'nav-{i+1}')] if i < 7 else [])
+            process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
+                'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'test.exe'), 'breadcrumbs'],
+                cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+            try:
+                stdout, stderr = process.communicate(timeout=60)
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+            print(stdout, end='', flush=True)
+            if process.returncode:
+                raise RuntimeError('Breadcrumb GUI: ' + stdout + stderr)
             server.blobs = {'root': blob('root', 'null', [entry(f'folder-{i:02}', name=f'folder-{i:02}-' + 'long-name-' * 20) for i in range(40)])}
             server.blobs.update({f'folder-{i:02}': blob(f'folder-{i:02}', 'root', []) for i in range(40)})
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',

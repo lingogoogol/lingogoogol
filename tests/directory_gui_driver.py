@@ -8,6 +8,43 @@ import time
 from urllib.request import urlopen
 from PIL import ImageGrab
 
+if len(sys.argv) > 2 and sys.argv[2] == 'breadcrumbs':
+    app = subprocess.Popen(['wine64', sys.argv[1], 'breadcrumbs'])
+    step = 0
+    try:
+        while app.poll() is None:
+            path = Path('nav-input.json')
+            if path.exists():
+                value = json.loads(path.read_text())
+                if value['step'] > step:
+                    window = subprocess.check_output(['xdotool','search','--onlyvisible','--name',
+                        'Directory operation regression'], text=True).splitlines()[0]
+                    subprocess.run(['xdotool','windowfocus','--sync',window],check=True)
+                    for kind,*args in value['commands']:
+                        commands={'move':['mousemove','--window',window], 'wheel':['click'],
+                            'down':['mousedown','1'], 'up':['mouseup','1'], 'click':['click','1'],
+                            'keydown':['keydown'], 'keyup':['keyup'], 'resize':['windowsize','--sync',window]}
+                        subprocess.run(['xdotool',*commands[kind],*map(str,args)],check=True)
+                        time.sleep(.08)
+                    time.sleep(.15)
+                    if value.get('separators'):
+                        geometry = dict(line.split('=',1) for line in subprocess.check_output(
+                            ['xdotool','getwindowgeometry','--shell',window],text=True).splitlines())
+                        x,y,width,height=(int(geometry[key]) for key in ('X','Y','WIDTH','HEIGHT'))
+                        image=ImageGrab.grab().crop((x,y,x+width,y+height)).convert('RGB')
+                        image.save('/tmp/storage-breadcrumb-separators-' + str(value['step']) + '.png')
+                        for box in value['separators']:
+                            ink=sum(min(pixel)>180 and max(pixel)-min(pixel)<8 for pixel in image.crop(box).getdata())
+                            assert ink>2, 'Breadcrumb > has no visible white glyph pixels: ' + str(box)
+                    step = value['step']
+                    Path('nav-ack').write_text(str(step))
+            time.sleep(.02)
+        sys.exit(app.wait())
+    finally:
+        if app.poll() is None:
+            app.kill()
+            app.wait()
+
 app = subprocess.Popen(['wine64', sys.argv[1]])
 window = None
 
@@ -97,19 +134,19 @@ try:
         # events subsequently move that name without selecting another row.
         def thumb_top():
             image = screenshot('scroll-sync')
-            return next((y for y in range(58, 1016) if image.getpixel((1526, y))[0] > 180), None)
+            return next((y for y in range(98, 1016) if image.getpixel((1526, y))[0] > 180), None)
         # Await rendered state rather than assuming that Lavapipe has finished
         # rebuilding thousands of deferred glyphs after an arbitrary delay.
-        wait_for(lambda: thumb_top() == 58, 'Directory scrollbar did not appear.')
-        run('mousemove', '--window', window, 400, 70)
+        wait_for(lambda: thumb_top() == 98, 'Directory scrollbar did not appear.')
+        run('mousemove', '--window', window, 400, 110)
         time.sleep(.3)
         run('click', '--repeat', '3', '--delay', '80', '5')
-        wait_for(lambda: (thumb_top() or 0) >= 80, 'Vertical wheel did not update the viewport.')
-        before = screenshot('scroll-vertical').crop((285,60,1500,94))
+        wait_for(lambda: (thumb_top() or 0) >= 120, 'Vertical wheel did not update the viewport.')
+        before = screenshot('scroll-vertical').crop((285,100,1500,134))
         run('click', '7')
-        wait_for(lambda: screenshot('scroll-horizontal').crop((285,60,1500,94)).tobytes() != before.tobytes(),
+        wait_for(lambda: screenshot('scroll-horizontal').crop((285,100,1500,134)).tobytes() != before.tobytes(),
                  'Horizontal name scrolling did not redraw.')
-        click(456, 96)
+        click(456, 136)
         screenshot('scroll-delete-confirm')
         click(1056, 584)
         wait_for(lambda: 'folder-01' not in status(), 'Wheel axes selected the wrong directory row.')
@@ -118,7 +155,7 @@ try:
         # Let the mocked refresh finish before beginning the native drag.
         time.sleep(2)
         # Drag the thin vertical thumb down, beyond the list, then release.
-        run('mousemove', '--window', window, 1526, 90)
+        run('mousemove', '--window', window, 1526, 130)
         time.sleep(.3)
         run('mousedown', '1')
         time.sleep(2)
@@ -161,12 +198,12 @@ try:
     image = screenshot('actions')
     for x in (330, 380, 430):
         assert sum(b > 240 and 150 < r < 220 and abs(r-g) < 3
-                   for r,g,b in (image.getpixel((x,y)) for y in range(98,125))) >= 18, 'Missing light-blue action separator.'
-    click(356, 110)  # Cut records a selection; it must not mutate Drive.
+                   for r,g,b in (image.getpixel((x,y)) for y in range(138,165))) >= 18, 'Missing light-blue action separator.'
+    click(356, 150)  # Cut records a selection; it must not mutate Drive.
     image = screenshot('paste-enabled')
     assert image.getpixel((808,16))[0] > 240, 'Cut did not enable the standard-size paste button.'
     assert json.loads(status()['file']['name'])['parent'] == 'root'
-    click(450, 152)  # Browse the destination folder.
+    click(450, 192)  # Browse the destination folder.
     time.sleep(.6)
     click(880, 24)  # Paste opens a confirmation for the visible folder.
     screenshot('paste-cut')
@@ -187,13 +224,13 @@ try:
     screenshot('copy-progress')
     copied = [value['id'] for value in json.loads(status()['destination']['description']) if value['id'] != 'file'][0]
     assert json.loads(status()[copied]['name'])['parent'] == 'destination'
-    click(340, 70)  # Return to root while retaining the copy selection.
+    click(310, 70)  # Return to root while retaining the copy selection.
     time.sleep(.6)
-    click(456, 110)  # Delete the first folder, including both file instances.
+    click(456, 150)  # Delete the first folder, including both file instances.
     screenshot('delete')
     click(936, 584)
     assert 'destination' in status() and 'file' in status(), 'Cancelled deletion changed Drive.'
-    click(456, 110)
+    click(456, 150)
     click(1056, 584)
     wait_for(lambda: 'destination' not in status() and 'file' not in status() and copied not in status(), 'Recursive deletion did not finish.')
     glow('glow', 1000, 900)

@@ -171,6 +171,105 @@ int main(int argc, char** argv)
             check(std::chrono::steady_clock::now()-stopped<1s,"Queued coordinator blocked destruction without GUI dispatch.");
             journal->finish();
         }
+        else if (phase == "breadcrumbs")
+        {
+            auto main{gui.get_object_shared<lgo::divy_hard_t>(0)};
+            lgo::scroll_t* viewer{};
+            std::function<void(lgo::GUI_object_t&)> find_viewer = [&](auto& object)
+            {
+                if (auto scroll{dynamic_cast<lgo::scroll_t*>(&object)}; scroll && scroll->axes()==lgo::scroll_axes_t::y)
+                    viewer=scroll;
+                object.visit_children(find_viewer);
+            };
+            find_viewer(*main);
+            check(viewer,"Missing directory contents viewport.");
+            auto crumbs{persistent.m_breadcrumbs};
+            unsigned step{};
+            auto input = [&](json commands)
+            {
+                auto separators = json::array();
+                if (commands.empty() && crumbs->content()) crumbs->content()->visit_children([&](auto& child)
+                {
+                    if (auto text{dynamic_cast<lgo::text_line_t*>(&child)}; text && text->get_text()==">")
+                    {
+                        const auto visible{lgo::clip_rect_t{crumbs->get_pos(),crumbs->view_size()}.intersect(
+                            {text->get_pos(),text->get_size()})};
+                        if (visible.size.x>0 && visible.size.x==text->get_size().x &&
+                            visible.size.y==text->get_size().y)
+                            separators.push_back({visible.pos.x,visible.pos.y,
+                                visible.pos.x+visible.size.x,visible.pos.y+visible.size.y});
+                    }
+                });
+                storage_atomic_write("nav-input.json", json{{"step",++step},{"commands",commands},
+                    {"separators",separators}}.dump());
+                wait([&] { return std::filesystem::exists("nav-ack") && storage_read("nav-ack")==std::to_string(step); });
+            };
+            auto names = [&]
+            {
+                std::vector<std::string> result;
+                if (crumbs->content()) crumbs->content()->visit_children([&](auto& child)
+                {
+                    if (auto button{dynamic_cast<progress_button_t*>(&child)}) result.push_back(button->get_text());
+                    else if (auto text{dynamic_cast<lgo::text_line_t*>(&child)})
+                    {
+                        check(text->get_text()==">","Breadcrumb separator is not >.");
+                        check(text->get_size().x>0 && text->get_clip_size().x>0,
+                              "Breadcrumb separator has zero width and cannot render.");
+                    }
+                });
+                return result;
+            };
+            auto click_crumb = [&](const std::string& name)
+            {
+                lgo::GUI_object_t* button{};
+                crumbs->content()->visit_children([&](auto& child)
+                    { if (auto text{dynamic_cast<progress_button_t*>(&child)}; text && text->get_text()==name) button=text; });
+                check(button,"Missing ancestor button.");
+                const auto bounds{lgo::clip_rect_t{crumbs->get_pos(),crumbs->view_size()}.intersect({button->get_pos(),button->get_size()})};
+                check(bounds.size.x>0 && bounds.size.y>0,"Ancestor button is clipped out.");
+                input({{"move",bounds.pos.x+bounds.size.x/2,bounds.pos.y+bounds.size.y/2},{"click"}});
+            };
+            wait([&] { return persistent.m_breadcrumb_folder=="root"; });
+            pos="nav-7"; persistent.m_refresh();
+            wait([&] { return persistent.m_breadcrumb_folder=="nav-7"; });
+            check(names().size()==9 && names().front()=="根目錄","Direct navigation did not load every actual ancestor.");
+            input(json::array()); // Verify rendered separator pixels before moving the path.
+            check(viewer->get_pos().y>=crumbs->get_pos().y+crumbs->get_size().y &&
+                  crumbs->max_scroll().x>0,"Breadcrumbs are not a separate horizontal viewport above contents.");
+            bool old_button{};
+            std::function<void(lgo::GUI_object_t&)> inspect = [&](auto& object)
+            {
+                if (auto text{dynamic_cast<lgo::text_line_t*>(&object)}; text && text->get_text()=="返回根目錄") old_button=true;
+                object.visit_children(inspect);
+            };
+            inspect(*viewer);
+            check(!old_button,"Old root-return row is still present.");
+            const auto at{crumbs->get_pos()};
+            input({{"move",at.x+100,at.y+8},{"wheel",5}});
+            check(crumbs->scroll_offset().x==0,"Vertical wheel moved breadcrumbs.");
+            input(json::array({{"wheel",7},{"keydown","Shift_L"},{"wheel",5},{"keyup","Shift_L"}}));
+            wait([&] { return !crumbs->scrolling(); });
+            check(crumbs->scroll_offset().x==64 && crumbs->scroll_offset().y==0,"Horizontal/Shift wheel did not move breadcrumbs.");
+            auto thumb{crumbs->scrollbar_pos(true)};
+            input({{"move",thumb.x+2,thumb.y},{"down"},{"move",1530,thumb.y},{"up"}});
+            check(crumbs->scroll_offset().x==crumbs->max_scroll().x,"Breadcrumb thumb did not drag to the end.");
+            const auto parent{names().at(7)};
+            click_crumb(parent);
+            wait([&] { return persistent.m_breadcrumb_folder=="nav-6"; });
+            check(pos=="nav-6" && names().size()==8 && crumbs->scroll_offset().x==0,"Ancestor click did not truncate the path.");
+            input(json::array());
+            click_crumb("根目錄");
+            wait([&] { return persistent.m_breadcrumb_folder=="root"; });
+            check(pos=="root" && names().size()==1,"Root breadcrumb did not navigate.");
+            google_easy_t request;
+            blob_update_name_run(request,"nav-5",json{{"name","moved-parent"},{"parent","root"},{"next","null"}}.dump());
+            pos="nav-5"; persistent.m_refresh();
+            wait([&] { return persistent.m_breadcrumb_folder=="nav-5"; });
+            check(names()==std::vector<std::string>{"根目錄","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
+            input(json::array());
+            persistent.m_reset_view();
+            check(!crumbs->content() && persistent.m_breadcrumb_folder.empty(),"Reset retained an old account path.");
+        }
         else if (phase == "backend")
         {
             engine.device_lost();

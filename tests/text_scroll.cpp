@@ -55,11 +55,32 @@ int main()
                     }
                     check(std::chrono::steady_clock::now() < deadline, "Mouse driver stalled.");
                 }
+                while (line.scrolling())
+                {
+                    check(std::chrono::steady_clock::now()<deadline,"Text scrolling did not settle.");
+                    pump();
+                }
                 for (int i{}; i < 8; ++i) pump();
             };
             input(nlohmann::json::array(), true);
             check(line.get_clip_size().x == 200 && line.get_clip_size().y == 38 && line.scrollbar_size().y == 2,
                   "Single line reserves a vertical scrollbar or lacks a horizontal track.");
+            line.motion_limits_set({400.,100.});
+            bool intermediate{};
+            auto frame{engine.callback_frame_add([&](double)
+                { if (line.scroll_offset()>0 && line.scroll_offset()<32) intermediate=true; })};
+            input({{"move",150,90},{"wheel",7}});
+            engine.callback_frame_remove(frame);
+            check(intermediate,"Text wheel scrolling is not animated.");
+            const auto arrival{std::chrono::steady_clock::now()+5s};
+            while (line.scrolling())
+            {
+                check(std::chrono::steady_clock::now()<arrival,"Text animation did not settle.");
+                pump();
+            }
+            check(line.scroll_offset()==32,"Text animation did not stop at its target.");
+            line.motion_limits_set({});
+            line.set_scroll_offset(0);
             const auto thumb{line.scrollbar_pos()};
             input({{"move", thumb.x + 4, thumb.y + line.scrollbar_size().y / 2}, {"down"}, {"move", 700, 350}, {"up"}}, true);
             check(line.scroll_offset() > 0 && line.get_text_offset().y == 0, "Mouse drag did not scroll horizontally.");

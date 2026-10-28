@@ -98,7 +98,8 @@ class Handler(BaseHTTPRequestHandler):
             if identifier == 'retry-data': return 200, {'description': base64.urlsafe_b64encode(b'ABC').decode()}
             if identifier == 'cancel-file': time.sleep(.5)
             if identifier == 'slow-folder': time.sleep(1)
-            if identifier in ('fast-folder', 'slow-folder'): return 200, {'name':'{"next":"null"}', 'description':'[]'}
+            if identifier in ('fast-folder', 'slow-folder'):
+                return 200, {'name':json.dumps({'name':identifier,'parent':'root','next':'null'}), 'description':'[]'}
             with self.server.lock:
                 self.server.gets[identifier] = self.server.gets.get(identifier,0)+1
                 value = blobs.get(identifier)

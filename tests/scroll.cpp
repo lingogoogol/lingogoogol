@@ -10,10 +10,43 @@ using nlohmann::json;
 auto check(bool value, const char* message) -> void
 { if (!value) throw std::runtime_error{message}; }
 
+auto check_motion() -> void
+{
+    const lgo::motion_limits_t limits{12000.,1600.};
+    for (const auto dt : {.001, .008, .016, .033, .05})
+        for (const auto distance : {1.,32.,1000.,5000.})
+        {
+            lgo::motion_axis_t motion;
+            motion.target = distance;
+            bool braking{};
+            unsigned step{};
+            while (motion.active() && step++ < 10000)
+            {
+                const auto position{motion.position}, velocity{motion.velocity};
+                motion.advance(dt,limits);
+                check(motion.position >= position-1e-6 && motion.position <= distance+1e-6,
+                      "Motion overshot its target.");
+                check(std::abs(motion.velocity) <= limits.speed_max+1e-6 &&
+                      std::abs(motion.velocity-velocity) <= limits.acceleration_max*dt+1e-5,
+                      "Motion exceeded speed or acceleration limits.");
+                if (motion.velocity < velocity) braking = true;
+            }
+            check(!motion.active() && motion.position == distance && (braking || dt >= 2.*std::sqrt(distance/limits.acceleration_max)),
+                  "Motion did not brake and stop exactly at its target.");
+        }
+    lgo::motion_axis_t reverse;
+    reverse.target=1000.;
+    for (int i{}; i<10; ++i) reverse.advance(.016,limits);
+    reverse.target=-120.;
+    for (int i{}; i<1000 && reverse.active(); ++i) reverse.advance(.016,limits);
+    check(!reverse.active() && reverse.position==-120.,"Retargeting did not settle.");
+}
+
 int main()
 {
     try
     {
+        check_motion();
         lgo::init_logfile("logfile/scroll.txt");
         lgo::FreeType_t freetype;
         lgo::font_face_t::freetype_set(&freetype);
@@ -33,6 +66,8 @@ int main()
                 check(!engine.message_loop(),"Window unexpectedly closed.");
                 lgo::text_line_t::pending_load();
             };
+            std::vector<lgo::scroll_t*> scrollers;
+            std::vector<lgo::text_line_scroll_std_t*> text_scrollers;
             unsigned step{};
             auto input = [&](json commands, json clips = json::array())
             {
@@ -46,16 +81,42 @@ int main()
                     { std::ifstream file{"ack"}; unsigned value{}; file>>value; if (value==step) break; }
                     check(std::chrono::steady_clock::now()<deadline,"Input driver stalled.");
                 }
+                while (std::ranges::any_of(scrollers, [](auto scroll) { return scroll->scrolling(); }) ||
+                       std::ranges::any_of(text_scrollers, [](auto scroll) { return scroll->scrolling(); }))
+                {
+                    check(std::chrono::steady_clock::now()<deadline,"Scroll animation did not settle.");
+                    pump();
+                }
                 for (int i{};i<3;++i) pump();
             };
             auto clip = [](int channel,lgo::pos_2D pos,lgo::size_2D size)
             { return json{{"channel",channel},{"box",{pos.x,pos.y,pos.x+size.x,pos.y+size.y}}}; };
             lgo::scroll_t viewport{&engine,&depth,range,{100,80},{240,160},lgo::scroll_axes_t::x};
+            scrollers.push_back(&viewport);
             auto contents{body({600,500})};
             paint(contents,{600,500},lgo::std_red_light);
             viewport.set_content(contents,{10,15}); viewport.show();
             input(json::array(),{clip(0,{100,80},viewport.view_size())});
             check(contents->get_pos().x==110 && contents->get_pos().y==95,"Content origin is not relative to the viewport.");
+            viewport.motion_limits_set({400.,100.});
+            bool intermediate{};
+            auto frame{engine.callback_frame_add([&](double)
+                { if (viewport.scroll_offset().x>0 && viewport.scroll_offset().x<32) intermediate=true; })};
+            input({{"move",150,120},{"wheel",7}});
+            engine.callback_frame_remove(frame);
+            check(intermediate,"Wheel scrolling jumped straight to its destination.");
+            const auto arrival{std::chrono::steady_clock::now()+5s};
+            auto previous{viewport.scroll_offset().x};
+            while (viewport.scrolling())
+            {
+                check(std::chrono::steady_clock::now()<arrival,"Wheel animation never settled.");
+                pump();
+                check(viewport.scroll_offset().x>=previous && viewport.scroll_offset().x<=32,
+                      "Wheel animation reversed or overshot.");
+                previous=viewport.scroll_offset().x;
+            }
+            check(viewport.scroll_offset().x==32,"Wheel animation stopped at the wrong pixel.");
+            viewport.motion_limits_set({});
             viewport.set_scroll_offset({80,50});
             check(viewport.scroll_offset().x==80 && viewport.scroll_offset().y==0,"X-only mode moved vertically.");
             input({{"move",150,120},{"wheel",5}});
@@ -96,9 +157,11 @@ int main()
 
             // A nested XY viewport lives inside an ordinary fixed-size div.
             lgo::scroll_t outer{&engine,&depth,range,{80,70},{320,260},lgo::scroll_axes_t::xy};
+            scrollers.push_back(&outer);
             auto outer_body{body({700,650})}; paint(outer_body,{700,650},lgo::std_red_light);
             auto inner{outer_body->add_object_ghost_shared<lgo::scroll_t>(lgo::depth_range_t{.15f,.6f},
                 lgo::size_2D{160,120},lgo::scroll_axes_t::xy)};
+            scrollers.push_back(inner.get());
             inner->set_pos({40,40});
             auto inner_body{body({400,300})};
             inner_body->add_object_ghost<lgo::rect_t>(lgo::depth_range_t{.4f,.5f},lgo::size_2D{400,300},lgo::std_blue);
@@ -135,6 +198,7 @@ int main()
             std::string long_text;
             for (int i{};i<20;++i) long_text+="巢狀裁切 ABC ";
             auto text{inner_body->add_object_ghost_shared<lgo::text_line_scroll_std_t>(range,long_text,lgo::std_green,lgo::size_1D{400},false)};
+            text_scrollers.push_back(text.get());
             text->set_pos(inner_body->get_pos()+lgo::size_2D{0,60});
             input(json::array(),{clip(1,{120,70},{152,62}),clip(2,{120,70},{152,62}),clip(0,outer.get_pos(),outer.view_size())});
             input({{"move",150,90},{"wheel",7}});
@@ -156,6 +220,38 @@ int main()
             check(!contents->parent_clip(),"Detached contents retained the old viewport's clip chain.");
             contents->set_size({999,999});
             check(viewport.max_scroll().x==0 && viewport.max_scroll().y==0,"Detached content retained a size callback.");
+            {
+                lgo::divy_soft_t animated{&engine,&depth,range,{400,80},{300,350},{0},
+                    {lgo::alignment_x::left,lgo::alignment_y::bottom},true};
+                const auto first{animated.add_object<lgo::rect_t>(background,lgo::size_2D{100,40},lgo::std_blue)};
+                auto second{animated.add_object_shared<lgo::rect_t>(background,lgo::size_2D{100,40},lgo::std_blue)};
+                animated.add_object<lgo::rect_t>(background,lgo::size_2D{100,40},lgo::std_blue);
+                animated.show();
+                check(!animated.smooth_children(),"Div animation is not opt-in.");
+                animated.smooth_children_set(true,{400.,100.});
+                const auto initial{second->get_pos()};
+                const auto length{animated.len()};
+                animated.remove_object(first);
+                const auto shift{length.x-animated.len().x};
+                animated.set_size({300,390});
+                check(animated.children_moving() && second->get_pos().y==initial.y,
+                      "Consecutive layout changes jumped instead of preserving the current position.");
+                animated.set_pos({420,100});
+                check(second->get_pos().y==initial.y+20,"Ancestor translation was eased a second time.");
+                animated.smooth_children_set(false);
+                check(!animated.children_moving() && second->get_pos().y==initial.y+shift+60,
+                      "Disabling smoothing did not finish the accumulated layout target.");
+                animated.smooth_children_set(true);
+                const auto settled{second->get_pos().y};
+                animated.set_size({300,430});
+                animated.hide();
+                animated.set_size({300,450});
+                animated.show();
+                pump();
+                check(!animated.children_moving() && second->get_pos().y==settled+60,
+                      "Hidden layout changes resumed an obsolete animation.");
+                animated.hide();
+            }
         }
         engine.flush(); lgo::text_line_t::free();
         std::println("PASS: X/Y/XY viewports, content origins, clipping, partial button hits, native/Shift wheels, nested routing/edge bubbling, drag capture, resize, deferred glyphs and cleanup");

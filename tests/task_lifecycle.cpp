@@ -160,6 +160,12 @@ int main(int argc, char** argv)
             auto click = [&](const auto& button, auto done)
             {
                 pump();
+                const auto settle_deadline{std::chrono::steady_clock::now() + 5s};
+                while (column->children_moving())
+                {
+                    check(std::chrono::steady_clock::now() < settle_deadline, "Progress layout did not settle.");
+                    pump();
+                }
                 const auto at{button->get_pos()};
                 const auto size{button->get_size()};
                 storage_atomic_write("click.json", nlohmann::json{{"step", ++step},
@@ -252,8 +258,24 @@ int main(int argc, char** argv)
                 pump();
                 check(task->m_row_removed, "Acknowledged cancelled row remained visible.");
                 if (task == upload)
-                    check(download->m_progress_text->get_pos().y == remaining_y + height + lgo::std_margin.x,
+                {
+                    const auto destination{remaining_y + height + lgo::std_margin.x};
+                    check(column->smooth_children() && column->children_moving() &&
+                          download->m_progress_text->get_pos().y < destination,
+                          "Removing a row jumped instead of animating.");
+                    auto previous{download->m_progress_text->get_pos().y};
+                    const auto deadline{std::chrono::steady_clock::now()+5s};
+                    while (column->children_moving())
+                    {
+                        check(std::chrono::steady_clock::now()<deadline,"Progress animation did not finish.");
+                        pump();
+                        const auto current{download->m_progress_text->get_pos().y};
+                        check(current >= previous && current <= destination,"Progress animation moved upward or overshot.");
+                        previous=current;
+                    }
+                    check(download->m_progress_text->get_pos().y == destination,
                           "Acknowledging the bottom task did not move the remaining task downward.");
+                }
             }
             // Hold a preparation future to make cancellation cleanup visible
             // deterministically, independently of local network speed.
@@ -528,8 +550,14 @@ int main(int argc, char** argv)
             check(persistent.m_directory_status->get_text() == "目錄更新中", "Missing directory status.");
             pos = "fast-folder";
             persistent.m_refresh();
-            for (int i{}; i < 100; ++i)
+            const auto listing_deadline{std::chrono::steady_clock::now()+10s};
+            while (!persistent.m_listings.empty())
+            {
+                check(std::chrono::steady_clock::now()<listing_deadline,"Browsing did not finish.");
                 pump();
+            }
+            check(persistent.m_breadcrumb_folder=="fast-folder" && persistent.m_directory_status->get_text().empty(),
+                  "Stale browsing replaced the current ancestor path or left an error.");
             // Render reusable modal objects and exercise focus cleanup across close.
             loads.m_settings_page();
             pump();
