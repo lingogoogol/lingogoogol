@@ -43,6 +43,8 @@ export namespace lgo
         auto add_object_impl(depth_range_t depth_range, t_arg&&... arg) -> std::uint64_t;
         auto child_set_size(std::uint64_t id, size_2D size) -> void override;
     public:
+        auto visit_children(const child_visitor_t& visit) -> void override
+        { for (auto& [id, child] : m_current.m_object) visit(*child); }
         constexpr static bool hard = t_hard;
 
         GUI_div_impl_t() = default;
@@ -483,6 +485,7 @@ export namespace lgo
             object_pos_sideways = pos_sideways + size_sideways - object_size_sideways - (t_hard ? object->get_margin().x : 0);
             break;
         }
+        object->set_parent_clip(this->parent_clip());
         m_current.m_object.emplace(m_current_id_object, object);
         if constexpr (gui_object_events_enabled) object->debug_attach(this, m_current_id_object);
         object->set_pos

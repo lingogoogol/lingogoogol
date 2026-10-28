@@ -176,18 +176,20 @@ namespace lgo
         }
     }
 
-    auto rect_t::update_hit_area() -> void
+    auto rect_t::clip_changed() -> void
     {
-        auto pos{m_pos};
-        auto size{m_size};
-        if (m_clip_enabled)
+        auto bounds{clip_bounds({m_pos, m_size})};
+        if (m_clip_enabled) bounds = bounds.intersect({m_clip_pos, m_clip_size});
+        m_render_clip_pos = bounds.pos;
+        m_render_clip_size = bounds.size;
+        if (m_primitive)
         {
-            pos = {std::max(m_pos.x, m_clip_pos.x), std::max(m_pos.y, m_clip_pos.y)};
-            size = {std::max<std::int64_t>(0, std::min(m_pos.x + m_size.x, m_clip_pos.x + m_clip_size.x) - pos.x),
-                    std::max<std::int64_t>(0, std::min(m_pos.y + m_size.y, m_clip_pos.y + m_clip_size.y) - pos.y)};
+            m_primitive->set_clip(&m_render_clip_pos, &m_render_clip_size);
+            m_depth_tracker->update(m_depth_id, bounds.pos, bounds.size);
         }
-        m_depth_tracker->update(m_depth_id, pos, size);
     }
+
+    auto rect_t::update_hit_area() -> void { clip_changed(); }
 
     auto rect_t::get_size() const -> size_2D
     {
@@ -289,6 +291,7 @@ namespace lgo
         auto depth_range{ m_depth_range };
         auto color{ m_color };
         lock.unlock();
+        clip_changed();
         rect_primitive_t* primitive{};
         if (m_texture_enable)
         {
@@ -297,8 +300,8 @@ namespace lgo
                 .pos{ pos },
                 .size{ size },
                 .depth{ depth_range.near },
-                .clip_pos{m_clip_enabled ? &m_clip_pos : nullptr},
-                .clip_size{m_clip_enabled ? &m_clip_size : nullptr},
+                .clip_pos{&m_render_clip_pos},
+                .clip_size{&m_render_clip_size},
                 .color{ color },
                 .image_view{ m_image_view },
                 .texture_pos{ m_texture_pos },
@@ -314,8 +317,8 @@ namespace lgo
                 .pos{ pos },
                 .size{ size },
                 .depth{ depth_range.near },
-                .clip_pos{m_clip_enabled ? &m_clip_pos : nullptr},
-                .clip_size{m_clip_enabled ? &m_clip_size : nullptr},
+                .clip_pos{&m_render_clip_pos},
+                .clip_size{&m_render_clip_size},
                 .color{ color },
                 .name{ m_name + ".m_primitive" }
             });

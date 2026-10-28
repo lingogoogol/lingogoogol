@@ -543,9 +543,10 @@ auto delete_all_cancel_callback(std::shared_ptr<lgo::divy_hard_t>) -> void {}
 
 auto folder_button_callback(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,
                             load_state_t* load_state, blob_queue_t* blob_queue,
-                            std::shared_ptr<lgo::divy_soft_t> viewer_div, std::string* pos_ptr,
+                            std::shared_ptr<lgo::scroll_t> viewer_div, std::string* pos_ptr,
                             std::string pos) -> void
 {
+    viewer_div->set_scroll_offset({});
     *pos_ptr = pos;
     list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos_ptr);
     return;
@@ -622,7 +623,7 @@ namespace
 }
 
 auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,
-          load_state_t* load_state, blob_queue_t* blob_queue, std::shared_ptr<lgo::divy_soft_t> viewer_div,
+          load_state_t* load_state, blob_queue_t* blob_queue, std::shared_ptr<lgo::scroll_t> viewer_div,
           std::string* pos) -> void
 {
     // Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
@@ -633,8 +634,11 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
     auto session{load_state->m_session};
     if (session && session->clearing)
     {
-        viewer_div->clear_state();
-            persistent->m_directory_status->set_text("清除中");
+        auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
+        contents->clear_state();
+        contents->set_size({viewer_div->view_size().x,0});
+        viewer_div->set_scroll_offset({});
+        persistent->m_directory_status->set_text("清除中");
         return;
     }
     auto control{std::make_shared<request_control_t>()};
@@ -652,14 +656,16 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
     const auto source{*pos};
     auto apply = [=](nlohmann::json obj_list)
     {
-        viewer_div->clear_state();
-        auto contents{viewer_div};
+        const auto offset{viewer_div->scroll_offset()};
+        auto contents{std::make_shared<lgo::divy_flex_soft_t>(engine, load_state->m_progress_column->get_depth_tracker(),
+            storage_content_depth, lgo::pos_2D{}, lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
+            lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
         if (session && source != session->root)
         {
             // Clipboard operations need a route back to other branches of the
             // tree while retaining their selected source item.
             auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
-                lgo::size_1D{viewer_div->get_size().x}, lgo::std_margin,
+                lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
             row->add_object<progress_button_t>(storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
                 { if (auto target{viewer.lock()}) folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, session->root); },
@@ -674,7 +680,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             const auto id{entry.at("id").get<std::string>()};
             const auto name{entry.at("name").get<std::string>()};
             auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
-                lgo::size_1D{viewer_div->get_size().x}, lgo::std_margin,
+                lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
             row->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
                 storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
@@ -715,6 +721,8 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             row->add_object<lgo::std_linex_t>(
                 storage_content_depth, row->space_x(lgo::std_margin), lgo::std_white);
         }
+        viewer_div->set_content(std::move(contents));
+        viewer_div->set_scroll_offset(offset);
     };
     persistent->m_listings.push_back({generation, session, control, std::move(future), std::move(apply)});
     return;
@@ -806,9 +814,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     load_state->m_progress_column = *progress_column;
     auto column_line = work_div->add_object_shared<lgo::std_liney_t>(
         storage_content_depth, work_div->space_y(lgo::std_margin), lgo::std_white);
-    auto viewer_div{work_div->add_object_shared<lgo::divy_soft_t>(
-        storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::std_margin,
-        lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+    auto viewer_div{work_div->add_object_shared<lgo::scroll_t>(
+        storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::scroll_axes_t::y, lgo::std_margin)};
+    viewer_div->set_content(std::make_shared<lgo::divy_flex_soft_t>(engine, state->get_depth_tracker(),
+        storage_content_depth, lgo::pos_2D{}, lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
+        lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top}));
 
     persistent->m_reset_view = [viewer_div, persistent]
     {
@@ -817,8 +827,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         ++persistent->m_listing_generation;
         for (auto& listing : persistent->m_listings)
             listing.control->cancel();
-        viewer_div->clear_state();
-        };
+        auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
+        contents->clear_state();
+        contents->set_size({viewer_div->view_size().x,0});
+        viewer_div->set_scroll_offset({});
+    };
     persistent->m_refresh = [=] { list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos); };
     load_state->m_on_directory_changed = [=](const directory_task_t& task)
     {
@@ -1038,7 +1051,12 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto viewer_size{work_div->space_2D(lgo::std_margin)};
             viewer_size.x += viewer_div->get_size().x;
             viewer_div->set_size(viewer_size);
-            viewer_div->fit_children_sideways();
+            auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
+            contents->set_size({viewer_div->view_size().x,contents->get_size().y});
+            contents->fit_children_sideways();
+            // Each entry is itself a div containing a name, actions and separator.
+            contents->visit_children([](lgo::GUI_object_t& child)
+                { if (auto row{dynamic_cast<lgo::divy_flex_soft_t*>(&child)}) row->fit_children_sideways(); });
 
             center_div->set_size(size);
         });

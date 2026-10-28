@@ -99,12 +99,12 @@ export {
 
     auto folder_button_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
                                 curl_multi_worker_t* multi, load_state_t* load_state,
-                                blob_queue_t* blob_queue, std::shared_ptr<lgo::divy_soft_t> viewer_div,
+                                blob_queue_t* blob_queue, std::shared_ptr<lgo::scroll_t> viewer_div,
                                 std::string* pos_ptr, std::string pos) -> void;
 
     auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,
               load_state_t* load_state, blob_queue_t* blob_queue,
-              std::shared_ptr<lgo::divy_soft_t> viewer_div, std::string* pos) -> void;
+              std::shared_ptr<lgo::scroll_t> viewer_div, std::string* pos) -> void;
 
     auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persistent,
               std::shared_ptr<lgo::divy_soft_t>* progress_column, load_state_t* load_state,

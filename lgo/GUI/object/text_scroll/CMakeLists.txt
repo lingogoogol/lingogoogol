@@ -23,6 +23,7 @@ target_link_libraries(
         lgo.GUI.font
         lgo.GUI.object.depth_tracker
         lgo.GUI.object.object
+        lgo.GUI.object.scroll
         lgo.GUI.object.rect
         lgo.GUI.object.text
         lgo.GUI.object.click_area

@@ -33,6 +33,7 @@ namespace lgo
         std::unique_lock lock{ in.m_mutex };
         m_status = in.m_status.load();
         m_size_callback = in.m_size_callback;
+        m_parent_clip = in.m_parent_clip;
         #if defined(DEBUG_GUI_OBJECT_NAME) || defined(DEBUG_GUI_OBJECT_LOG)
         m_name = in.m_name + "/copy#" + std::to_string(m_debug_id);
         if constexpr (gui_object_events_enabled) debug_event("copy");
@@ -87,6 +88,7 @@ namespace lgo
     {
         m_status = in.m_status.load();
         m_size_callback = in.m_size_callback;
+        m_parent_clip = in.m_parent_clip;
         return *this;
     }
 

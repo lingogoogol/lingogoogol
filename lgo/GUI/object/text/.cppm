@@ -76,6 +76,7 @@ export namespace lgo
         auto depth_range_get() const -> depth_range_t;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
+        auto visit_children(const child_visitor_t& visit) -> void override { visit(m_div); }
         auto get_text() const -> const std::string&;
         auto set_text(std::string text, bool load_now = true) -> void;
         auto get_clip_pos() const -> pos_2D;

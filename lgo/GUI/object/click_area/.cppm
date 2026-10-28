@@ -36,6 +36,7 @@ export namespace lgo
         std::atomic_bool m_inside{ false };
         std::atomic_bool m_clicked_inside{ false };
         
+        auto clip_changed() -> void override;
         auto click_area_callback_mouse_enter(int entered) -> void;
         auto click_area_callback_mouse_move(pos_2D pos) -> void;
         auto click_area_callback_mouse_button(int button, int action, int mods) -> void;

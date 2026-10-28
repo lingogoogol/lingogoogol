@@ -8,6 +8,7 @@ import lgo.GUI.primitive;
 import lgo.GUI.object.depth_tracker;
 import lgo.GUI.object.std;
 import lgo.GUI.object.div;
+import lgo.GUI.object.object;
 import lgo.GUI.object.rect_border;
 
 export namespace lgo
@@ -61,6 +62,8 @@ export namespace lgo
         auto set_div_size(size_2D size) -> void override;
         auto get_margin() const -> size_1D override;
 
+        auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
+        { GUI_div_impl_t<t_y,t_hard>::visit_children(visit); visit(m_border); }
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
     };
@@ -410,6 +413,8 @@ export namespace lgo
             bool from_large = false
         );
 
+        auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
+        { GUI_div_flex_impl_t<t_y,t_hard>::visit_children(visit); visit(m_border); }
         auto get_pos() const -> pos_2D override;
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;

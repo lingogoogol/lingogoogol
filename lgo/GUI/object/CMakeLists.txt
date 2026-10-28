@@ -27,10 +27,12 @@ add_subdirectory(focus)
 add_subdirectory(menu)
 add_subdirectory(virt)
 add_subdirectory(dialog)
+add_subdirectory(scroll)
 
 target_link_libraries(
     lgo.GUI.object
     PRIVATE
+        lgo.GUI.object.scroll
         lgo.GUI.object.dialog
         common
         lgo.GUI.object.state

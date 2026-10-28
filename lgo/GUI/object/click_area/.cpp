@@ -85,7 +85,7 @@ namespace lgo
 
     auto click_area_t::click_area_callback_mouse_move(pos_2D pos) -> void
     {
-        if (inside(m_pos, m_size, pos) && m_depth_tracker->top(pos, m_depth_id))
+        if (inside(m_pos, m_size, pos) && clip_contains(pos) && m_depth_tracker->top(pos, m_depth_id))
         {
             m_inside = true;
             if (glfwGetMouseButton(m_engine->window_get(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_RELEASE)
@@ -137,6 +137,14 @@ namespace lgo
         return;
     }
 
+    auto click_area_t::clip_changed() -> void
+    {
+        if (status() != shown) return;
+        const auto bounds{clip_bounds({m_pos,m_size})};
+        m_depth_tracker->update(m_depth_id, bounds.pos, bounds.size);
+        click_area_callback_mouse_move(m_engine->get_cursor_pos());
+    }
+
     auto click_area_t::get_pos() const -> pos_2D
     {
         std::unique_lock lock{ m_mutex };
@@ -149,8 +157,7 @@ namespace lgo
         m_pos = pos;
         if (status() == shown)
         {
-            m_depth_tracker->update(m_depth_id, m_pos, m_size);
-            click_area_callback_mouse_move(m_engine->get_cursor_pos());
+            clip_changed();
         }
         return;
     }
@@ -168,8 +175,7 @@ namespace lgo
         m_size = size;
         if (status() == shown)
         {
-            m_depth_tracker->update(m_depth_id, m_pos, m_size);
-            click_area_callback_mouse_move(m_engine->get_cursor_pos());
+            clip_changed();
         }
         return;
     }
@@ -199,7 +205,8 @@ namespace lgo
             return;
         }
         std::unique_lock lock{ m_mutex };
-        m_depth_id = m_depth_tracker->add(m_pos, m_size, m_depth, true);
+        const auto bounds{clip_bounds({m_pos,m_size})};
+        m_depth_id = m_depth_tracker->add(bounds.pos, bounds.size, m_depth, true);
         m_callback_mouse_enter_key = m_engine->callback_mouse_enter_add
         (
             std::bind(&click_area_t::click_area_callback_mouse_enter, this, std::placeholders::_1)

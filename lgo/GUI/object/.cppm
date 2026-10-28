@@ -20,3 +20,5 @@ export import lgo.GUI.object.menu;
 export import lgo.GUI.object.virt;
 
 export import lgo.GUI.object.dialog;
+
+export import lgo.GUI.object.scroll;

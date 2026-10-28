@@ -49,6 +49,8 @@ export namespace lgo
         auto get_margin() const -> size_1D override;
         auto log(std::uint32_t tab_count) const -> void override;
 
+        auto visit_children(const child_visitor_t& visit) -> void override
+        { visit(m_click_area); visit(m_rect); visit(m_horizontal); visit(m_vertical); }
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
     };

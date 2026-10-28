@@ -29,6 +29,7 @@ export namespace lgo
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;
         auto get_margin() const -> size_1D override;
+        auto visit_children(const child_visitor_t& visit) -> void override { visit(*m_obj); }
         auto obj_get() const -> const std::shared_ptr<t_type>;
         auto log(std::uint32_t tab_count) const -> void override
         {

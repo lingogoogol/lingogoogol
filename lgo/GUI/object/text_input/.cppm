@@ -54,6 +54,8 @@ export namespace lgo
         auto set_pos(pos_2D pos) -> void override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
+        auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
+        { t_text::visit_children(visit); visit(m_click_area); }
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
     };

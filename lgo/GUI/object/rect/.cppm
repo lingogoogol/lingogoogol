@@ -31,7 +31,10 @@ export namespace lgo
         pos_2D m_clip_pos{};
         size_2D m_clip_size{};
         bool m_clip_enabled{};
+        pos_2D m_render_clip_pos{};
+        size_2D m_render_clip_size{};
         auto update_hit_area() -> void;
+        auto clip_changed() -> void override;
     public:
         rect_t() = default;
 
@@ -124,6 +127,7 @@ export namespace lgo
         auto get_margin() const -> size_1D override { return std_margin; }
         auto set_pos(pos_2D pos) -> void override;
         auto set_size(size_2D size) -> void override;
+        auto visit_children(const child_visitor_t& visit) -> void override { visit(m_track); visit(m_fill); }
         auto set_fraction(double fraction) -> void;
         auto fraction() const -> double { return m_fraction; }
         auto filled_size() const -> size_2D { return m_fill.get_size(); }

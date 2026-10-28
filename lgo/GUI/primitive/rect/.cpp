@@ -569,18 +569,6 @@ namespace lgo
     {
         std::unique_lock lock{ m_mutex };
 
-        if (m_texture_enable)
-        {
-            command_buffer.bindDescriptorSets
-            (
-                vk::PipelineBindPoint::eGraphics,
-                m_texture_pipeline_state.layout_get(),
-                0,
-                *m_descriptor_set,
-                nullptr
-            );
-        }
-
         // GUI coordinates are logical pixels; Vulkan scissors use framebuffer pixels.
         // Clamp before conversion so a shrinking window cannot produce negative Vulkan offsets.
         const auto window_size{ m_engine->get_window_size() };
@@ -606,6 +594,18 @@ namespace lgo
                 static_cast<std::uint32_t>(bottom * framebuffer_size.y / window_size.y - y)
             }
         };
+        if (m_texture_enable)
+        {
+            command_buffer.bindDescriptorSets
+            (
+                vk::PipelineBindPoint::eGraphics,
+                m_texture_pipeline_state.layout_get(),
+                0,
+                *m_descriptor_set,
+                nullptr
+            );
+        }
+
         command_buffer.setScissor(0, scissor_rect);
 
         command_buffer.bindVertexBuffers(0, *m_vertex_buffer.interface_get(), { 0 });

@@ -17,6 +17,7 @@ target_link_libraries(
         lgo.GUI.primitive
         lgo.GUI.object.depth_tracker
         lgo.GUI.object.std
+        lgo.GUI.object.object
         lgo.GUI.object.div
         lgo.GUI.object.rect_border
 )

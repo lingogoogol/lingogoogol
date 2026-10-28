@@ -20,6 +20,30 @@ export namespace lgo
         false;
         #endif
 
+    struct clip_rect_t
+    {
+        pos_2D pos{};
+        size_2D size{};
+        auto intersect(clip_rect_t other) const -> clip_rect_t
+        {
+            const pos_2D begin{std::max(pos.x, other.pos.x), std::max(pos.y, other.pos.y)};
+            return {begin, {std::max<std::int64_t>(0, std::min(pos.x + size.x, other.pos.x + other.size.x) - begin.x),
+                            std::max<std::int64_t>(0, std::min(pos.y + size.y, other.pos.y + other.size.y) - begin.y)}};
+        }
+        auto contains(pos_2D point) const -> bool
+        { return point.x >= pos.x && point.y >= pos.y && point.x < pos.x + size.x && point.y < pos.y + size.y; }
+    };
+
+    // Shared, world-coordinate clip chains keep nested viewport intersections
+    // intact when children move, resize or create deferred glyphs.
+    struct clip_region_t
+    {
+        clip_rect_t rect;
+        std::shared_ptr<clip_region_t> parent;
+        auto bounds() const -> clip_rect_t { return parent ? rect.intersect(parent->bounds()) : rect; }
+        auto depth() const -> std::size_t { return parent ? parent->depth() + 1 : 1; }
+    };
+
     class GUI_object_t
     {
     public:
@@ -35,6 +59,7 @@ export namespace lgo
         std::string m_name{};
     private:
         status_atomic_t m_status{};
+        std::shared_ptr<clip_region_t> m_parent_clip;
         std::function<void(size_2D)> m_size_callback{};
     public:
         #if defined(DEBUG_GUI_OBJECT_NAME) || defined(DEBUG_GUI_OBJECT_LOG)
@@ -52,6 +77,24 @@ export namespace lgo
 
         auto operator=(const GUI_object_t& in) -> GUI_object_t&;
 
+        using child_visitor_t = std::function<void(GUI_object_t&)>;
+        virtual auto visit_children(const child_visitor_t&) -> void {}
+        auto parent_clip() const -> const std::shared_ptr<clip_region_t>& { return m_parent_clip; }
+        auto clip_bounds(clip_rect_t rect) const -> clip_rect_t
+        { return m_parent_clip ? rect.intersect(m_parent_clip->bounds()) : rect; }
+        auto clip_contains(pos_2D point) const -> bool
+        { return !m_parent_clip || m_parent_clip->bounds().contains(point); }
+        auto set_parent_clip(std::shared_ptr<clip_region_t> clip) -> void
+        {
+            m_parent_clip = std::move(clip);
+            clip_changed();
+            propagate_clip();
+        }
+        auto refresh_clip() -> void
+        {
+            clip_changed();
+            visit_children([](GUI_object_t& child) { child.refresh_clip(); });
+        }
         auto name_get() -> std::string;
         auto name_set(std::string name) -> void;
         auto debug_attach(const void* parent, std::uint64_t id) const noexcept -> void;
@@ -66,6 +109,9 @@ export namespace lgo
         auto show() -> void;
         auto hide() -> void;
     protected:
+        virtual auto clip_changed() -> void {}
+        virtual auto propagate_clip() -> void
+        { visit_children([this](GUI_object_t& child) { child.set_parent_clip(m_parent_clip); }); }
         virtual auto show_impl(bool base) -> void = 0;
         auto show_begin(bool base) -> bool;
         auto show_end(bool base) -> void;

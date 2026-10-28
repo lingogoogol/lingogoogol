@@ -47,6 +47,7 @@ export namespace lgo
         auto get_margin() const -> size_1D override;
         virtual auto log(std::uint32_t tab_count) const -> void override;
 
+        auto visit_children(const child_visitor_t& visit) -> void override { visit(m_click_area); }
         auto show_impl(bool base) -> void override;
         auto hide_impl(bool base) -> void override;
     };
@@ -184,6 +185,8 @@ export namespace lgo
             u_arg&&... arg
         );
 
+        auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
+        { t_type::visit_children(visit); visit(m_button); }
         auto set_enabled(bool enabled) -> void;
         auto enabled() const -> bool { return m_enabled; }
         auto set_pos(pos_2D pos) -> void override;
@@ -396,6 +399,7 @@ export namespace lgo
         auto depth_range_get() const -> depth_range_t;
         virtual auto log(std::uint32_t tab_count) const -> void override;
         
+        auto visit_children(const child_visitor_t& visit) -> void override { visit(m_rect); visit(m_text); }
         auto button_enabled(bool enabled) -> void;
         auto button_move(pos_2D) -> void;
         auto button_leave() -> void;

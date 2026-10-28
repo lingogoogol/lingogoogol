@@ -10,6 +10,7 @@ import lgo.GUI.primitive;
 import lgo.GUI.object.depth_tracker;
 import lgo.GUI.object.object;
 import lgo.GUI.object.rect;
+import lgo.GUI.object.scroll;
 import lgo.GUI.object.text;
 
 export namespace lgo
@@ -26,9 +27,7 @@ export namespace lgo
         float m_depth{};
         bool m_initialized{}, m_dragging{};
         std::int64_t m_grab_offset{};
-        engine_t::callback_mouse_scroll_t* m_scroll_key{};
-        engine_t::callback_mouse_move_t* m_move_key{};
-        engine_t::callback_mouse_button_t* m_button_key{};
+        scroll_input_t m_input;
         static constexpr std::int64_t bar_height{2};
         static constexpr std::int64_t scroll_speed{32};
 
@@ -52,7 +51,7 @@ export namespace lgo
         }
         auto hit(pos_2D pos) const -> bool
         {
-            return inside(get_pos(), m_size, pos) && m_depth_tracker->top(pos, m_depth_id);
+            return this->clip_contains(pos) && inside(get_pos(), m_size, pos) && m_depth_tracker->top(pos, m_depth_id);
         }
         auto drag(pos_2D pos) -> void
         {
@@ -62,18 +61,6 @@ export namespace lgo
                 const auto x{std::clamp(pos.x - get_pos().x - m_grab_offset, std::int64_t{}, travel)};
                 set_scroll_offset(x * max_scroll() / travel);
             }
-        }
-        auto mouse_button(int button, int action, int) -> void
-        {
-            if (button != GLFW_MOUSE_BUTTON_LEFT) return;
-            if (action == GLFW_RELEASE) { m_dragging = false; return; }
-            const auto pos{this->m_engine->cursor_pos_get()};
-            if (action != GLFW_PRESS || !hit(pos) ||
-                !inside(m_track.get_pos(), m_track.get_size(), pos) || !max_scroll()) return;
-            m_dragging = true;
-            m_grab_offset = inside(m_thumb.get_pos(), m_thumb.get_size(), pos)
-                ? pos.x - m_thumb.get_pos().x : m_thumb.get_size().x / 2;
-            drag(pos);
         }
       protected:
         auto text_layout_changed() -> void override
@@ -99,6 +86,8 @@ export namespace lgo
             update_bar();
         }
         ~text_scroll_impl_t() override { this->hide(); }
+        auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
+        { t_text::visit_children(visit); visit(m_track); visit(m_thumb); }
         auto get_pos() const -> pos_2D override { return t_text::get_pos(); }
         auto get_size() const -> size_2D override { return m_size; }
         auto get_margin() const -> size_1D override { return size_1D{0}; }
@@ -143,25 +132,29 @@ export namespace lgo
             t_text::show_impl(false);
             m_track.show(); m_thumb.show();
             m_depth_id = m_depth_tracker->add(get_pos(), m_size, m_depth, false);
-            m_scroll_key = this->m_engine->callback_mouse_scroll_add([this](size_2D delta)
-            {
-                if (hit(this->m_engine->cursor_pos_get()))
-                    set_scroll_offset(scroll_offset() - scroll_speed * delta.x);
-            });
-            // Capture movement until release, even outside the track/viewport.
-            m_move_key = this->m_engine->callback_mouse_move_add([this](pos_2D pos)
-                { if (m_dragging) drag(pos); });
-            m_button_key = this->m_engine->callback_mouse_button_add([this](int b, int a, int m)
-                { mouse_button(b, a, m); });
+            m_input.attach(this->m_engine,this,m_depth,[this](pos_2D pos) { return hit(pos); },
+                [this](size_2D delta)
+                {
+                    if (!delta.x) return false;
+                    const auto old{scroll_offset()};
+                    set_scroll_offset(old-scroll_speed*delta.x);
+                    return old != scroll_offset();
+                }, [this](pos_2D pos)
+                { return max_scroll() && inside(m_track.get_pos(),m_track.get_size(),pos); },
+                [this](pos_2D pos)
+                {
+                    m_dragging = true;
+                    m_grab_offset = inside(m_thumb.get_pos(),m_thumb.get_size(),pos)
+                        ? pos.x-m_thumb.get_pos().x : m_thumb.get_size().x/2;
+                    drag(pos);
+                }, [this](pos_2D pos) { drag(pos); }, [this] { m_dragging = false; });
             this->show_end(base);
         }
         auto hide_impl(bool base) -> void override
         {
             if (!this->hide_begin(base)) return;
             m_dragging = false;
-            this->m_engine->callback_mouse_scroll_remove(m_scroll_key);
-            this->m_engine->callback_mouse_move_remove(m_move_key);
-            this->m_engine->callback_mouse_button_remove(m_button_key);
+            m_input.detach();
             m_depth_tracker->remove(m_depth_id);
             m_thumb.hide(); m_track.hide();
             t_text::hide_impl(false);
