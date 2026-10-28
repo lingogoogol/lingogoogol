@@ -39,7 +39,7 @@ int main()
                 lgo::text_line_t::pending_load();
             };
             unsigned step{};
-            auto input = [&](nlohmann::json commands, bool screenshot = false)
+            auto input = [&](nlohmann::json commands, nlohmann::json screenshot = false)
             {
                 for (int i{}; i < 8; ++i) pump();
                 const auto request = nlohmann::json{{"step", ++step}, {"commands", commands}, {"screenshot", screenshot}};
@@ -68,7 +68,14 @@ int main()
             input({{"move", 100, 114}});
             check(line.scroll_offset() == offset, "Scrollbar still dragged after mouse release.");
             input(nlohmann::json::array({{"wheel", 4}}));
-            check(line.scroll_offset() < offset, "Wheel did not scroll horizontally.");
+            check(line.scroll_offset() == offset, "Vertical wheel moved the horizontal scrollbar.");
+            input(nlohmann::json::array({{"wheel", 6}}));
+            check(line.scroll_offset() < offset, "Horizontal wheel did not scroll horizontally.");
+            const auto before_shift{line.scroll_offset()};
+            input(nlohmann::json::array({{"keydown", "Shift_L"}, {"wheel",4}, {"keyup","Shift_L"}}));
+            check(line.scroll_offset() == before_shift-32, "Shift+vertical wheel was not converted to horizontal scrolling.");
+            input(nlohmann::json::array({{"keydown", "Shift_R"}, {"wheel",5}, {"keyup","Shift_R"}}));
+            check(line.scroll_offset() == before_shift, "Right Shift+wheel did not scroll horizontally.");
             input({{"move", 103, 119}, {"click"}});
             check(line.scroll_offset() < offset / 2, "Track click did not reposition the thumb.");
             line.set_scroll_offset(1000000);
@@ -89,6 +96,7 @@ int main()
             input({{"move", 110,119}, {"wheel", 5}, {"down"}, {"move", 700,350}, {"up"}});
             check(line.scroll_offset() == hidden_offset, "Hidden text still handles mouse input.");
             line.show(); line.hide(); plain.hide();
+
         }
         engine.flush();
         lgo::text_line_t::free();

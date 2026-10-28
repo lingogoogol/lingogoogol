@@ -34,7 +34,7 @@ while app.poll() is None:
             for command in value['commands']:
                 kind, *args = command
                 action = {'move':['mousemove','--window',window], 'down':['mousedown','1'],
-                          'up':['mouseup','1'], 'click':['click','1'], 'wheel':['click']}[kind]
+                          'up':['mouseup','1'], 'click':['click','1'], 'wheel':['click'], 'keydown':['keydown'], 'keyup':['keyup']}[kind]
                 subprocess.run(['xdotool',*action,*map(str,args)], check=True)
                 time.sleep(.08)
             time.sleep(.15)
@@ -44,8 +44,6 @@ while app.poll() is None:
                 x,y = int(geometry['X']),int(geometry['Y'])
                 screenshot = ImageGrab.grab().crop((x,y,x+800,y+600))
                 screenshot.save(f'/tmp/storage-text-scroll-{value["step"]}.png')
-                # Glyphs are red; count their pixels inside each viewport and
-                # ensure neither side of the clip rectangle contains red ink.
                 for top,bottom in ((80,118),(180,204)):
                     def red(box):
                         return sum(r > 100 and r > g*2 and r > b*2
@@ -86,4 +84,4 @@ with tempfile.TemporaryDirectory(prefix='storage-scroll-test-') as directory:
             process.wait()
     print(stdout,end='')
     if process.returncode: raise RuntimeError(f'Scroll test failed ({process.returncode}): {stderr}')
-    print('PASS: rendered Unicode glyphs stay clipped at both edges before and after mouse scrolling/font reload')
+    print('PASS: clipped Unicode text, native horizontal wheels, Shift+wheel conversion, drag capture, resize, font reload and input cleanup')
