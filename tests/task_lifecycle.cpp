@@ -15,6 +15,52 @@ auto check(bool value, const char* message) -> void
         throw std::runtime_error{message};
 }
 
+// Compare removal against a freshly laid out list, including unequal margins.
+// This catches sign errors at bottom/right anchors and missing middle-row gaps.
+template<bool Y, bool Hard>
+auto check_removal(lgo::engine_t* engine, lgo::depth_tracker_t* depth) -> void
+{
+    for (bool reverse : {false, true})
+        for (bool far : {false, true})
+            for (int removed{}; removed < 3; ++removed)
+            {
+                const lgo::alignment_2D alignment{far && !Y ? lgo::alignment_x::right : lgo::alignment_x::left,
+                    far && Y ? lgo::alignment_y::bottom : lgo::alignment_y::top};
+                using div_t = lgo::GUI_div_impl_t<Y, Hard>;
+                div_t actual{engine, depth, storage_content_depth, {200,200}, {300,300}, {0}, alignment, reverse};
+                div_t expected{engine, depth, storage_content_depth, {200,200}, {300,300}, {0}, alignment, reverse};
+                std::array<std::uint64_t,3> ids{};
+                std::array<std::shared_ptr<lgo::divy_soft_t>,3> boxes{}, reference{};
+                for (int i{}; i < 3; ++i)
+                {
+                    const lgo::size_2D size{30+i*11,25+i*9};
+                    ids[i] = actual.template add_object<lgo::divy_soft_t>(storage_content_depth,
+                        size, lgo::size_1D{5+i*3}, alignment);
+                    boxes[i] = actual.template get_object_shared<lgo::divy_soft_t>(ids[i]);
+                    if (i != removed)
+                        reference[i] = expected.template add_object_shared<lgo::divy_soft_t>(
+                            storage_content_depth, size, lgo::size_1D{5+i*3}, alignment);
+                }
+                actual.remove_object(ids[removed]);
+                if (actual.len().x != expected.len().x)
+                    throw std::runtime_error{std::format("Removal length: Y={} hard={} reverse={} far={} removed={} actual={} expected={}",
+                        Y, Hard, reverse, far, removed, actual.len().x, expected.len().x)};
+                for (int i{}; i < 3; ++i)
+                    if (i != removed)
+                        check(boxes[i]->get_pos() == reference[i]->get_pos(),
+                              "Row removal differs from a fresh layout at the same anchor.");
+                auto added{actual.template add_object_shared<lgo::divy_soft_t>(storage_content_depth,
+                    lgo::size_2D{27,17}, lgo::size_1D{2}, alignment)};
+                auto added_reference{expected.template add_object_shared<lgo::divy_soft_t>(storage_content_depth,
+                    lgo::size_2D{27,17}, lgo::size_1D{2}, alignment)};
+                check(actual.len().x == expected.len().x && added->get_pos() == added_reference->get_pos(),
+                      "Adding a row reused the removed last child's margin.");
+                for (int i{}; i < 3; ++i)
+                    if (i != removed)
+                        check(boxes[i]->get_pos() == reference[i]->get_pos(), "Adding after removal shifted surviving rows incorrectly.");
+            }
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -38,6 +84,10 @@ int main(int argc, char** argv)
             }
         } cleanup{engine};
         lgo::depth_tracker_t depth;
+        check_removal<true,false>(&engine, &depth);
+        check_removal<true,true>(&engine, &depth);
+        check_removal<false,false>(&engine, &depth);
+        check_removal<false,true>(&engine, &depth);
         lgo::state_t gui{&engine, &depth};
         std::atomic_bool close{};
         storage_runtime_t runtime{&close};
@@ -152,6 +202,11 @@ int main(int argc, char** argv)
                       bar->get_pos().y + bar->get_size().y <= task->m_pause_button->get_pos().y,
                       "Progress bar is not between task text and actions.");
                 click(task->m_pause_button, [&] { return task->m_control->user_paused.load(); });
+                const auto divider{task->m_action_separator};
+                check(divider && divider->get_size().x == lgo::std_line_size.x &&
+                      divider->get_pos().x >= task->m_resume_button->get_pos().x + task->m_resume_button->get_size().x &&
+                      divider->get_pos().x + divider->get_size().x <= task->m_cancel_button->get_pos().x,
+                      "Progress actions do not have a standard vertical separator between them.");
                 const auto progress{task->m_paused_text};
                 const auto fraction{task->m_progress_bar->fraction()};
                 check(progress.contains(std::to_string(bytes()) + "B/" + std::to_string(size) + "B"),
@@ -191,9 +246,14 @@ int main(int argc, char** argv)
                       "Cancelled transfer has no acknowledgement.");
                 const auto fraction{task->m_progress_bar->fraction()};
                 check(fraction > 0., "Cancellation lost graphical progress.");
+                const auto remaining_y{download->m_progress_text->get_pos().y};
+                const auto height{column->get_object_shared<lgo::divy_flex_soft_t>(task->m_progress_div)->get_size().y};
                 click(task->m_confirm_button, [&] { return task->m_dismissed; });
                 pump();
                 check(task->m_row_removed, "Acknowledged cancelled row remained visible.");
+                if (task == upload)
+                    check(download->m_progress_text->get_pos().y == remaining_y + height + lgo::std_margin.x,
+                          "Acknowledging the bottom task did not move the remaining task downward.");
             }
             // Hold a preparation future to make cancellation cleanup visible
             // deterministically, independently of local network speed.

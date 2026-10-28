@@ -268,6 +268,7 @@ python3 tests/run_token_refresh.py
 python3 tests/run_task_lifecycle.py
 python3 tests/run_gui_settings.py
 python3 tests/run_text_scroll.py
+python3 tests/run_directory_operations.py
 ```
 
 測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 與 Vulkan 啟動測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。
@@ -284,9 +285,11 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `run_token_refresh.py` 會嚴格檢查 JWT bearer grant type 與 assertion，使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
 
-`python3 tests/run_task_lifecycle.py` 使用本機模擬 Drive，實際強制終止 Windows 程序並重新啟動，驗證上下載續傳、精確位元組內容、blob ID 保存、避免重複發布、切換帳戶後的工作隔離、目的地覆寫拒絕、網路重試／取消、非同步瀏覽、UTF-8 輸入與 lgo.GUI 對話框，以及全部檔案清除中斷後的恢復。另驗證手動暫停在重啟後仍保留、繼續不會清除網路錯誤；以實際滑鼠點擊測試上下載的暫停／繼續／取消，圖形進度與成功／取消／拒絕覆寫後的「確定」，取消收尾期間的「取消中」，以及 F3 面板在 800×600 視窗下的分頁與欄位間距。測試使用一次性帳戶資料及至少 25,000 個佔位 ID，完全不讀取正式憑證或刪除雲端資料。
+`python3 tests/run_task_lifecycle.py` 使用本機模擬 Drive，實際強制終止 Windows 程序並重新啟動，驗證上下載續傳、精確位元組內容、blob ID 保存、避免重複發布、切換帳戶後的工作隔離、目的地覆寫拒絕、網路重試／取消、非同步瀏覽、UTF-8 輸入與 lgo.GUI 對話框，以及全部檔案清除中斷後的恢復。另驗證手動暫停在重啟後仍保留、繼續不會清除網路錯誤；以實際滑鼠點擊測試上下載的暫停／繼續／取消，圖形進度與成功／取消／拒絕覆寫後的「確定」，取消收尾期間的「取消中」，進度列移除後往下補位及游標原地連點、不同間距與排列方向下的移除／再新增，以及 F3 面板在 800×600 視窗下的分頁與欄位間距。測試使用一次性帳戶資料及至少 25,000 個佔位 ID，完全不讀取正式憑證或刪除雲端資料。
 
 `run_gui_settings.py` 另需 `xdotool`，會操作正式程式入口的設定與清除對話框，驗證取消／確定、Backspace、Ctrl+A、UTF-8 貼上、即時字型與日誌更新、錯誤確認文字及全部 Drive 檔案清除。剪貼簿內容由一次性 Windows 測試工具設定，避免 Wine／X11 剪貼簿橋接影響結果。若有 Pillow，另存對話框截圖至 `/tmp/storage-*.png`。帳戶、檔案與刪除操作均限本機模擬資料。
+
+`python3 tests/run_directory_operations.py` 使用本機模擬 Drive，驗證新增資料夾、名稱驗證、跨頁移動、父目錄更新、同名項目並存與依 ID 刪除、獨立遞迴複製與中斷恢復、自己／子目錄拒絕、遞迴刪除、索引歸屬檢查、與上傳同時更新目錄，以及移動／刪除程序中斷後的接續。另實際操作剪下／複製、切換目錄、貼上確認與取消，並以截圖檢查標準直向分隔線、較暗的圓形滑鼠漸層及縮放。測試不讀取正式帳戶或雲端資料。加上 `--scroll-only` 可只驗證正式畫面的長清單捲動。
 
 `python3 tests/run_text_scroll.py` 不使用帳戶或網路，以實際滑鼠操作水平捲軸，驗證拖曳離開範圍仍持續、放開停止、軌道點擊、滾輪、縮放、延後載入文字、字型重載及隱藏後的事件清理；並檢查 Vulkan 截圖，確認捲動前後的中文字均不超出裁切區。
 
