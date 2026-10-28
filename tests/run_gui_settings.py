@@ -58,11 +58,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith('/fixture/'):
+            self.server.phase = path.rsplit('/', 1)[-1]
+            if self.server.phase != 'cancel': self.server.release.set()
+            return self.reply(200, {})
         if path == '/drive/v3/files':
             return self.reply(200, {'files': [{'id': 'root'}, {'id': 'outside-app-root'}]})
         return self.reply(200, {'name': '{"next":"null"}', 'description': '[]'})
 
     def do_DELETE(self):
+        phase = self.server.phase
+        if phase == 'cancel':
+            # Keep a DELETE in flight until the user cancels its curl handle.
+            # A separate fixture request releases this server handler afterward.
+            (self.server.test / 'delete-pending').touch()
+            self.server.release.wait(20)
+            return self.reply(503, {})
+        if phase == 'failure':
+            return self.reply(503, {})
         with self.server.lock:
             self.server.deleted.add(urlparse(self.path).path.rsplit('/', 1)[-1])
         self.reply(204, b'')
@@ -92,6 +105,8 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import os
+from urllib.request import urlopen
 
 app = subprocess.Popen(['wine64', sys.argv[1]])
 def run(*args):
@@ -147,6 +162,34 @@ try:
     value = json.loads(Path('settings.json').read_text())
     assert value['logfile_path'] == 'changed-logfile' and value['network_retries'] == 2
     capture('settings-live')
+    def snapshot():
+        path = Path('clear-ui.json')
+        return json.loads(path.read_text()) if path.exists() else {}
+    def wait_ui(predicate, message):
+        wait_for(lambda: predicate(snapshot()), message)
+        return snapshot()
+    def action(name):
+        wait_ui(lambda s: s.get('settled', False), 'Progress layout did not settle.')
+        value = snapshot()[name]
+        assert value['shown'], name + ' is hidden.'
+        click(value['x'] + value['w'] // 2, value['y'] + value['h'] // 2)
+    def mode(value):
+        with urlopen('http://127.0.0.1:' + os.environ['STORAGE_GPU_TEST_PORT'] + '/fixture/' + value) as response:
+            response.read()
+    def start_clear():
+        click(1480, 24)
+        click(500, 540)
+        subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
+        run('key', 'ctrl+v')
+        click(1056, 632)
+    def acknowledge_cancel():
+        value = wait_ui(lambda s: s.get('text') == '清除：已取消', 'Cancelled clear did not finish draining.')
+        assert value['confirm']['shown'] and not value['retry']['shown'] and not value['cancel']['shown']
+        assert value['confirm']['x'] == value['retry']['x']
+        assert list(Path('.').glob('clear.*')), 'Cancellation removed the resumable inventory.'
+        action('confirm')
+        wait_ui(lambda s: s.get('rows') == 0, 'Confirm did not remove the cancelled row.')
+    mode('cancel')
     click(1480, 24)  # Clear
     click(1056, 632)  # Empty confirmation must be rejected.
     assert Path('root').read_text() == 'root'
@@ -163,7 +206,33 @@ try:
     run('key', 'ctrl+v')
     time.sleep(.3)
     click(1056, 632)
-    wait_for(lambda: Path('root').read_text() == 'new-root', 'Confirmed clear did not finish.')
+    value = wait_ui(lambda s: s.get('rows') == 1 and s['cancel']['shown'], 'Running clear controls did not appear.')
+    assert value['cancel']['x'] == value['retry']['x'], 'Sole Cancel reserves a hidden Retry slot.'
+    assert value['cancel']['y'] >= value['text_y'] + value['text_h'], 'Actions overlap clear text.'
+    wait_for(lambda: bool(list(Path('.').glob('clear.*'))), 'Clear inventory was not checkpointed.')
+    wait_for(lambda: Path('delete-pending').exists(), 'Clear did not submit its DELETE request.')
+    capture('clear-running')
+    action('cancel')
+    acknowledge_cancel()
+    mode('failure')
+    start_clear()  # A fresh clear must reset the previous cancellation flag.
+    value = wait_ui(lambda s: s.get('text', '').startswith('清除失敗：'), 'Network error controls did not appear.')
+    assert value['retry']['shown'] and value['cancel']['shown'] and value['separator']['shown']
+    assert value['cancel']['x'] >= value['separator']['x'] + value['separator']['w'], 'Cancel overlaps the separator.'
+    assert value['retry']['y'] == value['cancel']['y'], 'Retry and Cancel are on different lines.'
+    capture('clear-network-failure')
+    action('cancel')
+    acknowledge_cancel()
+    start_clear()
+    wait_ui(lambda s: s.get('text', '').startswith('清除失敗：'), 'Second clear did not reach the network error.')
+    mode('success')
+    action('retry')
+    wait_for(lambda: Path('root').read_text() == 'new-root', 'Retried clear did not finish.')
+    value = wait_ui(lambda s: s.get('text') == '清除完成', 'Clear completion was not displayed.')
+    assert value['confirm']['shown'] and not value['retry']['shown'] and not value['cancel']['shown']
+    assert value['confirm']['x'] == value['retry']['x']
+    action('confirm')
+    wait_ui(lambda s: s.get('rows') == 0, 'Confirm did not remove the completed row.')
     run('key', 'alt+F4')
     app.wait(timeout=10)
     assert app.returncode == 0, 'Application did not close normally.'
@@ -204,9 +273,43 @@ int wmain(int argc, wchar_t** argv) {
     command[command.index('-o') + 1] = str(test / 'mock.obj')
     command[command.index('-c') + 1] = str(source / 'tests/mock_google_easy.cpp')
     subprocess.run(command, cwd=build, check=True)
+    entry = next(item for item in entries if Path(item['file']) == source / 'storage/storage.cpp')
+    observed = (source / 'storage/storage.cpp').read_text(encoding='utf-8-sig')
+    # Expose the inherited visibility query only in this test executable.
+    observed = observed.replace('progress_button_t', 'observed_t<progress_button_t>')
+    observed = observed.replace('lgo::std_liney_t', 'observed_t<lgo::std_liney_t>')
+    observed = observed.replace('std::atomic_bool close_app', '''template<class Base> struct observed_t : Base
+    {
+        using Base::Base;
+        auto is_shown() const -> bool { return this->status() == this->shown; }
+    };
+    std::atomic_bool close_app''')
+    observation = r'''        if (clear_text)
+        {
+            const auto button = [](const auto& object)
+            {
+                const auto pos{object->get_pos()}; const auto size{object->get_size()};
+                return nlohmann::json{{"shown", object->is_shown()},
+                    {"x", pos.x}, {"y", pos.y}, {"w", size.x}, {"h", size.y}};
+            };
+            const auto value = nlohmann::json{{"rows", clear_rows.size()}, {"settled", !progress_column->children_moving()}, {"text", clear_text->get_text()},
+                {"text_y", clear_text->get_pos().y}, {"text_h", clear_text->get_size().y},
+                {"retry", button(clear_retry)}, {"cancel", button(clear_cancel)},
+                {"confirm", button(clear_confirm)}, {"separator", button(clear_separator)}}.dump();
+            static std::string previous;
+            if (value != previous) { storage_atomic_write("clear-ui.json", value); previous = value; }
+        }
+'''
+    observed = observed.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
+    (test / 'observed.cpp').write_text(observed)
+    command = shlex.split(entry['command'])
+    command[command.index('-o') + 1] = str(test / 'entry.obj')
+    command[command.index('-c') + 1] = str(test / 'observed.cpp')
+    subprocess.run(command, cwd=build, check=True)
     link = subprocess.check_output(['ninja', '-t', 'commands', 'storage.exe'], cwd=build, text=True).splitlines()[-1]
     command = shlex.split(link.split(' && ')[1])
     command[command.index('-o') + 1] = str(test / 'test.exe')
+    command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test / 'entry.obj')
     command[command.index('storage/google/easy/libstorage.google.easy.a')] = str(test / 'mock.obj')
     command.append('storage/google/easy/CMakeFiles/storage.google.easy.dir/.cppm.obj')
     subprocess.run(command, cwd=build, check=True)
@@ -223,20 +326,23 @@ int wmain(int argc, wchar_t** argv) {
     server.lock = threading.Lock()
     server.deleted = set()
     server.serial = 0
+    server.test = test
+    server.phase = 'cancel'
+    server.release = threading.Event()
     threading.Thread(target=server.serve_forever, daemon=True).start()
     process = None
     try:
         process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'python3', '-c', interaction, str(test / 'test.exe'), str(test / 'clipboard.exe')],
                                    cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
-        stdout, stderr = process.communicate(timeout=60)
+        stdout, stderr = process.communicate(timeout=100)
         if process.returncode:
             raise RuntimeError(stdout + stderr)
         assert server.deleted == {'root', 'outside-app-root'}, 'Clear scope differs from the confirmed whole account.'
         logs = ''.join(path.read_text(errors='replace') for path in (test / 'changed-logfile').glob('*.txt'))
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
         assert not list(test.glob('clear.*')), 'Completed clear marker was retained.'
-        print('PASS: production GUI Cancel/OK, UTF-8 paste, Backspace, Ctrl+A, live settings/font/log reload, typed whole-account clear, invalid/declined confirmation and clean close')
+        print('PASS: production GUI Cancel/OK, UTF-8 paste, Backspace, Ctrl+A, live settings/font/log reload, typed whole-account clear, running/error cancellation, action geometry, retry, terminal acknowledgement and clean close')
     finally:
         if process and process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
