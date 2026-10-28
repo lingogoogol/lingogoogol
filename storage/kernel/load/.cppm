@@ -112,6 +112,8 @@ export
     
     enum class task_result_t { active, cancelling, completed, cancelled, failed };
 
+    using progress_button_t = lgo::button_text_t<lgo::text_line_std_t>;
+
     struct load_task_t
     {
         virtual ~load_task_t() = default;
@@ -147,11 +149,12 @@ export
                 m_progress_text->set_text(value ? "已暫停：" + m_paused_text : m_paused_text, false);
         }
         std::shared_ptr<lgo::progress_bar_t> m_progress_bar;
-        std::shared_ptr<lgo::button_classic_std_t> m_confirm_button;
-        std::shared_ptr<lgo::button_classic_std_t> m_pause_button;
-        std::shared_ptr<lgo::button_classic_std_t> m_resume_button;
-        std::shared_ptr<lgo::button_classic_std_t> m_retry_button;
-        std::shared_ptr<lgo::button_classic_std_t> m_cancel_button;
+        std::shared_ptr<progress_button_t> m_confirm_button;
+        std::shared_ptr<progress_button_t> m_pause_button;
+        std::shared_ptr<progress_button_t> m_resume_button;
+        std::shared_ptr<progress_button_t> m_retry_button;
+        std::shared_ptr<progress_button_t> m_cancel_button;
+        std::shared_ptr<lgo::std_liney_t> m_action_separator;
         load_state_t* m_state{};
         std::list<std::shared_ptr<load_task_t>>::iterator m_self_i{};
         std::string m_type{};

@@ -54,6 +54,7 @@ auto finish_task(load_task_t& task, task_result_t result, std::string text) -> v
         task.m_progress_bar->set_fraction(1.);
     for (const auto& button : {task.m_pause_button, task.m_resume_button, task.m_retry_button, task.m_cancel_button})
         if (button) button->hide();
+    if (task.m_action_separator) task.m_action_separator->hide();
     if (task.m_confirm_button && task.m_result != task_result_t::cancelling)
         task.m_confirm_button->show();
     auto& state{*task.m_state};

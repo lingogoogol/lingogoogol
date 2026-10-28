@@ -121,6 +121,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         visible(task->m_pause_button, !cancelled && !failed && !paused);
         visible(task->m_resume_button, !cancelled && !failed && paused);
         visible(task->m_cancel_button, !cancelled && (failed || paused));
+        visible(task->m_action_separator, !cancelled && (failed || paused));
     }
 
     if (load_state->m_session)
@@ -247,23 +248,23 @@ namespace
         // All three primary actions occupy the same slot. Ghost children do
         // not reserve extra width when hidden; the cancel slot stays fixed.
         auto actions{row->add_object_shared<lgo::divx_soft_t>(
-            storage_content_depth, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
+            storage_content_depth, lgo::div_create_from_member{}, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
             row->space_x(lgo::std_margin),
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
-        task->m_pause_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+        task->m_pause_button = actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [weak]
             {
                 if (auto task{weak.lock()})
                     task->pause(true);
-            }, "暫停");
-        task->m_resume_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+            }, "暫停", lgo::std_white, lgo::size_1D{32});
+        task->m_resume_button = actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [weak]
             {
                 if (auto task{weak.lock()})
                     task->pause(false);
-            }, "繼續");
+            }, "繼續", lgo::std_white, lgo::size_1D{32});
         task->m_resume_button->hide();
-        task->m_retry_button = actions->add_object_shared<lgo::button_classic_std_t>(
+        task->m_retry_button = actions->add_object_shared<progress_button_t>(
             storage_content_depth,
             [weak]
             {
@@ -283,24 +284,27 @@ namespace
                     }
                 }
             },
-            "重試");
+            "重試", lgo::std_white, lgo::size_1D{32});
         task->m_retry_button->hide();
-        task->m_cancel_button = actions->add_object_shared<lgo::button_classic_std_t>(
+        task->m_action_separator = actions->add_object_shared<lgo::std_liney_t>(
+            storage_content_depth, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+        task->m_action_separator->hide();
+        task->m_cancel_button = actions->add_object_shared<progress_button_t>(
             storage_content_depth,
             [weak]
             {
                 if (auto task{weak.lock()})
                     task->m_control->cancel();
             },
-            "取消");
+            "取消", lgo::std_white, lgo::size_1D{32});
         task->m_cancel_button->hide();
-        task->m_confirm_button = actions->add_object_ghost_shared<lgo::button_classic_std_t>(
+        task->m_confirm_button = actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [weak]
             {
                 // Defer removal until input dispatch returns; destroying the
                 // clicked control inside its own callback is unsafe.
                 if (auto task{weak.lock()}) task->m_dismissed = true;
-            }, "確定");
+            }, "確定", lgo::std_white, lgo::size_1D{32});
         task->m_confirm_button->hide();
         // A div applies leading margins differently to its first ghost child.
         // Anchor all primary actions explicitly to the reserved retry slot.

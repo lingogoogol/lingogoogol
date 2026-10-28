@@ -71,14 +71,15 @@ auto app() -> void
     std::future<settings_result_t> settings_job;
     auto settings_control{std::make_shared<request_control_t>()};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
-    std::shared_ptr<lgo::button_classic_std_t> settings_retry, settings_cancel;
+    std::shared_ptr<progress_button_t> settings_retry, settings_cancel;
+    std::shared_ptr<lgo::std_liney_t> settings_separator, clear_separator;
     std::future<std::string> clear_job;
     auto clear_control{std::make_shared<request_control_t>()};
     std::shared_ptr<storage_session_t> clearing_session;
     std::atomic_uint64_t clear_progress{}, clear_total{};
     std::shared_ptr<lgo::text_line_scroll_std_t> clear_text;
-    std::shared_ptr<lgo::button_classic_std_t> clear_retry;
-    std::shared_ptr<lgo::button_classic_std_t> clear_cancel;
+    std::shared_ptr<progress_button_t> clear_retry;
+    std::shared_ptr<progress_button_t> clear_cancel;
     struct shutdown_t
     {
         storage_runtime_t& runtime;
@@ -126,17 +127,25 @@ auto app() -> void
         settings_control->retry_limit = candidate.network_retries;
         settings_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
             storage_content_depth, "設定更新中", lgo::std_red, lgo::size_1D{256}, false);
-        settings_retry = progress_column->add_object_shared<lgo::button_classic_std_t>(
+        auto settings_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
+            storage_content_depth, lgo::div_create_from_member{},
+            lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
+            progress_column->space_x(lgo::std_margin),
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+        settings_retry = settings_actions->add_object_shared<progress_button_t>(
             storage_content_depth,
             [&]
             {
                 runtime.retry_accounts();
                 settings_control->retry();
             },
-            "重試");
+            "重試", lgo::std_white, lgo::size_1D{32});
         settings_retry->hide();
-        settings_cancel = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            storage_content_depth, [&] { settings_control->cancel(); }, "取消");
+        settings_separator = settings_actions->add_object_shared<lgo::std_liney_t>(
+            storage_content_depth, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+        settings_separator->hide();
+        settings_cancel = settings_actions->add_object_shared<progress_button_t>(
+            storage_content_depth, [&] { settings_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
         persistent.m_switching = true;
         persistent.m_directory_status->set_text("目錄更新中");
         settings_job =
@@ -167,7 +176,12 @@ auto app() -> void
         multi.interrupt();
         clear_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
             storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red, lgo::size_1D{256}, false);
-        clear_retry = progress_column->add_object_shared<lgo::button_classic_std_t>(
+        auto clear_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
+            storage_content_depth, lgo::div_create_from_member{},
+            lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
+            progress_column->space_x(lgo::std_margin),
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+        clear_retry = clear_actions->add_object_shared<progress_button_t>(
             storage_content_depth,
             [&]
             {
@@ -179,10 +193,13 @@ auto app() -> void
                     persistent.m_clear_account();
                 }
             },
-            "重試");
+            "重試", lgo::std_white, lgo::size_1D{32});
         clear_retry->hide();
-        clear_cancel = progress_column->add_object_shared<lgo::button_classic_std_t>(
-            storage_content_depth, [&] { clear_control->cancel(); }, "取消");
+        clear_separator = clear_actions->add_object_shared<lgo::std_liney_t>(
+            storage_content_depth, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+        clear_separator->hide();
+        clear_cancel = clear_actions->add_object_shared<progress_button_t>(
+            storage_content_depth, [&] { clear_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
         clear_job = std::async(std::launch::async,
                                [&, target = clearing_session, cancelled]
                                {
@@ -258,6 +275,7 @@ auto app() -> void
             }
             settings_retry->hide();
             settings_cancel->hide();
+            settings_separator->hide();
             persistent.m_switching = false;
         }
         if (settings_job.valid())
@@ -267,9 +285,13 @@ auto app() -> void
                 persistent.m_directory_status->set_text("設定更新失敗");
                 settings_text->set_text("設定失敗：" + settings_control->reason(), false);
                 settings_retry->show();
+                settings_separator->show();
             }
             else
+            {
                 settings_retry->hide();
+                settings_separator->hide();
+            }
         }
         if (clear_job.valid())
         {
@@ -277,10 +299,12 @@ auto app() -> void
             {
                 clear_text->set_text("清除失敗：" + clear_control->reason(), false);
                 clear_retry->show();
+                clear_separator->show();
             }
             else
             {
                 clear_retry->hide();
+                clear_separator->hide();
                 clear_text->set_text("清除：" + std::to_string(clear_progress.load()) + "/" +
                                          std::to_string(clear_total.load()),
                                      false);
@@ -304,6 +328,7 @@ auto app() -> void
                 else
                     clear_retry->hide();
                 clear_cancel->hide();
+                clear_separator->hide();
                 clearing_session.reset();
             }
         }
