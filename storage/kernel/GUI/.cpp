@@ -23,6 +23,11 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
                   load_state_t* load_state, blob_queue_t* blob_queue) -> bool
 {
     using namespace std::chrono_literals;
+    // Do this before accepting pending dialog decisions or applying listings.
+    // Poll even when every pool slot is busy or a delete has a network error.
+    for (const auto& task : load_state->m_task_list)
+        if (auto operation{std::dynamic_pointer_cast<directory_task_t>(task)})
+            directory_notify_unlinked(*operation);
     while (!persistent->m_deferred.empty())
     {
         auto action{std::move(persistent->m_deferred.front())};
@@ -583,6 +588,12 @@ namespace
                     persistent->m_dialog->error("帳戶已變更，請重新剪下或複製");
                     return false;
                 }
+                if (!persistent->m_clipboard || persistent->m_clipboard->session != clipboard->session ||
+                    persistent->m_clipboard->entity.at("id") != clipboard->entity.at("id"))
+                {
+                    persistent->m_dialog->error("來源項目已移除，請取消並重新剪下或複製");
+                    return false;
+                }
                 begin_directory_task(state, clipboard->session,
                     clipboard->copy ? "directory-copy" : "directory-move", clipboard->source,
                     clipboard->entity, destination, clipboard->entity.at("name").get<std::string>());
@@ -702,15 +713,18 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 }, ancestor.at("name").get<std::string>(), lgo::std_brown_light, lgo::size_1D{0})};
             button->set_size(button->get_text_size());
         }
+        std::map<std::string, std::uint64_t> rows;
         for (const auto& entry : result.at("entries"))
         {
             const bool folder{entry.at("type") == "folder"};
             if (!folder && entry.at("type") != "file") throw lgo::internal_error_t{"obj type"};
             const auto id{entry.at("id").get<std::string>()};
             const auto name{entry.at("name").get<std::string>()};
-            auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
+            const auto row_id{contents->add_object<lgo::divy_flex_soft_t>(storage_content_depth,
                 lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
+            rows.emplace(id, row_id);
+            auto row{contents->get_object_shared<lgo::divy_flex_soft_t>(row_id)};
             row->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
                 storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
                 {
@@ -754,6 +768,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
         const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};
         persistent->m_breadcrumbs->set_content(std::move(path));
         persistent->m_breadcrumb_folder = source;
+        persistent->m_directory_rows = std::move(rows);
         persistent->m_breadcrumbs->set_scroll_offset(same_path ? path_offset : lgo::size_2D{});
         viewer_div->set_content(std::move(contents));
         viewer_div->set_scroll_offset(offset);
@@ -868,6 +883,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         ++persistent->m_listing_generation;
         persistent->m_breadcrumbs->set_content({});
         persistent->m_breadcrumb_folder.clear();
+        persistent->m_directory_rows.clear();
         for (auto& listing : persistent->m_listings)
             listing.control->cancel();
         auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
@@ -878,13 +894,35 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     persistent->m_refresh = [=] { list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos); };
     load_state->m_on_directory_changed = [=](const directory_task_t& task)
     {
+        bool reset_view{};
         if (task.m_kind == "directory-delete")
         {
             const auto saved = task.m_journal->data();
             const auto ids = saved.value("delete_ids", std::vector<std::string>{});
-            if (std::ranges::find(ids, *pos) != ids.end()) *pos = task.m_source;
+            if (persistent->m_clipboard && persistent->m_clipboard->session == task.m_session &&
+                std::ranges::find(ids, persistent->m_clipboard->entity.at("id").get<std::string>()) != ids.end())
+                persistent->m_clipboard.reset();
+            const bool requested_deleted{std::ranges::find(ids, *pos) != ids.end()};
+            if (requested_deleted || std::ranges::find(ids, persistent->m_breadcrumb_folder) != ids.end())
+            {
+                persistent->m_reset_view();
+                if (requested_deleted) *pos = task.m_source;
+                reset_view = true;
+            }
+            else if (persistent->m_breadcrumb_folder == task.m_source)
+            {
+                // Remove by stable ID, not name, before the asynchronous reload.
+                // Failed/slow refreshes must not leave live actions for deleted blobs.
+                const auto row{persistent->m_directory_rows.find(task.m_entity.at("id").get<std::string>())};
+                if (row != persistent->m_directory_rows.end())
+                {
+                    auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
+                    contents->remove_object(row->second);
+                    persistent->m_directory_rows.erase(row);
+                }
+            }
         }
-        if (*pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
+        if (reset_view || *pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
     };
     load_state->m_on_upload_linked = [engine, persistent, multi, load_state, blob_queue, pos,
                                       viewer = std::weak_ptr{viewer_div}](const std::string& uploaded_pos)

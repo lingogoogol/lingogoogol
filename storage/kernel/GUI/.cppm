@@ -27,6 +27,7 @@ export {
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
         std::shared_ptr<lgo::scroll_t> m_breadcrumbs;
         std::string m_breadcrumb_folder;
+        std::map<std::string, std::uint64_t> m_directory_rows;
         std::shared_ptr<lgo::button_classic_std_t> m_paste_button;
         std::function<void()> m_refresh;
         std::function<void()> m_reset_view;

@@ -271,6 +271,10 @@ export
         nlohmann::json m_entity;
         std::shared_future<void> m_operation;
         std::atomic_uint64_t m_completed{}, m_total{};
+        // The coordinator publishes successful unlinking; only the GUI thread
+        // consumes the notification and changes visible controls.
+        std::atomic_bool m_source_unlinked{};
+        bool m_unlink_notified{};
         // Only descriptions cross threads; physical handles come exclusively
         // from the same pool used by uploads and downloads on the GUI thread.
         std::mutex m_requests_mutex;
@@ -279,6 +283,7 @@ export
 
     auto directory_validate_name(std::string_view name) -> void;
     auto directory_execute(directory_task_t& task) -> void;
+    auto directory_notify_unlinked(directory_task_t& task) -> void;
     auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi,
                                   curl_easy_t&& easy) -> bool;
 

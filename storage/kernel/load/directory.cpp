@@ -431,6 +431,7 @@ auto directory_execute(directory_task_t& task) -> void
         task.m_journal->set("delete_ids", ids); // Durable before unlinking the only visible entry.
     }
     unlink(easy, task.m_source, id);
+    task.m_source_unlinked = true;
     task.m_total = ids.size();
     auto begin{saved.value("delete_index", std::size_t{})};
     task.m_completed = begin;
@@ -450,6 +451,14 @@ auto directory_execute(directory_task_t& task) -> void
         });
 }
 
+auto directory_notify_unlinked(directory_task_t& task) -> void
+{
+    if (!task.m_source_unlinked || std::exchange(task.m_unlink_notified, true)) return;
+    auto& state{*task.m_state};
+    if (state.m_on_directory_changed && task.m_session == state.m_session)
+        state.m_on_directory_changed(task);
+}
+
 auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi,
                               curl_easy_t&& easy) -> bool
 {
@@ -460,6 +469,10 @@ auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi
         request=std::move(task.m_requests.front());
         task.m_requests.pop_front();
     }
+    // Check after dequeuing: the coordinator publishes unlinking before
+    // enqueueing DELETEs, but can do so after this frame's earlier GUI poll.
+    // Retire controls before dispatch, even if the directory refresh is offline.
+    directory_notify_unlinked(task);
     directory_easy_t operation{std::move(easy)};
     operation.m_journal.reset(); // Mutable directory reads must never be replayed from a cache.
     auto* key{operation.interface_get()};
