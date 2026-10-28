@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--scroll-only', action='store_true', help='Run only the production directory scrolling scenario.')
 parser.add_argument("--pool-only", action="store_true", help="Run shared-pool concurrency and metadata-only move checks.")
+parser.add_argument('--unlink-only', action='store_true', help='Run early unlink visibility and deletion retry checks.')
 args = parser.parse_args()
 
 source = Path(__file__).resolve().parents[1]
@@ -168,6 +169,34 @@ class Handler(BaseHTTPRequestHandler):
         category = None
         identifier = urlparse(self.path).path.rsplit('/', 1)[-1]
         stage = ''
+        if self.server.phase.startswith('unlink-'):
+            target = 'visible-folder' if self.server.phase == 'unlink-folder' else 'visible-file'
+            with self.server.lock:
+                linked = any(item['id'] == target for page in ('root', 'root2') if page in self.server.blobs
+                             for item in json.loads(self.server.blobs[page]['description']))
+            if method == 'GET' and identifier == 'elsewhere':
+                self.respond(503, {})
+                return
+            if method == 'GET' and identifier == 'root' and not linked and not (self.server.test / 'unlink-release').exists():
+                # A failed reload must not preserve old row controls.
+                self.respond(503, {})
+                return
+            if method == 'DELETE':
+                if linked:
+                    self.server.violations.append('Content DELETE started before unlinking its parent entry.')
+                if not (self.server.test / 'unlink-observed').exists():
+                    self.server.violations.append('Content DELETE started before the visible row was retired.')
+                deadline = time.monotonic() + 20
+                while not (self.server.test / 'unlink-release').exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                if not (self.server.test / 'unlink-release').exists():
+                    self.server.violations.append('GUI did not observe unlink while content DELETE was blocked.')
+                with self.server.lock:
+                    fail = not self.server.unlink_failure
+                    self.server.unlink_failure = True
+                if fail:
+                    self.respond(503, {})
+                    return
         if self.server.phase == 'pool':
             marker = self.server.test / 'pool-stage'
             stage = marker.read_text() if marker.exists() else ''
@@ -280,10 +309,28 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
     server.phase = ''
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        phases = ('pool',) if args.pool_only else (() if args.scroll_only else
-            ('backend', 'copy-crash', 'resume-copy', 'move-crash', 'resume-move', 'delete-crash', 'resume-delete', 'pool'))
+        phases = ('unlink-file', 'unlink-folder', 'unlink-away') if args.unlink_only else (('pool',) if args.pool_only else
+            (() if args.scroll_only else ('backend', 'copy-crash', 'resume-copy', 'move-crash', 'resume-move',
+                'delete-crash', 'resume-delete', 'pool', 'unlink-file', 'unlink-folder', 'unlink-away')))
         for phase in phases:
             server.phase = phase
+            if phase.startswith('unlink-'):
+                server.unlink_failure = False
+                for marker in ('unlink-observed', 'unlink-release'):
+                    (test / marker).unlink(missing_ok=True)
+                server.blobs = {
+                    'root': blob('root', 'null', [entry('keep-file', 'file', 'shared')], 'root2'),
+                    'root2': blob('root', 'null', [entry('visible-file', 'file', 'shared')]),
+                    'keep-file': blob('shared', 'root', [], file=True),
+                    'visible-file': blob('shared', 'root', [], file=True),
+                }
+                if phase == 'unlink-folder':
+                    server.blobs['root2'] = blob('root', 'null', [entry('visible-folder', name='shared')])
+                    server.blobs.update({
+                        'visible-folder': blob('shared', 'root', [entry('visible-child')]),
+                        'visible-child': blob('child', 'visible-folder', [entry('visible-leaf', 'file')]),
+                        'visible-leaf': blob('leaf', 'visible-child', [], file=True),
+                    })
             if phase == 'pool':
                 server.blobs = pool_fixture(test)
                 server.active = dict.fromkeys(('scan', 'copy', 'delete'), 0)
@@ -312,6 +359,10 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 assert all(identifier not in server.blobs for identifier in ('pool-file', 'pool-chunk-0', 'pool-chunk-1'))
                 assert all(f'pool-data-{i}' not in server.blobs for i in range(128))
                 print('PASS: 64 shared physical handles, concurrent discovery/copy/delete, mixed upload/download, metadata-only move, out-of-order checkpoints and independent content', flush=True)
+            if phase.startswith('unlink-'):
+                assert not server.violations, server.violations
+                assert server.unlink_failure, 'Content deletion network retry was not exercised.'
+                assert 'keep-file' in server.blobs, 'Same-named sibling was deleted.'
             if phase == 'backend':
                 assert {identifier for identifier in server.deleted if not identifier.startswith('reserve-')} == {'tree', 'tree2', 'child', 'nested', 'chunk', 'data', 'conflict'}, server.deleted
                 assert 'unrelated' in server.blobs and 'malformed' in server.blobs
@@ -340,7 +391,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 assert json.loads(server.blobs['restart']['name'])['parent'] == 'destination'
             if phase.startswith('resume'):
                 assert json.loads((test / 'task').read_text()) == [], 'Finished intent was not removed.'
-        if not args.pool_only:
+        if not args.pool_only and not args.unlink_only:
             if not args.scroll_only:
                 assert 'restart' not in server.blobs and 'restart-child' not in server.blobs
                 assert not server.violations, server.violations

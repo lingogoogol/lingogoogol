@@ -103,7 +103,93 @@ int main(int argc, char** argv)
                 result["size"] = 0;
             return result;
         };
-        if (phase=="pool")
+        if (phase == "unlink-file" || phase == "unlink-folder" || phase == "unlink-away")
+        {
+            const bool folder{phase == "unlink-folder"};
+            const bool away{phase == "unlink-away"};
+            const auto id{folder ? "visible-folder" : "visible-file"};
+            const auto selected{folder ? "visible-leaf" : id};
+            wait([&] { return persistent.m_directory_rows.contains(id); });
+            if (folder)
+            {
+                pos = "visible-child";
+                persistent.m_refresh();
+                wait([&] { return persistent.m_breadcrumb_folder == pos &&
+                                  persistent.m_directory_rows.contains(selected); });
+            }
+            if (away)
+            {
+                // Navigation keeps the old rows until its replacement arrives.
+                // A failing new folder must not keep actions for an old deletion.
+                pos = "elsewhere";
+                persistent.m_refresh();
+                wait([&] { return persistent.m_directory_status->get_text() == "目錄更新失敗"; });
+                check(persistent.m_breadcrumb_folder == "root", "Navigation test lost its old visible folder.");
+            }
+            // Keep a same-named sibling and the actual removed row observable.
+            lgo::scroll_t* viewer{};
+            std::function<void(lgo::GUI_object_t&)> find_viewer = [&](auto& object)
+            {
+                if (auto scroll{dynamic_cast<lgo::scroll_t*>(&object)}; scroll && scroll->axes()==lgo::scroll_axes_t::y)
+                    viewer = scroll;
+                object.visit_children(find_viewer);
+            };
+            gui.get_object_shared<lgo::divy_hard_t>(0)->visit_children(find_viewer);
+            check(viewer, "Missing deletion-test viewport.");
+            auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer->content())};
+            std::weak_ptr<lgo::divy_flex_soft_t> old_row{
+                contents->get_object_shared<lgo::divy_flex_soft_t>(persistent.m_directory_rows.at(selected))};
+            persistent.m_clipboard = GUI_persistent_t::clipboard_t{session, pos, entry(selected,"shared",!folder),true};
+            pump();
+            check(persistent.m_paste_button->enabled(), "Test clipboard did not enable paste.");
+            const auto old_generation{persistent.m_listing_generation};
+            // A pre-unlink listing becomes ready exactly when the change is
+            // observed. Its generation must be invalidated before applying it.
+            std::promise<json> stale;
+            bool stale_applied{}, observed{};
+            if (!away)
+                persistent.m_listings.push_back({old_generation, session, std::make_shared<request_control_t>(),
+                    stale.get_future(), [&](json) { stale_applied = true; }});
+            auto changed{loads.m_on_directory_changed};
+            loads.m_on_directory_changed = [&](const directory_task_t& task)
+            {
+                if (observed) { changed(task); return; }
+                if (!away) stale.set_value(json::object());
+                changed(task);
+                check(task.m_result == task_result_t::active && task.m_source_unlinked,
+                      "Directory changed only after content deletion completed.");
+                check(old_row.expired(), "The unlinked row still owns active GUI controls.");
+                check(!persistent.m_clipboard, "Unlinked clipboard selection remained usable.");
+                if (!away)
+                    check(persistent.m_listing_generation > old_generation, "Unlink did not invalidate the old listing.");
+                else
+                    check(pos == "elsewhere", "Unlink interrupted navigation to an unrelated folder.");
+                if (folder)
+                    check(pos == "root" && persistent.m_directory_rows.empty(),
+                          "Deleting an ancestor did not clear the old view and navigate to its source.");
+                else
+                    check(!persistent.m_directory_rows.contains(id) && persistent.m_directory_rows.contains("keep-file"),
+                          "Unlink removed the wrong same-named row.");
+                observed = true;
+                storage_atomic_write("unlink-observed", "yes");
+            };
+            begin_directory_task(&loads, session, "directory-delete", "root", entry(id,"shared",!folder), {}, "shared");
+            auto task{loads.m_task_list.back()};
+            wait([&] { return observed; });
+            wait([&] { return persistent.m_directory_status->get_text() == "目錄更新失敗"; });
+            check(!stale_applied && !persistent.m_paste_button->enabled(),
+                  "Stale listing or clipboard became usable after unlink.");
+            check(task->m_result == task_result_t::active, "Delete did not remain active while requests were blocked.");
+            storage_atomic_write("unlink-release", "yes");
+            wait([&] { return task->m_control->paused.load(); });
+            check(!persistent.m_directory_rows.contains(id), "A failed content DELETE restored the removed row.");
+            task->m_control->retry();
+            wait([&] { return task->m_result != task_result_t::active; });
+            check(task->m_result == task_result_t::completed, "Unlinked deletion did not recover after retry.");
+            check(!stale_applied, "A late listing restored stale controls.");
+            loads.m_on_directory_changed = std::move(changed);
+        }
+        else if (phase=="pool")
         {
             auto file=entry("pool-file","pool",true);
             file["size"]=384;
