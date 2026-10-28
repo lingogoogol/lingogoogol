@@ -919,30 +919,17 @@ export namespace lgo
         size_2D size_orig{ m_current.m_object[id]->get_size() };
         auto current_iter{ m_current.m_object.find(id) };
         auto next_iter{ std::next(current_iter) };
-        std::int64_t last_margin_orig{}, next_margin_orig{}, last_margin{}, next_margin{};
-        if (current_iter == m_current.m_object.begin())
-        {
-            last_margin = 0;
-            last_margin_orig = (t_hard ? current_iter->second->get_margin().x : 0);
-        }
-        else
-        {
-            last_margin = ((next_iter == m_current.m_object.end() && !t_hard) ?
-                0 : std::prev(current_iter)->second->get_margin().x);
-            last_margin_orig = std::max(last_margin, current_iter->second->get_margin().x);
-        }
-        if (next_iter == m_current.m_object.end())
-        {
-            next_margin = 0;
-            next_margin_orig = (t_hard ? current_iter->second->get_margin().x : 0);
-        }
-        else
-        {
-            next_margin = ((current_iter == m_current.m_object.begin() && !t_hard) ?
-                0 : next_iter->second->get_margin().x);
-            next_margin_orig = std::max(next_margin, current_iter->second->get_margin().x);
-        }
-        std::int64_t margin_actual{ std::max(last_margin, next_margin) - std::max(last_margin_orig, next_margin_orig) };
+        const auto margin{current_iter->second->get_margin().x};
+        const bool first{current_iter == m_current.m_object.begin()}, last{next_iter == m_current.m_object.end()};
+        const auto before{first ? 0 : std::prev(current_iter)->second->get_margin().x};
+        const auto after{last ? 0 : next_iter->second->get_margin().x};
+        const auto old_before{first ? (t_hard ? margin : 0) : std::max(before, margin)};
+        const auto old_after{last ? (t_hard ? margin : 0) : std::max(after, margin)};
+        // Two neighboring gaps become one. At a soft outer edge there is no
+        // gap; hard layouts retain the new first/last child's outer margin.
+        const auto new_gap{first && last ? 0 :
+            first ? (t_hard ? after : 0) : last ? (t_hard ? before : 0) : std::max(before, after)};
+        const auto margin_actual{new_gap - old_before - old_after};
         std::int64_t size_orig_forward{ t_y ? size_orig.y : size_orig.x };
         state_t::remove_object(id);
         if (m_ghost[id])
@@ -951,6 +938,9 @@ export namespace lgo
             return;
         }
         m_ghost.erase(id);
+        m_last_margin = size_1D{0};
+        for (auto entry{m_current.m_object.rbegin()}; entry != m_current.m_object.rend(); ++entry)
+            if (!m_ghost.at(entry->first)) { m_last_margin = entry->second->get_margin(); break; }
         switch (m_alignment_forward)
         {
         case 0:
@@ -1033,8 +1023,10 @@ export namespace lgo
         }
         case 2:
         {
-            std::int64_t offset_forward{ margin_actual - size_orig_forward };
-            m_length += margin_actual - size_orig_forward;
+            // Bottom/right anchoring keeps the far edge fixed: removing a row
+            // moves the remaining earlier content toward that edge.
+            std::int64_t offset_forward{ size_orig_forward - margin_actual };
+            m_length -= offset_forward;
             if (m_current.m_object.size())
             {
                 if (m_from_large)

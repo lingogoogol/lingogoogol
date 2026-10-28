@@ -150,6 +150,7 @@ namespace lgo
         if (status() == shown)
         {
             m_depth_tracker->update(m_depth_id, m_pos, m_size);
+            click_area_callback_mouse_move(m_engine->get_cursor_pos());
         }
         return;
     }
@@ -168,6 +169,7 @@ namespace lgo
         if (status() == shown)
         {
             m_depth_tracker->update(m_depth_id, m_pos, m_size);
+            click_area_callback_mouse_move(m_engine->get_cursor_pos());
         }
         return;
     }
