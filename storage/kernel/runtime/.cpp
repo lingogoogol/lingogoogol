@@ -21,14 +21,6 @@ namespace
     {
         return "clear." + storage_digest(address);
     }
-    class delete_request_t : public google_easy_t
-    {
-      public:
-        auto valid() -> bool override
-        {
-            return google_easy_t::valid() || m_response_code == 404;
-        }
-    };
 } // namespace
 auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
     -> std::shared_ptr<blob_queue_t>
@@ -128,16 +120,28 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
     // restore IDs belonging to files that have already been removed.
     session->queue->clear_end();
     session->queue->clear_begin();
-    for (std::size_t index{progress.load()}; index < ids.size(); ++index)
+    google_batch_t remove;
+    remove.m_account_context = session->account;
+    remove.control_set(control);
+    remove.boundary_set("+");
+    for (std::size_t index{progress.load()}; index < ids.size();)
     {
-        const auto& id{ids[index]};
-        delete_request_t remove;
-        remove.m_account_context = session->account;
-        remove.control_set(control);
-        remove.path_set("/drive/v3/files/" + id);
-        remove.method_delete();
+        remove.clear();
+        remove.path_set("/drive/v3");
+        const auto count{std::min<std::size_t>(google_batch_t::part_count_max(), ids.size()-index)};
+        for (std::size_t part{}; part<count; ++part)
+        {
+            auto& request{remove.request_add_handle()};
+            request.path_set("/drive/v3/files/" + ids[index+part]);
+            request.method_set("DELETE");
+            remove.response_allow_missing(part);
+        }
+        remove.method_post();
         remove.run();
-        ++progress;
+        // Advance only after every part succeeds. A lost response/crash replays
+        // this batch; 404 is accepted only for these idempotent deletes.
+        index += count;
+        progress = index;
         storage_atomic_write(marker, nlohmann::json{{"ids", ids}, {"progress", progress.load()}}.dump());
     }
     // The app needs a fresh empty root after literally all Drive files are removed.
