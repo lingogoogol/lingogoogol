@@ -22,6 +22,7 @@ namespace lgo
     pipeline_state_t rect_primitive_t::m_solid_pipeline_state{};
     pipeline_state_t rect_primitive_t::m_texture_pipeline_state{};
     vk::raii::Sampler rect_primitive_t::m_sampler{ nullptr };
+    buffer_t rect_primitive_t::m_cursor_vertices{};
 
     auto rect_primitive_t::create_vertex_buffer() -> void
     {
@@ -178,7 +179,8 @@ namespace lgo
             .descriptor_set_layout{ &m_solid_descriptor_set_layout },
             .topology{ vk::PrimitiveTopology::eTriangleStrip },
             .surface_format{ m_engine->format_get() },
-            .depth_format{ m_engine->depth_format_get() }
+            .depth_format{ m_engine->depth_format_get() },
+            .push_constant_size{32}
         });
         m_solid_pipeline_state.vertex_binding_add
         (
@@ -216,6 +218,16 @@ namespace lgo
         };
         m_solid_pipeline_state.shader_add(solid_shader_pixel);
         m_solid_pipeline_state.serialize(m_engine->device_get());
+        // One immutable quad; cursor movement changes push constants only,
+        // avoiding vertex uploads and device-idle waits on every mouse event.
+        m_cursor_vertices.init({.name{"cursor.highlight.quad"},
+            .device_physical{&engine->device_physical_get()}, .device{&engine->device_get()},
+            .usage{vk::BufferUsageFlagBits::eVertexBuffer},
+            .property{vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent},
+            .size{sizeof(solid_vertex_t) * 4}});
+        auto* data{m_cursor_vertices.memory_get().interface_get().mapMemory(0, sizeof(solid_vertex_t) * 4)};
+        std::memset(data, 0, sizeof(solid_vertex_t) * 4);
+        m_cursor_vertices.memory_get().interface_get().unmapMemory();
 
         m_texture_descriptor_set_layout.binding_add
         (
@@ -317,13 +329,14 @@ namespace lgo
         m_solid_pipeline_state = {};
         m_texture_pipeline_state = {};
         m_sampler.clear();
+        m_cursor_vertices.clear();
         return;
     }
 
     auto rect_primitive_t::render
     (
         const std::set<rect_primitive_t*>& rect,
-        vk::raii::CommandBuffer& command_buffer
+        vk::raii::CommandBuffer& command_buffer, bool cursor_highlight
     )
     -> void
     {
@@ -332,6 +345,9 @@ namespace lgo
             vk::PipelineBindPoint::eGraphics,
             *m_solid_pipeline_state.interface_get()
         );
+        const std::array<float, 8> ordinary{};
+        command_buffer.pushConstants<float>(m_solid_pipeline_state.layout_get(),
+            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, ordinary);
         for (auto i{ rect.begin() }; i != rect.end(); ++i)
         {
             if (!(*i)->m_texture_enable)
@@ -351,6 +367,23 @@ namespace lgo
             {
                 (*i)->render(command_buffer);
             }
+        }
+        if (cursor_highlight)
+        {
+            const auto logical{m_engine->get_window_size()};
+            const auto frame{m_engine->get_framebuffer_size()};
+            const auto cursor{m_engine->cursor_pos_get()};
+            const float sx{float(frame.x) / logical.x}, sy{float(frame.y) / logical.y};
+            // Independent X/Y framebuffer scales preserve a logical circle on HiDPI screens.
+            const std::array<float, 8> highlight{cursor.x * sx, cursor.y * sy,
+                72.f * sx, 72.f * sy, float(frame.x), float(frame.y), 0.f, 0.f};
+            command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_solid_pipeline_state.interface_get());
+            command_buffer.pushConstants<float>(m_solid_pipeline_state.layout_get(),
+                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, highlight);
+            command_buffer.setScissor(0, vk::Rect2D{.offset{0, 0},
+                .extent{static_cast<std::uint32_t>(frame.x), static_cast<std::uint32_t>(frame.y)}});
+            command_buffer.bindVertexBuffers(0, *m_cursor_vertices.interface_get(), {0});
+            command_buffer.draw(4, 1, 0, 0);
         }
         return;
     }

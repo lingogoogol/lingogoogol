@@ -53,6 +53,7 @@ export namespace lgo
         vk::raii::Fence m_fence{ nullptr };
         std::uint64_t m_frame_number{ 0 };
         bool m_exit{ false };
+        bool m_cursor_highlight{};
         std::atomic_bool m_device_lost{};
         bool m_surface_lost{};
         bool m_recovering{};
@@ -170,6 +171,7 @@ export namespace lgo
         auto remove_rect(rect_primitive_t* in) -> void;
 
         auto cursor_pos_get() const -> pos_2D;
+        auto cursor_highlight_set(bool enabled) -> void { m_cursor_highlight = enabled; }
         auto frame_rate() const -> std::uint64_t;
 
         //This includes both cursor enter and cursor leave.

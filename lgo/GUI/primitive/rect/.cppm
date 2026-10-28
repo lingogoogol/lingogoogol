@@ -41,6 +41,7 @@ export namespace lgo
         static pipeline_state_t m_solid_pipeline_state;
         static pipeline_state_t m_texture_pipeline_state;
         static vk::raii::Sampler m_sampler;
+        static buffer_t m_cursor_vertices;
 
         buffer_t m_vertex_buffer{};
         std::size_t m_vertex_buffer_size{};
@@ -75,7 +76,7 @@ export namespace lgo
         static auto render
         (
             const std::set<rect_primitive_t*>& rect,
-            vk::raii::CommandBuffer& command_buffer
+            vk::raii::CommandBuffer& command_buffer, bool cursor_highlight = false
         )
         -> void;
         

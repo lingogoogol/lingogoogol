@@ -19,6 +19,7 @@ namespace lgo
         m_input_assembly.topology = ctor.topology;
         m_surface_format = ctor.surface_format;
         m_depth_format = ctor.depth_format;
+        m_push_constant_size = ctor.push_constant_size;
         return;
     }
 
@@ -138,11 +139,15 @@ namespace lgo
             .attachmentCount{ 1 },
             .pAttachments{ &color_blend_arr }
         };
+        const vk::PushConstantRange push_constants{
+            .stageFlags{vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment},
+            .offset{0}, .size{m_push_constant_size}};
         vk::PipelineLayoutCreateInfo pipeline_layout_info
         {
             .setLayoutCount{ 1 },
             .pSetLayouts{ &*m_descriptor_set_layout->interface_get() },
-            .pushConstantRangeCount{ 0 }
+            .pushConstantRangeCount{m_push_constant_size ? 1u : 0u},
+            .pPushConstantRanges{m_push_constant_size ? &push_constants : nullptr}
         };
         m_pipeline_layout = vk::raii::PipelineLayout{ device, pipeline_layout_info };
         vulkan_name(device, *m_pipeline_layout, [&] { return m_name + ".pipeline-layout"; });

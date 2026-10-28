@@ -22,6 +22,9 @@ constexpr auto GLFW_PRESS_export{ GLFW_PRESS };
 constexpr auto GLFW_RELEASE_export{ GLFW_RELEASE };
 #undef GLFW_RELEASE
 
+constexpr auto GLFW_HOVERED_export{ GLFW_HOVERED };
+#undef GLFW_HOVERED
+
 constexpr auto GLFW_ICONIFIED_export{ GLFW_ICONIFIED };
 #undef GLFW_ICONIFIED
 
@@ -42,6 +45,7 @@ constexpr auto GLFW_KEY_C_export{ GLFW_KEY_C };
 #undef GLFW_KEY_C
 constexpr auto GLFW_KEY_V_export{ GLFW_KEY_V };
 #undef GLFW_KEY_V
+
 
 export
 {
@@ -93,6 +97,7 @@ export
     constexpr auto GLFW_KEY_C{ GLFW_KEY_C_export };
     constexpr auto GLFW_KEY_V{ GLFW_KEY_V_export };
 
+    constexpr auto GLFW_HOVERED{ GLFW_HOVERED_export };
     constexpr auto GLFW_ICONIFIED{ GLFW_ICONIFIED_export };
     constexpr auto GLFW_DONT_CARE{ GLFW_DONT_CARE_export };
     constexpr auto GLFW_CLIENT_API{ GLFW_CLIENT_API_export };

@@ -721,6 +721,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
           curl_multi_worker_t* multi, blob_queue_t* blob_queue, std::string* pos) -> void
 {
     state->clear_state();
+    engine->cursor_highlight_set(true);
     auto main_div{state->add_object_shared<lgo::divy_hard_t>(
         lgo::depth_range_t{0.2f, 1.0f}, lgo::pos_2D{0, 0}, engine->get_window_size(), lgo::size_1D{0},
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};

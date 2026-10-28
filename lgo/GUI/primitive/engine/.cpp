@@ -1084,7 +1084,8 @@ namespace lgo {
                 1.0f
             }
         );
-        rect_primitive_t::render(m_rect_primitive, m_command_buffer);
+        rect_primitive_t::render(m_rect_primitive, m_command_buffer,
+            m_cursor_highlight && glfwGetWindowAttrib(m_window, GLFW_HOVERED) != GLFW_FALSE);
         m_command_buffer.endRendering();
         transition_image_layout
         (
