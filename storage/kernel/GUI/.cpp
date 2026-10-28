@@ -268,7 +268,7 @@ namespace
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top});
         auto row{state->m_progress_column->get_object_shared<lgo::divy_flex_soft_t>(task->m_progress_div)};
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, text, lgo::std_white, lgo::size_1D{256}, false);
+            storage_content_depth, text, lgo::std_green_light, lgo::size_1D{256}, false);
         task->m_progress_bar = row->add_object_shared<lgo::progress_bar_t>(
             storage_content_depth, lgo::size_2D{256, 10}, lgo::std_green);
         const std::weak_ptr<load_task_t> weak{task};
@@ -699,7 +699,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                     if (auto target{viewer.lock()}; target && load_state->m_session == session &&
                         !persistent->m_switching && session && !session->clearing)
                         folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
-                }, ancestor.at("name").get<std::string>(), lgo::std_white, lgo::size_1D{0})};
+                }, ancestor.at("name").get<std::string>(), lgo::std_brown_light, lgo::size_1D{0})};
             button->set_size(button->get_text_size());
         }
         for (const auto& entry : result.at("entries"))
@@ -719,7 +719,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 },
                 (folder ? "資料夾，名稱：" : "檔案，名稱：") + name +
                     (folder ? "" : "，大小：" + std::to_string(entry.at("size").get<std::uint64_t>())),
-                lgo::std_white, row->space_x(lgo::std_margin));
+                folder ? lgo::std_brown_light : lgo::std_green_light, row->space_x(lgo::std_margin));
             auto actions{row->add_object_shared<lgo::divx_soft_t>(
                 storage_content_depth, lgo::div_create_from_member{},
                 lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -729,26 +729,26 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 {
                     if (folder) folder_download_callback(load_state, name, id);
                     else file_download_callback(load_state, name, id);
-                }, "下載", lgo::std_white, lgo::size_1D{32});
+                }, "下載", lgo::std_blue_light, lgo::size_1D{32});
             auto separator = [&]
             {
                 actions->add_object<lgo::std_liney_t>(storage_content_depth,
-                    lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+                    lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_blue_light);
             };
             separator();
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, false}; },
-                "剪下", lgo::std_white, lgo::size_1D{32});
+                "剪下", lgo::std_blue_light, lgo::size_1D{32});
             separator();
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, true}; },
-                "複製", lgo::std_white, lgo::size_1D{32});
+                "複製", lgo::std_blue_light, lgo::size_1D{32});
             separator();
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { delete_dialog(engine, persistent, load_state, session, source, entry); },
-                "刪除", lgo::std_white, lgo::size_1D{32});
+                "刪除", lgo::std_blue_light, lgo::size_1D{32});
             row->add_object<lgo::std_linex_t>(
-                storage_content_depth, row->space_x(lgo::std_margin), lgo::std_white);
+                storage_content_depth, row->space_x(lgo::std_margin), lgo::std_blue_light);
         }
         const bool same_path{persistent->m_breadcrumb_folder == source};
         const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};

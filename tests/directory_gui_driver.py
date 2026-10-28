@@ -160,7 +160,8 @@ try:
     # Download | Cut | Copy | Delete use the standard vertical dividers.
     image = screenshot('actions')
     for x in (330, 380, 430):
-        assert sum(image.getpixel((x, y))[0] > 200 for y in range(98, 125)) >= 18, 'Missing action separator.'
+        assert sum(b > 240 and 150 < r < 220 and abs(r-g) < 3
+                   for r,g,b in (image.getpixel((x,y)) for y in range(98,125))) >= 18, 'Missing light-blue action separator.'
     click(356, 110)  # Cut records a selection; it must not mutate Drive.
     image = screenshot('paste-enabled')
     assert image.getpixel((808,16))[0] > 240, 'Cut did not enable the standard-size paste button.'

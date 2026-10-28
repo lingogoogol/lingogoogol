@@ -17,6 +17,7 @@ export namespace lgo
     color_t std_white{ 1.0f, 1.0f, 1.0f };
     color_t std_red{ 1.0f, 0.0f, 0.0f };
     color_t std_red_light{ 1.0f, 0.5f, 0.5f };
+    color_t std_brown_light{ 0.8f, 0.6f, 0.4f };
     color_t std_yellow{ 1.0f, 1.0f, 0.0f };
     color_t std_green{ 0.0f, 1.0f, 0.0f };
     color_t std_green_light{ 0.5f, 1.0f, 0.5f };
