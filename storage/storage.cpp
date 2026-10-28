@@ -79,7 +79,12 @@ auto app() -> void
     std::atomic_uint64_t clear_progress{}, clear_total{};
     std::shared_ptr<lgo::text_line_scroll_std_t> clear_text;
     std::shared_ptr<progress_button_t> clear_retry;
-    std::shared_ptr<progress_button_t> clear_cancel;
+    std::shared_ptr<progress_button_t> clear_cancel, clear_confirm;
+    // Completed clear rows remain independent of later clears. Input callbacks
+    // only mark rows; removing their controls during input dispatch is unsafe.
+    std::vector<std::pair<std::uint64_t, std::shared_ptr<bool>>> clear_rows;
+    std::shared_ptr<bool> clear_dismissed;
+    bool clear_restart{};
     struct shutdown_t
     {
         storage_runtime_t& runtime;
@@ -156,6 +161,12 @@ auto app() -> void
     {
         if (clear_job.valid() || settings_job.valid())
             return;
+        if (clear_retry) clear_retry->hide();
+        if (clear_separator) clear_separator->hide();
+        if (clear_confirm && clear_retry)
+            clear_confirm->set_pos(clear_retry->get_pos());
+        clear_control->cancelled = false;
+        clear_control->retry();
         clearing_session = load_state.m_session;
         clearing_session->clearing = true;
         persistent.m_reset_view();
@@ -174,24 +185,26 @@ auto app() -> void
                 cancelled.push_back(task);
             }
         multi.interrupt();
-        clear_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
+        const auto row_id{progress_column->add_object<lgo::divy_flex_soft_t>(
+            storage_content_depth, progress_column->space_x(lgo::std_margin), lgo::std_margin,
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+        auto row{progress_column->get_object_shared<lgo::divy_flex_soft_t>(row_id)};
+        clear_dismissed = std::make_shared<bool>(false);
+        clear_rows.emplace_back(row_id, clear_dismissed);
+        clear_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
             storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red, lgo::size_1D{256}, false);
-        auto clear_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
+        auto clear_actions{row->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
-            progress_column->space_x(lgo::std_margin),
+            row->space_x(lgo::std_margin),
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
         clear_retry = clear_actions->add_object_shared<progress_button_t>(
             storage_content_depth,
             [&]
             {
                 load_state.m_session->account->retry();
-                clear_control->retry();
-                if (!clear_job.valid())
-                {
-                    clear_control->cancelled = false;
-                    persistent.m_clear_account();
-                }
+                if (clear_job.valid()) clear_control->retry();
+                else clear_restart = true;
             },
             "重試", lgo::std_white, lgo::size_1D{32});
         clear_retry->hide();
@@ -200,6 +213,15 @@ auto app() -> void
         clear_separator->hide();
         clear_cancel = clear_actions->add_object_shared<progress_button_t>(
             storage_content_depth, [&] { clear_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
+        clear_confirm = clear_actions->add_object_ghost_shared<progress_button_t>(
+            storage_content_depth, [dismissed = clear_dismissed] { *dismissed = true; },
+            "確定", lgo::std_white, lgo::size_1D{32});
+        clear_confirm->hide();
+        // Hidden ordinary children still reserve their layout slots. Running
+        // cancel and terminal confirm share the first slot with retry; network
+        // failure moves cancel to the second slot beside the separator.
+        clear_cancel->set_pos(clear_retry->get_pos());
+        clear_confirm->set_pos(clear_retry->get_pos());
         clear_job = std::async(std::launch::async,
                                [&, target = clearing_session, cancelled]
                                {
@@ -295,24 +317,47 @@ auto app() -> void
                 settings_separator->hide();
             }
         }
+        if (clear_restart)
+        {
+            clear_restart = false;
+            *clear_dismissed = true;
+            persistent.m_clear_account();
+        }
+        std::erase_if(clear_rows, [&](const auto& row)
+        {
+            if (!*row.second) return false;
+            progress_column->remove_object(row.first);
+            return true;
+        });
         if (clear_job.valid())
         {
-            if (clear_control->paused)
+            const auto second_slot{clear_separator->get_pos() +
+                lgo::size_2D{clear_separator->get_size().x + lgo::std_margin.x, 0}};
+            if (clear_control->cancelled)
+            {
+                clear_text->set_text("清除：取消中", false);
+                clear_retry->hide();
+                clear_cancel->hide();
+                clear_separator->hide();
+            }
+            else if (clear_control->paused)
             {
                 clear_text->set_text("清除失敗：" + clear_control->reason(), false);
                 clear_retry->show();
                 clear_separator->show();
+                clear_cancel->set_pos(second_slot);
             }
             else
             {
                 clear_retry->hide();
                 clear_separator->hide();
+                clear_cancel->set_pos(clear_retry->get_pos());
                 clear_text->set_text("清除：" + std::to_string(clear_progress.load()) + "/" +
-                                         std::to_string(clear_total.load()),
-                                     false);
+                                         std::to_string(clear_total.load()), false);
             }
             if (clear_job.wait_for(0s) == std::future_status::ready)
             {
+                bool failed{};
                 try
                 {
                     auto root{clear_job.get()};
@@ -323,14 +368,21 @@ auto app() -> void
                 }
                 catch (const std::exception& error)
                 {
-                    clear_text->set_text(std::string{"清除未完成："} + error.what(), false);
+                    failed = !clear_control->cancelled;
+                    clear_text->set_text(clear_control->cancelled ? "清除：已取消" :
+                        std::string{"清除未完成："} + error.what(), false);
                 }
-                if (load_state.m_session->clearing)
-                    clear_retry->show();
-                else
-                    clear_retry->hide();
                 clear_cancel->hide();
+                clear_retry->hide();
                 clear_separator->hide();
+                clear_confirm->set_pos(clear_retry->get_pos());
+                if (failed)
+                {
+                    clear_retry->show();
+                    clear_separator->show();
+                    clear_confirm->set_pos(second_slot);
+                }
+                clear_confirm->show();
                 clearing_session.reset();
             }
         }
