@@ -106,6 +106,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         {
             task->m_progress_text->set_text("已暫停：" + task->m_paused_text, false);
         }
+        const bool directory{task->m_type == "directory"};
         const bool cancelled{task->m_control->cancelled};
         const bool failed{task->m_control->paused};
         const bool paused{task->m_control->user_paused};
@@ -118,10 +119,10 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             }
         };
         visible(task->m_retry_button, !cancelled && failed);
-        visible(task->m_pause_button, !cancelled && !failed && !paused);
-        visible(task->m_resume_button, !cancelled && !failed && paused);
-        visible(task->m_cancel_button, !cancelled && (failed || paused));
-        visible(task->m_action_separator, !cancelled && (failed || paused));
+        visible(task->m_pause_button, !directory && !cancelled && !failed && !paused);
+        visible(task->m_resume_button, !directory && !cancelled && !failed && paused);
+        visible(task->m_cancel_button, !directory && !cancelled && (failed || paused));
+        visible(task->m_action_separator, !directory && !cancelled && (failed || paused));
     }
 
     if (load_state->m_session)
@@ -206,9 +207,31 @@ auto dialog_file(bool folder) -> std::vector<std::string>
     return dialog.result();
 }
 
-auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::string* pos) -> void
+auto folder_create_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
+                            load_state_t* state, std::string* pos) -> void
 {
-    return;
+    const auto session{state->m_session};
+    const auto source{*pos};
+    persistent->m_dialog_queue.push_back([=]
+    {
+        persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+            engine, state->m_progress_column->get_depth_tracker(), "新增資料夾",
+            std::vector<std::string>{},
+            std::vector<std::pair<std::string, std::string>>{{"資料夾名稱", ""}});
+        persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
+        {
+            if (!accepted) return true;
+            try
+            {
+                directory_validate_name(values.at(0));
+                if (state->m_session != session || session->clearing)
+                    throw std::runtime_error{"帳戶已變更，請重新開啟對話框"};
+                begin_directory_task(state, session, "directory-create", source, {}, {}, values[0]);
+                return true;
+            }
+            catch (const std::exception& error) { persistent->m_dialog->error(error.what()); return false; }
+        };
+    });
 }
 
 namespace
@@ -315,9 +338,47 @@ namespace
     }
 } // namespace
 
+auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
+                          std::string kind, std::string source, nlohmann::json entity,
+                          std::string destination, std::string name,
+                          std::shared_ptr<task_journal_t> journal) -> void
+{
+    if (!session || session->clearing) return;
+    if (!journal)
+        journal = task_journal_t::create(nlohmann::json{{"kind", kind}, {"path", name}, {"pos", source},
+            {"entity", entity}, {"destination", destination}, {"account_path", session->account_path},
+            {"account_email", session->address}, {"root_path", session->root_path}, {"root", session->root}});
+    auto task{std::make_shared<directory_task_t>()};
+    task->m_session = session; task->m_journal = journal; task->m_type = "directory";
+    task->m_kind = kind; task->m_name = name; task->m_source = source;
+    task->m_destination = destination; task->m_entity = std::move(entity);
+    task_row(state, task, (kind == "directory-create" ? "新增資料夾：" :
+        kind == "directory-move" ? "剪下貼上：" : kind == "directory-copy" ? "複製：" : "刪除：") + name);
+    task->m_pause_button->hide();
+    // Share the publication chain: every read/modify/write of a directory is
+    // ordered with existing uploads. A worker never reads GUI-owned containers.
+    task->m_operation = std::async(std::launch::async,
+        [task = task.get(), previous = state->m_upload_linked]
+        {
+            using namespace std::chrono_literals;
+            while (previous.valid() && previous.wait_for(20ms) != std::future_status::ready)
+                if (task->m_control->cancelled) throw std::runtime_error{"操作已中止"};
+            if (task->m_control->cancelled) throw std::runtime_error{"操作已中止"};
+            directory_execute(*task);
+        }).share();
+    state->m_upload_linked = task->m_operation;
+}
+
 auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session, std::string kind,
                 std::string path, std::string pos, std::shared_ptr<task_journal_t> journal) -> void
 {
+    if (kind.starts_with("directory-"))
+    {
+        if (!journal) throw std::invalid_argument{"Directory restoration requires a saved intent."};
+        const auto saved = journal->data();
+        begin_directory_task(state, session, kind, pos, saved.at("entity"), saved.at("destination"), path, journal);
+        return;
+    }
     const bool upload{kind.starts_with("upload")};
     const bool folder{kind.ends_with("folder")};
     if (session && session->clearing)
@@ -486,6 +547,76 @@ auto folder_button_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
     return;
 }
 
+namespace
+{
+    auto paste_dialog(lgo::engine_t* engine, GUI_persistent_t* persistent, load_state_t* state,
+                      std::string destination) -> void
+    {
+        const auto clipboard{persistent->m_clipboard};
+        persistent->m_dialog_queue.push_back([=]
+        {
+            if (!clipboard)
+            {
+                persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                    engine, state->m_progress_column->get_depth_tracker(), "貼上",
+                    std::vector<std::string>{"請先剪下或複製一個檔案或資料夾。"},
+                    std::vector<std::pair<std::string, std::string>>{});
+                persistent->m_dialog_done = [](bool, const auto&) { return true; };
+                return;
+            }
+            persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                engine, state->m_progress_column->get_depth_tracker(),
+                clipboard->copy ? "複製到目前資料夾" : "剪下並貼上",
+                std::vector<std::string>{"項目：" + clipboard->entity.at("name").get<std::string>(),
+                    "目的地：目前顯示的資料夾"},
+                std::vector<std::pair<std::string, std::string>>{}, "貼上");
+            persistent->m_dialog_done = [=](bool accepted, const auto&)
+            {
+                if (!accepted) return true;
+                if (state->m_session != clipboard->session || clipboard->session->clearing)
+                {
+                    persistent->m_dialog->error("帳戶已變更，請重新剪下或複製");
+                    return false;
+                }
+                begin_directory_task(state, clipboard->session,
+                    clipboard->copy ? "directory-copy" : "directory-move", clipboard->source,
+                    clipboard->entity, destination, clipboard->entity.at("name").get<std::string>());
+                if (!clipboard->copy && persistent->m_clipboard &&
+                    persistent->m_clipboard->session == clipboard->session &&
+                    persistent->m_clipboard->entity.at("id") == clipboard->entity.at("id") &&
+                    !persistent->m_clipboard->copy)
+                    persistent->m_clipboard.reset();
+                return true;
+            };
+        });
+    }
+
+    auto delete_dialog(lgo::engine_t* engine, GUI_persistent_t* persistent, load_state_t* state,
+                       std::shared_ptr<storage_session_t> session, std::string source,
+                       nlohmann::json entry) -> void
+    {
+        persistent->m_dialog_queue.push_back([=]
+        {
+            if (state->m_session != session || session->clearing) return;
+            persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                engine, state->m_progress_column->get_depth_tracker(), "刪除檔案或資料夾",
+                std::vector<std::string>{"項目：" + entry.at("name").get<std::string>(),
+                    "將永久刪除此項目及所有子內容，無法復原。"},
+                std::vector<std::pair<std::string, std::string>>{}, "刪除");
+            persistent->m_dialog_done = [=](bool accepted, const auto&)
+            {
+                if (accepted)
+                {
+                    if (state->m_session != session || session->clearing)
+                    { persistent->m_dialog->error("帳戶已變更，請取消並重新操作"); return false; }
+                    begin_directory_task(state, session, "directory-delete", source, entry, {}, entry.at("name").get<std::string>());
+                }
+                return true;
+            };
+        });
+    }
+}
+
 auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,
           load_state_t* load_state, blob_queue_t* blob_queue, std::shared_ptr<lgo::divy_soft_t> viewer_div,
           std::string* pos) -> void
@@ -499,7 +630,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
     if (session && session->clearing)
     {
         viewer_div->clear_state();
-        persistent->m_directory_status->set_text("清除中");
+            persistent->m_directory_status->set_text("清除中");
         return;
     }
     auto control{std::make_shared<request_control_t>()};
@@ -514,46 +645,71 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                return list_folder_content(request, &target);
                            })};
     persistent->m_directory_status->set_text("目錄更新中");
+    const auto source{*pos};
     auto apply = [=](nlohmann::json obj_list)
     {
         viewer_div->clear_state();
-        for (auto i : obj_list)
+        auto contents{viewer_div};
+        if (session && source != session->root)
         {
-            if (i["type"] == "folder")
+            // Clipboard operations need a route back to other branches of the
+            // tree while retaining their selected source item.
+            auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
+                lgo::size_1D{viewer_div->get_size().x}, lgo::std_margin,
+                lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
+            row->add_object<progress_button_t>(storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
+                { if (auto target{viewer.lock()}) folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, session->root); },
+                "返回根目錄", lgo::std_white, lgo::size_1D{96});
+            row->add_object<lgo::std_linex_t>(storage_content_depth,
+                row->space_x(lgo::std_margin), lgo::std_white);
+        }
+        for (const auto& entry : obj_list)
+        {
+            const bool folder{entry.at("type") == "folder"};
+            if (!folder && entry.at("type") != "file") throw lgo::internal_error_t{"obj type"};
+            const auto id{entry.at("id").get<std::string>()};
+            const auto name{entry.at("name").get<std::string>()};
+            auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
+                lgo::size_1D{viewer_div->get_size().x}, lgo::std_margin,
+                lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
+            row->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
+                storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
+                {
+                    if (auto target{viewer.lock()}; folder && target)
+                        folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
+                },
+                (folder ? "資料夾，名稱：" : "檔案，名稱：") + name +
+                    (folder ? "" : "，大小：" + std::to_string(entry.at("size").get<std::uint64_t>())),
+                lgo::std_white, row->space_x(lgo::std_margin));
+            auto actions{row->add_object_shared<lgo::divx_soft_t>(
+                storage_content_depth, lgo::div_create_from_member{},
+                lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
+                row->space_x(lgo::std_margin),
+                lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                {
+                    if (folder) folder_download_callback(load_state, name, id);
+                    else file_download_callback(load_state, name, id);
+                }, "下載", lgo::std_white, lgo::size_1D{32});
+            auto separator = [&]
             {
-                viewer_div->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
-                    storage_content_depth,
-                    std::bind(&folder_button_callback, engine, persistent, multi, load_state, blob_queue,
-                              viewer_div, pos, i["id"]),
-                    "資料夾，名稱：" + i["name"].get<std::string>(), lgo::std_white,
-                    lgo::size_1D{viewer_div->space_2D(lgo::std_margin).x});
-                viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>(
-                    storage_content_depth,
-                    std::bind(&folder_download_callback, load_state, i["name"].get<std::string>(),
-                              i["id"].get<std::string>()),
-                    "下載", lgo::std_white, viewer_div->space_x(lgo::std_margin));
-                viewer_div->add_object<lgo::std_linex_t>(
-                    storage_content_depth, viewer_div->space_x(lgo::std_margin), lgo::std_white);
-            }
-            else if (i["type"] == "file")
-            {
-                viewer_div->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
-                    storage_content_depth, []() {},
-                    "檔案，名稱：" + i["name"].get<std::string>() + "，大小：" +
-                        std::to_string(i["size"].get<std::uint64_t>()),
-                    lgo::std_white, lgo::size_1D{viewer_div->space_2D(lgo::std_margin).x});
-                viewer_div->add_object<lgo::button_text_t<lgo::text_line_std_t>>(
-                    storage_content_depth,
-                    std::bind(&file_download_callback, load_state, i["name"].get<std::string>(),
-                              i["id"].get<std::string>()),
-                    "下載", lgo::std_white, viewer_div->space_x(lgo::std_margin));
-                viewer_div->add_object<lgo::std_linex_t>(
-                    storage_content_depth, viewer_div->space_x(lgo::std_margin), lgo::std_white);
-            }
-            else
-            {
-                throw lgo::internal_error_t{"obj type"};
-            }
+                actions->add_object<lgo::std_liney_t>(storage_content_depth,
+                    lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+            };
+            separator();
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, false}; },
+                "剪下", lgo::std_white, lgo::size_1D{32});
+            separator();
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, true}; },
+                "複製", lgo::std_white, lgo::size_1D{32});
+            separator();
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                { delete_dialog(engine, persistent, load_state, session, source, entry); },
+                "刪除", lgo::std_white, lgo::size_1D{32});
+            row->add_object<lgo::std_linex_t>(
+                storage_content_depth, row->space_x(lgo::std_margin), lgo::std_white);
         }
     };
     persistent->m_listings.push_back({generation, session, control, std::move(future), std::move(apply)});
@@ -581,7 +737,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         main_div->space_x(lgo::std_margin),
         lgo::alignment_2D{lgo::alignment_x::right, lgo::alignment_y::center})};
     persistent->m_directory_status = menu_right->add_object_shared<lgo::text_line_std_t>(
-        storage_content_depth, "", lgo::std_red, lgo::size_1D{112});
+        storage_content_depth, "", lgo::std_red, lgo::size_1D{96});
     auto header_line = main_div->add_object_shared<lgo::std_linex_t>(
         storage_content_depth, main_div->space_x(lgo::std_margin), lgo::std_white);
     auto work_div{main_div->add_object_shared<lgo::divx_soft_t>(
@@ -657,8 +813,18 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         for (auto& listing : persistent->m_listings)
             listing.control->cancel();
         viewer_div->clear_state();
-    };
+        };
     persistent->m_refresh = [=] { list(engine, persistent, multi, load_state, blob_queue, viewer_div, pos); };
+    load_state->m_on_directory_changed = [=](const directory_task_t& task)
+    {
+        if (task.m_kind == "directory-delete")
+        {
+            const auto saved = task.m_journal->data();
+            const auto ids = saved.value("delete_ids", std::vector<std::string>{});
+            if (std::ranges::find(ids, *pos) != ids.end()) *pos = task.m_source;
+        }
+        if (*pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
+    };
     load_state->m_on_upload_linked = [engine, persistent, multi, load_state, blob_queue, pos,
                                       viewer = std::weak_ptr{viewer_div}](const std::string& uploaded_pos)
     {
@@ -790,6 +956,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 };
             });
     };
+    menu_right->add_object_shared<progress_button_t>(
+        storage_content_depth, [=] { paste_dialog(engine, persistent, load_state, *pos); }, "貼上", lgo::std_white, lgo::size_1D{32});
+
     menu_right->add_object<lgo::button_classic_std_t>(
         storage_content_depth,
         [=]
@@ -805,7 +974,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     menu_right->add_object<lgo::button_classic_std_t>(storage_content_depth, load_state->m_settings_page,
                                                       "設定");
     menu_right->add_object<lgo::button_classic_std_t>(
-        storage_content_depth, std::bind(&folder_create_callback, engine, state, pos), "新增資料夾");
+        storage_content_depth, std::bind(&folder_create_callback, engine, persistent, load_state, pos), "新增資料夾");
     menu_right->add_object<lgo::button_classic_std_t>(
         storage_content_depth, [load_state, blob_queue, pos]
         { folder_upload_callback(load_state, blob_queue, *pos); }, "上傳資料夾");
@@ -840,8 +1009,16 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             }
             main_div->set_size(size);
             menu_left->set_size(lgo::size_2D{main_div->space_x(lgo::std_margin).x, menu_left->get_size().y});
+            // Reserve the left edge for directory status on narrow windows;
+            // all seven toolbar actions still fit at the 800-pixel minimum.
+            if (size.x < 1000) menu_left->hide();
+            else menu_left->show();
             menu_right->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, menu_right->get_size().y});
+            // Keep all seven standard-size buttons visible at the minimum width.
+            persistent->m_directory_status->set_size({std::clamp<std::int64_t>(
+                menu_right->get_size().x - 7 * (lgo::button_classic_std_impl_t::size.x + lgo::std_margin.x),
+                0, 96), persistent->m_directory_status->get_size().y});
             header_line->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, header_line->get_size().y});
             // space_2D() reports unused space; add back the existing child along the flow axis.
@@ -857,6 +1034,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             viewer_size.x += viewer_div->get_size().x;
             viewer_div->set_size(viewer_size);
             viewer_div->fit_children_sideways();
+
             center_div->set_size(size);
         });
     // Below this size the fixed-width desktop controls and status column would overlap.

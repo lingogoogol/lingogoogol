@@ -73,6 +73,7 @@ export
     struct download_task_t;
     struct download_file_t;
     struct download_chunk_t;
+    struct directory_task_t;
 
     struct storage_session_t {
         std::shared_ptr<google_account_t> account;
@@ -108,6 +109,7 @@ export
         std::shared_future<void> m_upload_linked{};
         //Invoked on the GUI thread after publication succeeds.
         std::function<void(const std::string&)> m_on_upload_linked{};
+        std::function<void(const directory_task_t&)> m_on_directory_changed;
     };
     
     enum class task_result_t { active, cancelling, completed, cancelled, failed };
@@ -246,6 +248,18 @@ export
         std::vector<std::shared_ptr<upload_entity_t>>::iterator m_begin_progress{};
         std::vector<std::shared_ptr<upload_entity_t>>::iterator m_end_progress{};
     };
+
+    struct directory_task_t: public load_task_t
+    {
+        ~directory_task_t() override { if (m_operation.valid()) m_operation.wait(); }
+        std::string m_kind, m_name, m_source, m_destination;
+        nlohmann::json m_entity;
+        std::shared_future<void> m_operation;
+        std::atomic_uint64_t m_completed{}, m_total{};
+    };
+
+    auto directory_validate_name(std::string_view name) -> void;
+    auto directory_execute(directory_task_t& task) -> void;
 
     struct download_chunk_t
     {

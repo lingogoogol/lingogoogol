@@ -216,6 +216,8 @@ auto app() -> void
                                        if (auto download = std::dynamic_pointer_cast<download_task_t>(task))
                                            if (download->m_prepared.valid())
                                                download->m_prepared.wait();
+                                       if (auto operation = std::dynamic_pointer_cast<directory_task_t>(task))
+                                           if (operation->m_operation.valid()) operation->m_operation.wait();
                                        while (multi.pending(task->m_control))
                                        {
                                            if (clear_control->cancelled)

@@ -8,6 +8,7 @@ target_sources(
             .cppm
     PRIVATE
         .cpp
+        directory.cpp
 )
 
 target_link_libraries(

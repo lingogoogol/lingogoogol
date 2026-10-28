@@ -81,6 +81,8 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
             busy = busy || !ready(upload->m_prepared) || !ready(upload->m_linked);
         if (const auto download{std::dynamic_pointer_cast<download_task_t>(*entry)})
             busy = busy || !ready(download->m_prepared);
+        if (const auto operation{std::dynamic_pointer_cast<directory_task_t>(*entry)})
+            busy = busy || !ready(operation->m_operation);
         std::erase_if(state.m_parked, [&](const auto& parked)
             { return parked.request->m_control == task.m_control; });
         if (task.m_result == task_result_t::cancelling && !busy)
@@ -477,6 +479,29 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
             easy.m_account_context.reset();
         easy.control_set(task_ptr->m_control);
         easy.m_journal = task_ptr->m_journal;
+        if (task_ptr->m_type == "directory")
+        {
+            auto task{std::static_pointer_cast<directory_task_t>(task_ptr)};
+            const auto total{task->m_total.load()}, completed{task->m_completed.load()};
+            if (task->m_progress_bar)
+                task->m_progress_bar->set_fraction(total ? double(completed) / total : 0.);
+            if (task->m_progress_text)
+                task->m_progress_text->set_text(task->m_label + (total ? std::format("（{}/{}）", completed, total) : "（等待中）"), false);
+            if (task->m_operation.wait_for(0s) != std::future_status::ready) continue;
+            try
+            {
+                task->m_operation.get();
+                if (state->m_on_directory_changed && task->m_session == state->m_session)
+                    state->m_on_directory_changed(*task);
+                finish_task(*task, task_result_t::completed, "已完成：" + task->m_label);
+            }
+            catch (const std::exception& error)
+            {
+                lgo::log_file("Directory operation failed: " + std::string{error.what()} + "\n");
+                finish_task(*task, task_result_t::failed, "操作失敗：" + task->m_label + "（" + error.what() + "）");
+            }
+            return false;
+        }
         if (task_ptr->m_type == "upload")
         {
             auto upload_task_ptr{ std::dynamic_pointer_cast<upload_task_t>(task_ptr) };

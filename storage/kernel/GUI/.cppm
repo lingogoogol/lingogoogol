@@ -33,6 +33,14 @@ export {
         std::function<bool(bool, const std::vector<std::string>&)> m_dialog_done;
         std::deque<std::function<void()>> m_dialog_queue;
         std::deque<std::function<void()>> m_deferred;
+        struct clipboard_t
+        {
+            std::shared_ptr<storage_session_t> session;
+            std::string source;
+            nlohmann::json entity;
+            bool copy{};
+        };
+        std::optional<clipboard_t> m_clipboard;
         struct listing_t
         {
             std::uint64_t generation{};
@@ -67,7 +75,7 @@ export {
 
     auto dialog_file(bool folder) -> std::vector<std::string>;
 
-    auto folder_create_callback(lgo::engine_t* engine, lgo::state_t* state, std::string* pos) -> void;
+    auto folder_create_callback(lgo::engine_t* engine, GUI_persistent_t* persistent, load_state_t* state, std::string* pos) -> void;
 
     auto file_upload_callback(load_state_t* load_state, blob_queue_t* blob_queue, std::string pos) -> void;
 
@@ -105,6 +113,10 @@ export {
     restore_tasks(load_state_t* state,
                   const std::function<std::shared_ptr<storage_session_t>(const nlohmann::json&)>& session)
         -> void;
+    auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
+                              std::string kind, std::string source, nlohmann::json entity = {},
+                              std::string destination = {}, std::string name = {},
+                              std::shared_ptr<task_journal_t> journal = {}) -> void;
     auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session, std::string kind,
                     std::string path, std::string pos, std::shared_ptr<task_journal_t> journal = {}) -> void;
 
