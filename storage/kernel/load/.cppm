@@ -253,7 +253,8 @@ export
 
     struct directory_request_t
     {
-        std::function<void(google_easy_t&)> configure;
+        // Each description appends exactly one part to a shared-pool batch.
+        std::function<void(google_batch_t&)> configure;
         std::promise<std::string> response;
         bool allow_missing{};
     };

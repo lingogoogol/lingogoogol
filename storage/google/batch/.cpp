@@ -12,11 +12,6 @@ import lgo.io.file;
 import storage.http;
 import storage.google.easy;
 
-constexpr auto google_batch_t::part_count_max() -> std::uint64_t
-{
-    return 100;
-}
-
 google_batch_t::google_batch_t()
 : google_easy_t{} {}
 
@@ -83,6 +78,11 @@ auto google_batch_t::request_get(std::uint64_t id) -> http_request_t&
 auto google_batch_t::response_get(std::uint64_t id) -> http_response_t&
 {
     return m_part[id].m_response;
+}
+
+auto google_batch_t::response_allow_missing(std::uint64_t id) -> void
+{
+    m_part.at(id).m_allow_missing = true;
 }
 
 auto google_batch_t::method_post() -> void
@@ -178,7 +178,8 @@ auto google_batch_t::parse() -> void
         for (auto& [id, response] : parsed)
         {
             auto& part{ m_part.at(id) };
-            part.m_valid = response.status_code_get().starts_with('2');
+            part.m_valid = response.status_code_get().starts_with('2') ||
+                (part.m_allow_missing && response.status_code_get() == "404");
             if (response.status_code_get() == "401") m_auth_rejected = true;
             part.m_response = std::move(response);
         }

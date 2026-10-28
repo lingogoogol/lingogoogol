@@ -13,7 +13,8 @@ export
     class google_batch_t: public google_easy_t
     {
     public:
-        constexpr static auto part_count_max() -> std::uint64_t;
+        // Importers need the definition when sizing their bounded request windows.
+        constexpr static auto part_count_max() -> std::uint64_t { return 100; }
 
         google_batch_t();
         google_batch_t(curl_easy_t&& easy);
@@ -30,6 +31,9 @@ export
         auto request_add_handle() -> http_request_t&;
         auto request_get(std::uint64_t id) -> http_request_t&;
         auto response_get(std::uint64_t id) -> http_response_t&;
+        // Opt in per part: replayed DELETEs can legitimately return 404. A
+        // caller accepting missing GETs must still inspect their status.
+        auto response_allow_missing(std::uint64_t id) -> void;
         auto method_post() -> void;
 
         auto run_clear_if_full() -> void;
@@ -46,6 +50,7 @@ export
             http_request_t m_request{};
             http_response_t m_response{};
             bool m_valid{ false };
+            bool m_allow_missing{};
         };
 
         auto body_generate() -> void;

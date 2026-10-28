@@ -14,7 +14,7 @@ namespace
     class directory_io_t
     {
         directory_task_t& task;
-        auto submit(std::function<void(google_easy_t&)> configure, bool allow_missing = false) -> response_t
+        auto submit(std::function<void(google_batch_t&)> configure, bool allow_missing = false) -> response_t
         {
             if (task.m_control->cancelled) throw std::runtime_error{"操作已中止"};
             auto request{std::make_shared<directory_request_t>()};
@@ -54,12 +54,17 @@ namespace
         auto remove(std::string id) -> response_t
         {
             return submit([id = std::move(id)](auto& easy)
-                { easy.clear(); easy.path_set("/drive/v3/files/"+id); easy.method_delete(); },true);
+                {
+                    auto& request{easy.request_add_handle()};
+                    request.path_set("/drive/v3/files/"+id);
+                    request.method_set("DELETE");
+                },true);
         }
     };
 
-    // At most one pool request per logical job, including a data GET followed
-    // by PATCH. Consume whichever finishes first, not just the first submitted.
+    // Each physical pool request carries up to 100 independent logical jobs.
+    // Bound the window to 64 batches, including a data GET followed by PATCH.
+    // Consume whichever finishes first, not just the first submitted.
     // Discovery can grow size() as new metadata links arrive.
     // Complete may return a follow-up future for the same job (a data PATCH
     // after its GET), or an invalid future once that job has fully succeeded.
@@ -72,7 +77,7 @@ namespace
         while (next<size() || !pending.empty())
         {
             if (task.m_control->cancelled) throw std::runtime_error{"操作已中止"};
-            while (pending.size()<transfer_slot_count && next<size())
+            while (pending.size()<transfer_slot_count*google_batch_t::part_count_max() && next<size())
             { pending.emplace(next,start(next)); ++next; }
             bool progressed{};
             for (auto entry{pending.begin()}; entry!=pending.end();)
@@ -86,18 +91,6 @@ namespace
             if (!progressed) std::this_thread::sleep_for(1ms);
         }
     }
-
-    class directory_easy_t : public google_easy_t
-    {
-      public:
-        explicit directory_easy_t(curl_easy_t&& easy) : google_easy_t{std::move(easy)} {}
-        auto valid() -> bool override
-        {
-            // Surface missing items on the coordinator, not as a network retry
-            // or an exception that could stop the shared transfer worker.
-            return m_response_code==404 || google_easy_t::valid();
-        }
-    };
 
     struct page_t
     {
@@ -462,36 +455,55 @@ auto directory_notify_unlinked(directory_task_t& task) -> void
 auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi,
                               curl_easy_t&& easy) -> bool
 {
-    std::shared_ptr<directory_request_t> request;
+    std::vector<std::shared_ptr<directory_request_t>> requests;
     {
         std::unique_lock lock{task.m_requests_mutex};
         if (task.m_requests.empty()) return false;
-        request=std::move(task.m_requests.front());
-        task.m_requests.pop_front();
+        while (!task.m_requests.empty() && requests.size()<google_batch_t::part_count_max())
+        {
+            requests.push_back(std::move(task.m_requests.front()));
+            task.m_requests.pop_front();
+        }
     }
     // Check after dequeuing: the coordinator publishes unlinking before
     // enqueueing DELETEs, but can do so after this frame's earlier GUI poll.
     // Retire controls before dispatch, even if the directory refresh is offline.
     directory_notify_unlinked(task);
-    directory_easy_t operation{std::move(easy)};
+    google_batch_t operation{std::move(easy)};
     operation.m_journal.reset(); // Mutable directory reads must never be replayed from a cache.
     auto* key{operation.interface_get()};
     try
     {
-        request->configure(operation);
-        task.m_state->m_end.emplace(key,[request](std::unique_ptr<curl_easy_t>& result)
+        operation.clear();
+        operation.path_set("/drive/v3");
+        for (std::size_t i{}; i<requests.size(); ++i)
         {
-            const auto code{curl_easy_multi_access_t::response_code_get(*result)};
-            if (code==404 && !request->allow_missing)
-                request->response.set_exception(std::make_exception_ptr(
-                    std::runtime_error{"項目或資料夾已不存在，請重新整理"}));
-            else request->response.set_value(result->payload());
+            requests[i]->configure(operation);
+            if (operation.part_count()!=i+1)
+                throw std::logic_error{"Directory request must append exactly one batch part."};
+            // Missing reads must reach the coordinator as errors rather than
+            // retry forever; missing DELETEs are successful idempotent replays.
+            operation.response_allow_missing(i);
+        }
+        operation.method_post();
+        task.m_state->m_end.emplace(key,[requests](std::unique_ptr<curl_easy_t>& result)
+        {
+            auto& batch{dynamic_cast<google_batch_t&>(*result)};
+            for (std::size_t i{}; i<requests.size(); ++i)
+            {
+                auto& response{batch.response_get(i)};
+                if (response.status_code_get()=="404" && !requests[i]->allow_missing)
+                    requests[i]->response.set_exception(std::make_exception_ptr(
+                        std::runtime_error{"項目或資料夾已不存在，請重新整理"}));
+                else requests[i]->response.set_value(response.body_get());
+            }
         });
     }
     catch (...)
     {
         task.m_state->m_end.erase(key);
-        request->response.set_exception(std::current_exception());
+        for (const auto& request : requests)
+            request->response.set_exception(std::current_exception());
         // Restore the pool slot if request construction failed.
         easy=std::move(operation);
         return false;
