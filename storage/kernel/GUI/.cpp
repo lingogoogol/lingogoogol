@@ -268,7 +268,7 @@ namespace
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top});
         auto row{state->m_progress_column->get_object_shared<lgo::divy_flex_soft_t>(task->m_progress_div)};
         task->m_progress_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, text, lgo::std_green_light, lgo::size_1D{256}, false);
+            storage_content_depth, text, lgo::std_white, lgo::size_1D{256}, false);
         task->m_progress_bar = row->add_object_shared<lgo::progress_bar_t>(
             storage_content_depth, lgo::size_2D{256, 10}, lgo::std_green);
         const std::weak_ptr<load_task_t> weak{task};
@@ -650,30 +650,59 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                if (session)
                                    request.m_account_context = session->account;
                                request.control_set(control);
-                               return list_folder_content(request, &target);
+                               auto entries = list_folder_content(request, &target);
+                               auto path = nlohmann::json::array();
+                               std::set<std::string> visited;
+                               auto ancestor{target};
+                               // Read actual parent metadata in the listing worker. Navigation
+                               // history becomes stale after moving a folder or restoring tasks.
+                               while (session && ancestor != session->root && ancestor != "null")
+                               {
+                                   if (!visited.insert(ancestor).second)
+                                       throw std::runtime_error{"資料夾的父目錄形成循環"};
+                                   const auto data = blob_get_run(request, ancestor, "name");
+                                   const auto metadata = nlohmann::json::parse(data.at("name").get<std::string>());
+                                   path.push_back({{"id", ancestor}, {"name", metadata.at("name")}});
+                                   ancestor = metadata.at("parent").get<std::string>();
+                               }
+                               if (session && ancestor == session->root)
+                                   path.push_back({{"id", session->root}, {"name", "根目錄"}});
+                               std::reverse(path.begin(), path.end());
+                               return nlohmann::json{{"entries", std::move(entries)}, {"path", std::move(path)}};
                            })};
     persistent->m_directory_status->set_text("目錄更新中");
     const auto source{*pos};
-    auto apply = [=](nlohmann::json obj_list)
+    auto apply = [=](nlohmann::json result)
     {
         const auto offset{viewer_div->scroll_offset()};
         auto contents{std::make_shared<lgo::divy_flex_soft_t>(engine, load_state->m_progress_column->get_depth_tracker(),
             storage_content_depth, lgo::pos_2D{}, lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
             lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
-        if (session && source != session->root)
+        auto path{std::make_shared<lgo::divx_flex_soft_t>(engine, load_state->m_progress_column->get_depth_tracker(),
+            storage_content_depth, lgo::pos_2D{},
+            lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::center})};
+        for (const auto& ancestor : result.at("path"))
         {
-            // Clipboard operations need a route back to other branches of the
-            // tree while retaining their selected source item.
-            auto row{contents->add_object_shared<lgo::divy_flex_soft_t>(storage_content_depth,
-                lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
-                lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
-            row->add_object<progress_button_t>(storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
-                { if (auto target{viewer.lock()}) folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, session->root); },
-                "返回根目錄", lgo::std_white, lgo::size_1D{96});
-            row->add_object<lgo::std_linex_t>(storage_content_depth,
-                row->space_x(lgo::std_margin), lgo::std_white);
+            if (path->len().x)
+            {
+                // A new text_line_flex_std_t measures its deferred glyphs as
+                // zero width here. Measure a loaded label before sizing its clip.
+                auto separator{path->add_object_shared<lgo::text_line_std_t>(
+                    storage_content_depth, ">", lgo::std_white, lgo::size_1D{0})};
+                separator->set_size(separator->get_text_size());
+            }
+            const auto id{ancestor.at("id").get<std::string>()};
+            auto button{path->add_object_shared<progress_button_t>(
+                storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
+                {
+                    if (auto target{viewer.lock()}; target && load_state->m_session == session &&
+                        !persistent->m_switching && session && !session->clearing)
+                        folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
+                }, ancestor.at("name").get<std::string>(), lgo::std_white, lgo::size_1D{0})};
+            button->set_size(button->get_text_size());
         }
-        for (const auto& entry : obj_list)
+        for (const auto& entry : result.at("entries"))
         {
             const bool folder{entry.at("type") == "folder"};
             if (!folder && entry.at("type") != "file") throw lgo::internal_error_t{"obj type"};
@@ -721,6 +750,11 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             row->add_object<lgo::std_linex_t>(
                 storage_content_depth, row->space_x(lgo::std_margin), lgo::std_white);
         }
+        const bool same_path{persistent->m_breadcrumb_folder == source};
+        const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};
+        persistent->m_breadcrumbs->set_content(std::move(path));
+        persistent->m_breadcrumb_folder = source;
+        persistent->m_breadcrumbs->set_scroll_offset(same_path ? path_offset : lgo::size_2D{});
         viewer_div->set_content(std::move(contents));
         viewer_div->set_scroll_offset(offset);
     };
@@ -814,8 +848,14 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     load_state->m_progress_column = *progress_column;
     auto column_line = work_div->add_object_shared<lgo::std_liney_t>(
         storage_content_depth, work_div->space_y(lgo::std_margin), lgo::std_white);
-    auto viewer_div{work_div->add_object_shared<lgo::scroll_t>(
-        storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::scroll_axes_t::y, lgo::std_margin)};
+    auto browser_div{work_div->add_object_shared<lgo::divy_soft_t>(
+        storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::std_margin,
+        lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+    persistent->m_breadcrumbs = browser_div->add_object_shared<lgo::scroll_t>(
+        storage_content_depth, lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
+            lgo::font_preference_t::default_get()[0]->leading_get() + 8}, lgo::scroll_axes_t::x, lgo::std_margin);
+    auto viewer_div{browser_div->add_object_shared<lgo::scroll_t>(
+        storage_content_depth, browser_div->space_2D(lgo::std_margin), lgo::scroll_axes_t::y, lgo::std_margin)};
     viewer_div->set_content(std::make_shared<lgo::divy_flex_soft_t>(engine, state->get_depth_tracker(),
         storage_content_depth, lgo::pos_2D{}, lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
         lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top}));
@@ -825,6 +865,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         // A completed future may still be waiting for the GUI to collect it.
         // Invalidate it even if cancellation arrived after its last HTTP request.
         ++persistent->m_listing_generation;
+        persistent->m_breadcrumbs->set_content({});
+        persistent->m_breadcrumb_folder.clear();
         for (auto& listing : persistent->m_listings)
             listing.control->cancel();
         auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
@@ -1007,7 +1049,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         [main = std::weak_ptr{main_div}, left = std::weak_ptr{menu_left}, right = std::weak_ptr{menu_right},
          header = std::weak_ptr{header_line}, work = std::weak_ptr{work_div},
          status = std::weak_ptr{state_div}, progress = std::weak_ptr{*progress_column},
-         separator = std::weak_ptr{column_line}, viewer = std::weak_ptr{viewer_div},
+         separator = std::weak_ptr{column_line}, browser = std::weak_ptr{browser_div}, viewer = std::weak_ptr{viewer_div},
          center = std::weak_ptr{center_div}, persistent](lgo::size_2D size)
         {
             auto main_div{main.lock()};
@@ -1019,9 +1061,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto progress_column{progress.lock()};
             auto column_line{separator.lock()};
             auto viewer_div{viewer.lock()};
+            auto browser_div{browser.lock()};
             auto center_div{center.lock()};
             if (!main_div || !menu_left || !menu_right || !header_line || !work_div || !state_div ||
-                !progress_column || !column_line || !viewer_div || !center_div)
+                !progress_column || !column_line || !browser_div || !viewer_div || !center_div)
             {
                 return;
             }
@@ -1049,8 +1092,13 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             state_div->set_size(lgo::size_2D{state_div->get_size().x, height});
             progress_column->set_size(lgo::size_2D{progress_column->get_size().x, height});
             column_line->set_size(lgo::size_2D{column_line->get_size().x, height});
-            auto viewer_size{work_div->space_2D(lgo::std_margin)};
-            viewer_size.x += viewer_div->get_size().x + lgo::std_margin.x;
+            auto browser_size{work_div->space_2D(lgo::std_margin)};
+            browser_size.x += browser_div->get_size().x + lgo::std_margin.x;
+            browser_div->set_size(browser_size);
+            persistent->m_breadcrumbs->set_size({browser_div->space_x(lgo::std_margin).x,
+                lgo::font_preference_t::default_get()[0]->leading_get() + 8});
+            auto viewer_size{browser_div->space_2D(lgo::std_margin)};
+            viewer_size.y += viewer_div->get_size().y + lgo::std_margin.x;
             viewer_div->set_size(viewer_size);
             auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
             contents->set_size({viewer_div->view_size().x,contents->get_size().y});
