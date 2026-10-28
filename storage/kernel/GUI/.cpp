@@ -845,6 +845,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     *progress_column = work_div->add_object_shared<lgo::divy_soft_t>(
         storage_content_depth, lgo::size_2D{0x100, work_div->space_y(lgo::std_margin).x},
         lgo::std_margin, lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::bottom}, true);
+    (*progress_column)->smooth_children_set(true);
     load_state->m_progress_column = *progress_column;
     auto column_line = work_div->add_object_shared<lgo::std_liney_t>(
         storage_content_depth, work_div->space_y(lgo::std_margin), lgo::std_white);

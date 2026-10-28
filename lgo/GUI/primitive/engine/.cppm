@@ -29,6 +29,7 @@ export namespace lgo
         std::exception_ptr m_refresh_error{};
         std::function<void(size_2D)> m_callback_window_resize{};
         std::function<void(std::uint64_t)> m_callback_frame_rate{};
+        std::chrono::steady_clock::time_point m_animation_time{std::chrono::steady_clock::now()};
 
         vk::raii::Context m_context{};
         vk::raii::Instance m_instance{ nullptr };
@@ -175,6 +176,10 @@ export namespace lgo
         auto frame_rate() const -> std::uint64_t;
 
         //This includes both cursor enter and cursor leave.
+        using callback_frame_t = std::function<void(double)>;
+        auto callback_frame_add(callback_frame_t callback) -> callback_frame_t*;
+        auto callback_frame_remove(callback_frame_t* callback) -> void;
+
         using callback_mouse_enter_t = std::function<void(int)>;
         //This includes both cursor enter and cursor leave.
         auto callback_mouse_enter_add(callback_mouse_enter_t callback) -> callback_mouse_enter_t*;
@@ -209,6 +214,7 @@ export namespace lgo
             bool m_calling_callback{ false };
         };
 
+        callback_set<callback_frame_t> m_callback_frame{};
         callback_set<callback_mouse_enter_t> m_callback_mouse_enter{};
         callback_set<callback_mouse_move_t> m_callback_mouse_move{};
         callback_set<callback_mouse_button_t> m_callback_mouse_button{};

@@ -28,6 +28,19 @@ export namespace lgo
         bool m_initialized{}, m_dragging{};
         std::int64_t m_grab_offset{};
         scroll_input_t m_input;
+        motion_axis_t m_motion;
+        motion_limits_t m_motion_limits;
+        auto animate(double seconds) -> void
+        {
+            if (!m_motion.active()) return;
+            std::unique_lock lock{this->m_mutex};
+            m_motion.advance(seconds, m_motion_limits);
+            m_motion.clamp(max_scroll());
+            const auto offset{std::llround(m_motion.position)};
+            if (offset == scroll_offset()) return;
+            this->set_text_offset({-offset, 0});
+            update_bar();
+        }
         static constexpr std::int64_t bar_height{2};
         static constexpr std::int64_t scroll_speed{32};
 
@@ -94,10 +107,15 @@ export namespace lgo
         auto scrollbar_pos() const -> pos_2D { return m_thumb.get_pos(); }
         auto scrollbar_size() const -> size_2D { return m_thumb.get_size(); }
         auto scroll_offset() const -> std::int64_t { return -this->get_text_offset().x; }
+        auto scrolling() const -> bool { return m_motion.active(); }
+        auto motion_limits_set(motion_limits_t limits) -> void { limits.validate(); m_motion_limits = limits; }
+        auto motion_limits() const -> motion_limits_t { return m_motion_limits; }
         auto set_scroll_offset(std::int64_t offset) -> void
         {
             std::unique_lock lock{this->m_mutex};
-            this->set_text_offset({-std::clamp(offset, std::int64_t{}, max_scroll()), 0});
+            offset = std::clamp(offset, std::int64_t{}, max_scroll());
+            m_motion.snap(offset);
+            this->set_text_offset({-offset, 0});
             update_bar();
         }
         auto set_pos(pos_2D pos) -> void override
@@ -136,24 +154,27 @@ export namespace lgo
                 [this](size_2D delta)
                 {
                     if (!delta.x) return false;
-                    const auto old{scroll_offset()};
-                    set_scroll_offset(old-scroll_speed*delta.x);
-                    return old != scroll_offset();
+                    const auto old{m_motion.target};
+                    m_motion.target -= scroll_speed * delta.x;
+                    m_motion.clamp(max_scroll());
+                    return old != m_motion.target || m_motion.active();
                 }, [this](pos_2D pos)
                 { return max_scroll() && inside(m_track.get_pos(),m_track.get_size(),pos); },
                 [this](pos_2D pos)
                 {
+                    set_scroll_offset(scroll_offset());
                     m_dragging = true;
                     m_grab_offset = inside(m_thumb.get_pos(),m_thumb.get_size(),pos)
                         ? pos.x-m_thumb.get_pos().x : m_thumb.get_size().x/2;
                     drag(pos);
-                }, [this](pos_2D pos) { drag(pos); }, [this] { m_dragging = false; });
+                }, [this](pos_2D pos) { drag(pos); }, [this] { m_dragging = false; }, [this](double seconds) { animate(seconds); });
             this->show_end(base);
         }
         auto hide_impl(bool base) -> void override
         {
             if (!this->hide_begin(base)) return;
             m_dragging = false;
+            m_motion.snap(scroll_offset());
             m_input.detach();
             m_depth_tracker->remove(m_depth_id);
             m_thumb.hide(); m_track.hide();

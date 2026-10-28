@@ -36,7 +36,59 @@ export namespace lgo
         size_1D m_last_margin{ 0 };
         std::map<std::uint64_t, bool> m_ghost{};
         depth_range_t m_depth_range{};
+        bool m_smooth_children{};
+        motion_limits_t m_motion_limits;
+        struct child_motion_t { motion_axis_t x, y; };
+        std::map<std::uint64_t, child_motion_t> m_child_motion;
+        engine_t::callback_frame_t* m_animation{};
 
+        auto child_target(std::uint64_t id) const -> pos_2D
+        {
+            if (const auto found{m_child_motion.find(id)}; found != m_child_motion.end())
+                return {std::llround(found->second.x.target), std::llround(found->second.y.target)};
+            return m_current.m_object.at(id)->get_pos();
+        }
+        auto position_child(std::uint64_t id, pos_2D target) -> void
+        {
+            auto& child{m_current.m_object.at(id)};
+            if (!m_smooth_children || status() != shown)
+            {
+                m_child_motion.erase(id);
+                child->set_pos(target);
+                return;
+            }
+            auto [entry, inserted]{m_child_motion.try_emplace(id)};
+            if (inserted)
+            {
+                const auto current{child->get_pos()};
+                entry->second.x.snap(current.x); entry->second.y.snap(current.y);
+            }
+            entry->second.x.target = target.x; entry->second.y.target = target.y;
+        }
+        auto animate_children(double seconds) -> void
+        {
+            std::unique_lock lock{m_mutex};
+            for (auto entry{m_child_motion.begin()}; entry != m_child_motion.end();)
+            {
+                auto& motion{entry->second};
+                motion.x.advance(seconds, m_motion_limits); motion.y.advance(seconds, m_motion_limits);
+                const pos_2D next{std::llround(motion.x.position), std::llround(motion.y.position)};
+                auto& child{m_current.m_object.at(entry->first)};
+                const auto current{child->get_pos()};
+                if (current.x != next.x || current.y != next.y) child->set_pos(next);
+                if (!motion.x.active() && !motion.y.active()) entry = m_child_motion.erase(entry);
+                else ++entry;
+            }
+        }
+        auto start_animation() -> void
+        {
+            if (m_smooth_children && !m_animation && (status() == shown || status() == showing))
+                m_animation = get_engine()->callback_frame_add([this](double seconds) { animate_children(seconds); });
+        }
+        auto stop_animation() -> void
+        {
+            if (m_animation) get_engine()->callback_frame_remove(std::exchange(m_animation, nullptr));
+        }
         auto move_child(std::uint64_t begin, std::uint64_t end, size_2D offset) -> void;
     protected:
         template<typename t_object, bool t_ghost, typename... t_arg>
@@ -48,6 +100,27 @@ export namespace lgo
         constexpr static bool hard = t_hard;
 
         GUI_div_impl_t() = default;
+        ~GUI_div_impl_t() override { stop_animation(); }
+        // Opt-in only: targets drive layout while get_pos() and input hit areas
+        // follow the actual rendered positions throughout the animation.
+        auto smooth_children_set(bool enabled, motion_limits_t limits = {}) -> void
+        {
+            limits.validate();
+            std::unique_lock lock{m_mutex};
+            m_smooth_children = enabled; m_motion_limits = limits;
+            if (enabled) start_animation();
+            else
+            {
+                stop_animation();
+                for (const auto& [id, motion] : m_child_motion)
+                    m_current.m_object.at(id)->set_pos({std::llround(motion.x.target), std::llround(motion.y.target)});
+                m_child_motion.clear();
+            }
+        }
+        auto smooth_children() const -> bool { return m_smooth_children; }
+        auto children_moving() const -> bool { return !m_child_motion.empty(); }
+        auto motion_limits_set(motion_limits_t limits) -> void { limits.validate(); m_motion_limits = limits; }
+        auto motion_limits() const -> motion_limits_t { return m_motion_limits; }
         GUI_div_impl_t
         (
             engine_t* engine,
@@ -153,7 +226,7 @@ export namespace lgo
     {
         std::unique_lock lock{ m_mutex };
         std::int64_t size_forward{ t_y ? size.y : size.x }, size_sideways{ t_y ? size.x : size.y };
-        pos_2D pos_orig{ m_current.m_object[id]->get_pos() };
+        pos_2D pos_orig{ child_target(id) };
         size_2D size_orig{ m_current.m_object[id]->get_size() };
         std::int64_t size_orig_forward{ t_y ? size_orig.y : size_orig.x },
             size_orig_sideways{ t_y ? size_orig.x : size_orig.y };
@@ -171,10 +244,8 @@ export namespace lgo
             offset_sideways = size_orig_sideways - size_sideways;
             break;
         }
-        m_current.m_object[id]->set_pos
-        (
-            pos_2D{ t_y ? pos_orig.x + offset_sideways : pos_orig.x, t_y ? pos_orig.y : pos_orig.y + offset_sideways }
-        );
+        position_child(id,
+            pos_2D{ t_y ? pos_orig.x + offset_sideways : pos_orig.x, t_y ? pos_orig.y : pos_orig.y + offset_sideways });
         if (m_ghost[id])
         {
             return;
@@ -297,8 +368,7 @@ export namespace lgo
         auto end_it{ m_current.m_object.lower_bound(end) };
         for (auto i{ m_current.m_object.lower_bound(begin) }; i != end_it; ++i)
         {
-            pos_2D pos_original{ i->second->get_pos() };
-            i->second->set_pos(pos_original + offset);
+            if (offset.x || offset.y) position_child(i->first, child_target(i->first) + offset);
         }
         return;
     }
@@ -601,6 +671,9 @@ export namespace lgo
         std::unique_lock lock{ m_mutex };
         size_2D offset{ pos - m_pos };
         m_pos = pos;
+        // Ancestor motion (including scrolling) translates both current and
+        // target positions immediately, avoiding compounded nested easing.
+        for (auto& [id, motion] : m_child_motion) { motion.x.shift(offset.x); motion.y.shift(offset.y); }
         for (auto i{ m_current.m_object.begin() }; i != m_current.m_object.end(); ++i)
         {
             i->second->set_pos(i->second->get_pos() + offset);
@@ -681,7 +754,7 @@ export namespace lgo
             {
                 std::int64_t object_size_sideways{ t_y ? i->second->get_size().x : i->second->get_size().y };
                 size_1D offset{ (size_sideways - object_size_sideways) / 2 - (size_orig_sideways - object_size_sideways) / 2 };
-                i->second->set_pos(i->second->get_pos() + size_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x });
+                position_child(i->first, child_target(i->first) + size_2D{ t_y ? offset.x : 0, t_y ? 0 : offset.x });
             }
             break;
         case 2:
@@ -839,6 +912,7 @@ export namespace lgo
             i->second->show();
         }
         show_end(base);
+        start_animation();
         return;
     }
 
@@ -854,6 +928,7 @@ export namespace lgo
         {
             i->second->hide();
         }
+        stop_animation();
         hide_end(base);
         return;
     }
@@ -934,6 +1009,7 @@ export namespace lgo
             first ? (t_hard ? after : 0) : last ? (t_hard ? before : 0) : std::max(before, after)};
         const auto margin_actual{new_gap - old_before - old_after};
         std::int64_t size_orig_forward{ t_y ? size_orig.y : size_orig.x };
+        m_child_motion.erase(id);
         state_t::remove_object(id);
         if (m_ghost[id])
         {
@@ -1061,6 +1137,7 @@ export namespace lgo
     auto GUI_div_impl_t<t_y, t_hard>::clear_state() -> void
     {
         std::unique_lock lock{ m_mutex };
+        m_child_motion.clear();
         state_t::clear_state();
         m_ghost.clear();
         m_length = 0;

@@ -29,6 +29,7 @@ export namespace lgo
         inline static std::map<engine_t*, route_t> routes;
         engine_t* m_engine{};
         GUI_object_t* m_owner{};
+        engine_t::callback_frame_t* m_animation{};
         float m_depth{};
         std::function<bool(pos_2D)> m_hit, m_track;
         std::function<bool(size_2D)> m_wheel;
@@ -58,10 +59,12 @@ export namespace lgo
         auto attach(engine_t* engine, GUI_object_t* owner, float depth,
                     std::function<bool(pos_2D)> hit, std::function<bool(size_2D)> wheel,
                     std::function<bool(pos_2D)> track, std::function<void(pos_2D)> begin,
-                    std::function<void(pos_2D)> move, std::function<void()> end) -> void
+                    std::function<void(pos_2D)> move, std::function<void()> end,
+                    std::function<void(double)> animate = {}) -> void
         {
             detach();
             m_engine = engine; m_owner = owner; m_depth = depth;
+            if (animate) m_animation = engine->callback_frame_add(std::move(animate));
             m_hit = std::move(hit); m_wheel = std::move(wheel); m_track = std::move(track);
             m_begin = std::move(begin); m_move = std::move(move); m_end = std::move(end);
             auto& route{routes[engine]};
@@ -99,6 +102,7 @@ export namespace lgo
         auto detach() -> void
         {
             if (!m_engine) return;
+            if (m_animation) m_engine->callback_frame_remove(std::exchange(m_animation, nullptr));
             auto& route{routes.at(m_engine)};
             if (route.captured == this) { m_end(); route.captured = nullptr; }
             route.nodes.erase(this);
@@ -126,6 +130,29 @@ export namespace lgo
         std::shared_ptr<clip_region_t> m_view{std::make_shared<clip_region_t>()};
         pos_2D m_origin{};
         size_2D m_offset{}, m_content_size{};
+        motion_axis_t m_motion_x, m_motion_y;
+        motion_limits_t m_motion_limits;
+        auto animate(double seconds) -> void
+        {
+            if (!scrolling()) return;
+            const auto maximum{max_scroll()};
+            m_motion_x.advance(seconds, m_motion_limits); m_motion_x.clamp(maximum.x);
+            m_motion_y.advance(seconds, m_motion_limits); m_motion_y.clamp(maximum.y);
+            const size_2D next{std::llround(m_motion_x.position), std::llround(m_motion_y.position)};
+            if (next.x == m_offset.x && next.y == m_offset.y) return;
+            m_offset = next;
+            layout();
+        }
+        auto wheel(size_2D delta) -> bool
+        {
+            const auto maximum{max_scroll()};
+            const auto x{m_motion_x.target}, y{m_motion_y.target};
+            m_motion_x.target -= wheel_step * delta.x;
+            m_motion_y.target -= wheel_step * delta.y;
+            m_motion_x.clamp(maximum.x); m_motion_y.clamp(maximum.y);
+            return x != m_motion_x.target || y != m_motion_y.target ||
+                (delta.x && m_motion_x.active()) || (delta.y && m_motion_y.active());
+        }
         rect_t m_x_track, m_x_thumb, m_y_track, m_y_thumb;
         scroll_input_t m_input;
         std::uint64_t m_depth_id{};
@@ -166,6 +193,7 @@ export namespace lgo
             m_layout = true;
             struct reset_t { bool& active; ~reset_t() { active = false; } } reset{m_layout};
             const auto maximum{max_scroll()};
+            m_motion_x.clamp(maximum.x); m_motion_y.clamp(maximum.y);
             m_offset = {std::clamp(m_offset.x,std::int64_t{},maximum.x),
                         std::clamp(m_offset.y,std::int64_t{},maximum.y)};
             m_view->rect = {m_pos,view_size()};
@@ -249,6 +277,7 @@ export namespace lgo
                 inspect(*content);
                 if (cycle) throw std::invalid_argument{"Scroll content cannot contain its own viewport."};
             }
+            set_scroll_offset(m_offset);
             if (m_content)
             { m_content->hide(); m_content->set_size_callback({}); m_content->set_parent_clip({}); }
             m_content = std::move(content); m_origin = origin;
@@ -266,10 +295,14 @@ export namespace lgo
         auto set_content_pos(pos_2D origin) -> void { m_origin = origin; layout(); }
         auto content_pos() const -> pos_2D { return {m_origin.x-m_offset.x,m_origin.y-m_offset.y}; }
         auto scroll_offset() const -> size_2D { return m_offset; }
+        auto scrolling() const -> bool { return m_motion_x.active() || m_motion_y.active(); }
+        auto motion_limits_set(motion_limits_t limits) -> void { limits.validate(); m_motion_limits = limits; }
+        auto motion_limits() const -> motion_limits_t { return m_motion_limits; }
         auto set_scroll_offset(size_2D offset) -> void
         {
             const auto maximum{max_scroll()};
             offset = {std::clamp(offset.x,std::int64_t{},maximum.x),std::clamp(offset.y,std::int64_t{},maximum.y)};
+            m_motion_x.snap(offset.x); m_motion_y.snap(offset.y);
             if (offset.x == m_offset.x && offset.y == m_offset.y) return;
             m_offset = offset; layout();
         }
@@ -287,15 +320,14 @@ export namespace lgo
             m_input.attach(m_engine,this,m_depth.near,[this](pos_2D pos) { return hit(pos); },
                 [this](size_2D delta)
                 {
-                    const auto old{m_offset};
-                    set_scroll_offset({m_offset.x-wheel_step*delta.x,m_offset.y-wheel_step*delta.y});
-                    return old.x != m_offset.x || old.y != m_offset.y;
+                    return wheel(delta);
                 }, [this](pos_2D pos)
                 {
                     return (max_scroll().x && inside(m_x_track.get_pos(),m_x_track.get_size(),pos)) ||
                            (max_scroll().y && inside(m_y_track.get_pos(),m_y_track.get_size(),pos));
                 }, [this](pos_2D pos)
                 {
+                    set_scroll_offset(m_offset); // Dragging takes over immediately from wheel momentum.
                     const bool x{max_scroll().x && inside(m_x_track.get_pos(),m_x_track.get_size(),pos)};
                     m_drag_axis = x ? 0 : 1;
                     const auto& thumb{x ? m_x_thumb : m_y_thumb};
@@ -303,13 +335,14 @@ export namespace lgo
                         ? (x ? pos.x-thumb.get_pos().x : pos.y-thumb.get_pos().y)
                         : (x ? thumb.get_size().x : thumb.get_size().y)/2;
                     drag(pos);
-                },[this](pos_2D pos) { drag(pos); },[this] { m_drag_axis = -1; });
+                },[this](pos_2D pos) { drag(pos); },[this] { m_drag_axis = -1; }, [this](double seconds) { animate(seconds); });
             show_end(base); layout();
             if (m_content) m_content->show();
         }
         auto hide_impl(bool base) -> void override
         {
             if (!hide_begin(base)) return;
+            set_scroll_offset(m_offset);
             m_input.detach();
             if (m_content) m_content->hide();
             m_x_thumb.hide();m_x_track.hide();m_y_thumb.hide();m_y_track.hide();

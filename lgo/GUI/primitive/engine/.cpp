@@ -973,6 +973,10 @@ namespace lgo {
             {
                 m_callback_frame_rate(frame_rate());
             }
+            const auto now{std::chrono::steady_clock::now()};
+            const auto elapsed{std::chrono::duration<double>(now - m_animation_time).count()};
+            m_animation_time = now;
+            call_callback(m_callback_frame, elapsed);
             draw();
         }
         catch (...)
@@ -1321,6 +1325,30 @@ namespace lgo {
         double x{}, y{};
         glfwGetCursorPos(m_window, &x, &y);
         return pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) };
+    }
+
+    auto engine_t::callback_frame_add(callback_frame_t callback) -> callback_frame_t*
+    {
+        auto out{ new callback_frame_t{ callback } };
+        if (m_callback_frame.m_calling_callback)
+        {
+            m_callback_frame.m_pending.emplace(out);
+        }
+        else
+        {
+            m_callback_frame.m_effective.emplace(out);
+        }
+        return out;
+    }
+
+    auto engine_t::callback_frame_remove(callback_frame_t* in) -> void
+    {
+        if (!m_callback_frame.m_effective.erase(in))
+        {
+            m_callback_frame.m_pending.erase(in);
+        }
+        delete in;
+        return;
     }
 
     auto engine_t::callback_mouse_enter_add(callback_mouse_enter_t callback) -> callback_mouse_enter_t*
