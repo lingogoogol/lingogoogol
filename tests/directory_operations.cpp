@@ -70,9 +70,13 @@ int main(int argc, char** argv)
             check(!message_loop(&engine, &persistent, &multi, &loads, session->queue.get()),
                   "Unexpected window close.");
             lgo::text_line_t::pending_load();
+            check(persistent.m_easy_idle.size()+loads.m_end.size()==load_easy_count,
+                  "Transfers lost or allocated an extra physical pool slot.");
+            for (const auto& [key, callback] : loads.m_end)
+                check(persistent.m_easy_status.contains(key),"A request used a handle outside the shared pool.");
         };
         auto wait = [&](auto done) {
-            const auto deadline{std::chrono::steady_clock::now() + 20s};
+            const auto deadline{std::chrono::steady_clock::now() + (phase=="pool" ? 60s : 20s)};
             while (!done())
             {
                 check(std::chrono::steady_clock::now() < deadline, "Directory operation timed out.");
@@ -98,7 +102,76 @@ int main(int argc, char** argv)
                 result["size"] = 0;
             return result;
         };
-        if (phase == "backend")
+        if (phase=="pool")
+        {
+            auto file=entry("pool-file","pool",true);
+            file["size"]=384;
+            storage_atomic_write("pool-stage","move");
+            run("directory-move","root",file,"destination","pool");
+            storage_atomic_write("pool-stage","copy");
+            begin_directory_task(&loads,session,"directory-copy","destination",file,"root","pool");
+            auto copy{std::static_pointer_cast<directory_task_t>(loads.m_task_list.back())};
+            wait([&] { return copy->m_total>0 || copy->m_result!=task_result_t::active; });
+            check(copy->m_result==task_result_t::active,"Copy failed during discovery.");
+            begin_task(&loads,session,"download-file","pool.bin","pool-file");
+            auto download{loads.m_task_list.back()};
+            begin_task(&loads,session,"upload-file","empty.bin","root");
+            auto upload{loads.m_task_list.back()};
+            std::size_t peak{};
+            wait([&]
+            {
+                peak=std::max(peak,loads.m_end.size());
+                return loads.m_task_list.empty();
+            });
+            for (const auto& task : {std::static_pointer_cast<load_task_t>(copy),download,upload})
+                check(task->m_result==task_result_t::completed,"Mixed copy/upload/download did not complete.");
+            check(peak==load_easy_count,"Directory operations did not fill the shared 64-slot pool.");
+            check(storage_read("pool.bin")==storage_read("expected.bin"),"Concurrent download changed file contents.");
+            check(copy->m_completed==copy->m_total,"Parallel copy progress did not reach its total.");
+            storage_atomic_write("pool-stage","delete");
+            run("directory-delete","destination",file,{},"pool");
+            // The copied graph must still be independently readable after deleting its source.
+            storage_atomic_write("pool-stage","verify");
+            google_easy_t request;
+            auto root=std::string{"root"};
+            const auto entries=list_folder_content(request,&root);
+            const auto copied=std::ranges::find_if(entries,[&](const auto& item)
+                { return item.at("name")=="pool" && item.at("id")!="pool-file"; });
+            check(copied!=entries.end(),"Parallel copy was not published.");
+            begin_task(&loads,session,"download-file","copy.bin",copied->at("id").template get<std::string>());
+            auto check_copy{loads.m_task_list.back()};
+            wait([&] { return check_copy->m_result!=task_result_t::active; });
+            check(check_copy->m_result==task_result_t::completed && storage_read("copy.bin")==storage_read("expected.bin"),
+                  "Deleting the source damaged the independent parallel copy.");
+            storage_atomic_write("pool-stage","retry");
+            begin_directory_task(&loads,session,"directory-copy","root",entry("tiny-file","tiny",true),"root","tiny");
+            auto retry{loads.m_task_list.back()};
+            wait([&] { return retry->m_control->paused.load(); });
+            check(retry->m_result==task_result_t::active,"Network failure discarded the pending directory request.");
+            retry->m_control->retry();
+            wait([&] { return retry->m_result!=task_result_t::active; });
+            check(retry->m_result==task_result_t::completed,"Small-file copy did not recover after retry.");
+            for (int i{};i<5;++i) pump();
+            check(persistent.m_easy_idle.size()==load_easy_count,"Completed operations did not return all pool slots.");
+            // Once event dispatch stops, a queued coordinator must still be
+            // destructible: no GUI callback can fulfil its promise at shutdown.
+            begin_directory_task(&loads,session,"directory-copy","root",entry("tiny-file","tiny",true),"root","tiny");
+            auto pending{std::static_pointer_cast<directory_task_t>(loads.m_task_list.back())};
+            const auto deadline{std::chrono::steady_clock::now()+5s};
+            while (true)
+            {
+                { std::unique_lock lock{pending->m_requests_mutex}; if (!pending->m_requests.empty()) break; }
+                check(std::chrono::steady_clock::now()<deadline,"Coordinator did not queue its first request.");
+                std::this_thread::sleep_for(1ms);
+            }
+            auto journal{pending->m_journal};
+            const auto stopped{std::chrono::steady_clock::now()};
+            loads.m_task_list.clear();
+            pending.reset();
+            check(std::chrono::steady_clock::now()-stopped<1s,"Queued coordinator blocked destruction without GUI dispatch.");
+            journal->finish();
+        }
+        else if (phase == "backend")
         {
             engine.device_lost();
             wait([&] { return engine.gpu_available(); });

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise directory mutations and crash replay against an isolated local Drive."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ from urllib.parse import urlparse
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--scroll-only', action='store_true', help='Run only the production directory scrolling scenario.')
+parser.add_argument("--pool-only", action="store_true", help="Run shared-pool concurrency and metadata-only move checks.")
 args = parser.parse_args()
 
 source = Path(__file__).resolve().parents[1]
@@ -63,6 +65,33 @@ def fixture():
     for i in range(101):
         result[f'batched-{i}'] = blob('batched', 'root', [], f'batched-{i+1}' if i < 100 else 'null', True)
     return result
+
+
+def pool_fixture(test):
+    file = entry('pool-file', 'file', 'pool')
+    file['size'] = 384
+    result = {'root': blob('root', 'null', [file, entry('tiny-file', 'file', 'tiny')]),
+              'destination': blob('destination', 'root', []),
+              'pool-file': blob('pool', 'root', ['pool-chunk-0', 'pool-chunk-1'], file=True),
+              'tiny-file': blob('tiny', 'root', [], file=True)}
+    metadata = json.loads(result['pool-file']['name'])
+    metadata['size'] = 384
+    result['pool-file']['name'] = json.dumps(metadata)
+    expected = b''
+    for chunk in range(2):
+        result[f'pool-chunk-{chunk}'] = {'name': json.dumps({'parent': 'pool-file'}),
+            'description': json.dumps([f'pool-data-{i}' for i in range(chunk*64, (chunk+1)*64)])}
+        for i in range(chunk*64, (chunk+1)*64):
+            content = i.to_bytes(3, 'little')
+            expected += content
+            result[f'pool-data-{i}'] = {'name': json.dumps({'parent': f'pool-chunk-{chunk}'}),
+                'description': base64.urlsafe_b64encode(content).decode()}
+    (test / 'expected.bin').write_bytes(expected)
+    return result
+
+
+class FixtureServer(ThreadingHTTPServer):
+    request_queue_size = 128
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -135,17 +164,71 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(3)
         return status, result
 
+    def dispatch(self, method, body=b''):
+        category = None
+        identifier = urlparse(self.path).path.rsplit('/', 1)[-1]
+        stage = ''
+        if self.server.phase == 'pool':
+            marker = self.server.test / 'pool-stage'
+            stage = marker.read_text() if marker.exists() else ''
+            if stage == 'retry' and method == 'GET' and identifier == 'tiny-file' and not self.server.retry_failures:
+                self.server.retry_failures += 1
+                self.respond(503, {})
+                return
+            if stage == 'move' and identifier.startswith(('pool-data-', 'pool-chunk-')):
+                self.server.violations.append('Move touched file contents: ' + identifier)
+            if stage == 'copy' and method == 'GET' and identifier.startswith('pool-data-'):
+                category = 'scan'
+            elif stage == 'copy' and method == 'PATCH' and identifier.startswith('reserve-'):
+                category = 'copy'
+            elif stage == 'delete' and method == 'DELETE':
+                category = 'delete'
+        if category:
+            with self.server.lock:
+                self.server.active[category] += 1
+                self.server.peak[category] = max(self.server.peak[category], self.server.active[category])
+                if self.server.active[category] == 64:
+                    self.server.gates[category].set()
+            if not self.server.gates[category].wait(15):
+                self.server.violations.append('Did not reach 64 concurrent ' + category + ' requests.')
+                self.server.gates[category].set()
+        try:
+            # Keep the first response outstanding while over 100 later writes
+            # finish. A checkpoint must not skip this unfinished prefix hole.
+            first = category == 'delete' and identifier == 'pool-file'
+            if category == 'copy':
+                name = json.loads(json.loads(body).get('name', '{}'))
+                first = name.get('name') == 'pool'
+            if first:
+                deadline = time.monotonic() + 20
+                while self.server.done[category] < 100 and time.monotonic() < deadline:
+                    time.sleep(.005)
+                if self.server.done[category] < 100:
+                    self.server.violations.append('Parallel pipeline stalled behind its first response.')
+                identifiers = json.loads((self.server.test / 'task').read_text())
+                intents = [json.loads((self.server.test / 'task.data' / value / 'state').read_text())
+                           for value in identifiers]
+                key = 'copy_index' if category == 'copy' else 'delete_index'
+                if any(intent.get(key, 0) != 0 for intent in intents if intent['kind'] == 'directory-' + category):
+                    self.server.violations.append('Checkpoint skipped an unfinished prefix: ' + category)
+            self.respond(*self.resource(method, self.path, body))
+        finally:
+            if category:
+                with self.server.lock:
+                    self.server.active[category] -= 1
+                    self.server.done[category] += 1
+
     def do_GET(self):
         if self.path == '/fixture/status':
             with self.server.lock:
                 return self.respond(200, self.server.blobs.copy())
-        self.respond(*self.resource('GET', self.path))
+        self.dispatch('GET')
 
     def do_PATCH(self):
-        self.respond(*self.resource('PATCH', self.path, self.body()))
+        self.dispatch('PATCH', self.body())
 
     def do_DELETE(self):
-        self.respond(*self.resource('DELETE', self.path))
+        self.dispatch('DELETE')
 
     def do_POST(self):
         body = self.body().decode()
@@ -187,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
     (test / 'root').write_text('root')
     (test / 'blob_queue').write_text(json.dumps([f'reserve-{i}' for i in range(25000)]))
     (test / 'empty.bin').write_bytes(b'')
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = FixtureServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
     server.lock = threading.Lock()
     server.blobs = fixture()
@@ -197,13 +280,23 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
     server.phase = ''
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        for phase in (() if args.scroll_only else ('backend', 'copy-crash', 'resume-copy', 'move-crash', 'resume-move', 'delete-crash', 'resume-delete')):
+        phases = ('pool',) if args.pool_only else (() if args.scroll_only else
+            ('backend', 'copy-crash', 'resume-copy', 'move-crash', 'resume-move', 'delete-crash', 'resume-delete', 'pool'))
+        for phase in phases:
             server.phase = phase
+            if phase == 'pool':
+                server.blobs = pool_fixture(test)
+                server.active = dict.fromkeys(('scan', 'copy', 'delete'), 0)
+                server.peak = server.active.copy()
+                server.done = server.active.copy()
+                server.gates = {key: threading.Event() for key in server.active}
+                server.retry_failures = 0
+
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64', str(test / 'test.exe'), phase],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
-                stdout, stderr = process.communicate(timeout=60)
+                stdout, stderr = process.communicate(timeout=120 if phase == "pool" else 60)
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -212,6 +305,13 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
             if process.returncode != (73 if phase.endswith('crash') else 0):
                 shutil.copytree(test, '/tmp/storage-directory-failed', dirs_exist_ok=True)
                 raise RuntimeError(f'{phase}: exit {process.returncode}; {stderr}')
+            if phase == 'pool':
+                assert all(value == 64 for value in server.peak.values()), server.peak
+                assert not server.violations, server.violations
+                assert server.retry_failures == 1, 'Small-file network retry was not exercised.'
+                assert all(identifier not in server.blobs for identifier in ('pool-file', 'pool-chunk-0', 'pool-chunk-1'))
+                assert all(f'pool-data-{i}' not in server.blobs for i in range(128))
+                print('PASS: 64 shared physical handles, concurrent discovery/copy/delete, mixed upload/download, metadata-only move, out-of-order checkpoints and independent content', flush=True)
             if phase == 'backend':
                 assert {identifier for identifier in server.deleted if not identifier.startswith('reserve-')} == {'tree', 'tree2', 'child', 'nested', 'chunk', 'data', 'conflict'}, server.deleted
                 assert 'unrelated' in server.blobs and 'malformed' in server.blobs
@@ -240,46 +340,47 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 assert json.loads(server.blobs['restart']['name'])['parent'] == 'destination'
             if phase.startswith('resume'):
                 assert json.loads((test / 'task').read_text()) == [], 'Finished intent was not removed.'
-        if not args.scroll_only:
-            assert 'restart' not in server.blobs and 'restart-child' not in server.blobs
-            assert not server.violations, server.violations
-            server.phase = 'ui'
-            server.blobs = {
-                'root': blob('root', 'null', [entry('file', 'file'), entry('destination')]),
-                'file': blob('file', 'root', [], file=True),
-                'destination': blob('destination', 'root', []),
-            }
+        if not args.pool_only:
+            if not args.scroll_only:
+                assert 'restart' not in server.blobs and 'restart-child' not in server.blobs
+                assert not server.violations, server.violations
+                server.phase = 'ui'
+                server.blobs = {
+                    'root': blob('root', 'null', [entry('file', 'file'), entry('destination')]),
+                    'file': blob('file', 'root', [], file=True),
+                    'destination': blob('destination', 'root', []),
+                }
+                process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
+                    'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'production.exe')],
+                    cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+                try:
+                    stdout, stderr = process.communicate(timeout=70)
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                print(stdout, end='', flush=True)
+                if process.returncode:
+                    shutil.copytree(test, '/tmp/storage-directory-failed', dirs_exist_ok=True)
+                    raise RuntimeError('Directory GUI: ' + stderr)
+            server.blobs = {'root': blob('root', 'null', [entry(f'folder-{i:02}', name=f'folder-{i:02}-' + 'long-name-' * 20) for i in range(40)])}
+            server.blobs.update({f'folder-{i:02}': blob(f'folder-{i:02}', 'root', []) for i in range(40)})
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
-                'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'production.exe')],
+                'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'production.exe'), 'scroll'],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
-                stdout, stderr = process.communicate(timeout=70)
+                stdout, stderr = process.communicate(timeout=60)
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
             print(stdout, end='', flush=True)
             if process.returncode:
-                shutil.copytree(test, '/tmp/storage-directory-failed', dirs_exist_ok=True)
-                raise RuntimeError('Directory GUI: ' + stderr)
-        server.blobs = {'root': blob('root', 'null', [entry(f'folder-{i:02}', name=f'folder-{i:02}-' + 'long-name-' * 20) for i in range(40)])}
-        server.blobs.update({f'folder-{i:02}': blob(f'folder-{i:02}', 'root', []) for i in range(40)})
-        process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
-            'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'production.exe'), 'scroll'],
-            cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
-        try:
-            stdout, stderr = process.communicate(timeout=60)
-        finally:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-        print(stdout, end='', flush=True)
-        if process.returncode:
-            raise RuntimeError('Directory scrolling GUI: ' + stderr)
-        if not args.scroll_only:
-            print('PASS: Unicode/invalid names, distinct same-named folders, same-name moves and deletion by ID, independent recursive copies and crash replay, paged moves, self/descendant rejection, recursive deletion, malformed parent protection, concurrent upload publication and durable ID reservations')
+                raise RuntimeError('Directory scrolling GUI: ' + stderr)
+            if not args.scroll_only:
+                print('PASS: Unicode/invalid names, distinct same-named folders, same-name moves and deletion by ID, independent recursive copies and crash replay, paged moves, self/descendant rejection, recursive deletion, malformed parent protection, concurrent upload publication and durable ID reservations')
     finally:
         server.shutdown()
         server.server_close()
