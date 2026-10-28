@@ -465,8 +465,15 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
         return true;
     }
 
-    for (auto& task_ptr : state->m_task_list)
+    // Rotate runnable jobs so a large copy/delete cannot monopolize all newly
+    // available slots while an upload or download is also waiting for one.
+    auto entry{std::ranges::find(state->m_task_list,state->m_next_transfer.lock())};
+    if (entry==state->m_task_list.end()) entry=state->m_task_list.begin();
+    for (auto remaining{state->m_task_list.size()}; remaining; --remaining)
     {
+        auto task_ptr{*entry};
+        if (++entry==state->m_task_list.end()) entry=state->m_task_list.begin();
+        state->m_next_transfer=*entry;
         if (task_ptr->m_control->cancelled || task_ptr->m_control->paused || task_ptr->m_control->user_paused ||
             (task_ptr->m_session && task_ptr->m_session->clearing))
             continue;
@@ -487,7 +494,11 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 task->m_progress_bar->set_fraction(total ? double(completed) / total : 0.);
             if (task->m_progress_text)
                 task->m_progress_text->set_text(task->m_label + (total ? std::format("（{}/{}）", completed, total) : "（等待中）"), false);
-            if (task->m_operation.wait_for(0s) != std::future_status::ready) continue;
+            if (task->m_operation.wait_for(0s) != std::future_status::ready)
+            {
+                if (directory_transfer_begin(*task, multi, std::move(easy))) return true;
+                continue;
+            }
             try
             {
                 task->m_operation.get();

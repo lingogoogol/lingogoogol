@@ -63,6 +63,7 @@ import storage.google;
 
 export
 {
+    constexpr std::size_t transfer_slot_count{64};
     struct load_state_t;
     struct load_task_t;
     struct upload_task_t;
@@ -93,6 +94,7 @@ export
         std::function<void()> m_settings_page;
         std::function<void()> m_clear_page;
         std::list<std::shared_ptr<load_task_t>> m_task_list{};
+        std::weak_ptr<load_task_t> m_next_transfer;
         // Terminal rows stay visible until acknowledged. Owners also outlive
         // cancelled requests and asynchronous preparation/publication.
         std::list<std::shared_ptr<load_task_t>> m_finished_tasks{};
@@ -249,17 +251,36 @@ export
         std::vector<std::shared_ptr<upload_entity_t>>::iterator m_end_progress{};
     };
 
+    struct directory_request_t
+    {
+        std::function<void(google_easy_t&)> configure;
+        std::promise<std::string> response;
+        bool allow_missing{};
+    };
+
     struct directory_task_t: public load_task_t
     {
-        ~directory_task_t() override { if (m_operation.valid()) m_operation.wait(); }
+        ~directory_task_t() override
+        {
+            // A coordinator can be waiting for a GUI-dispatched request during
+            // shutdown. Cancel before joining, when no more frames will run.
+            m_control->cancel();
+            if (m_operation.valid()) m_operation.wait();
+        }
         std::string m_kind, m_name, m_source, m_destination;
         nlohmann::json m_entity;
         std::shared_future<void> m_operation;
         std::atomic_uint64_t m_completed{}, m_total{};
+        // Only descriptions cross threads; physical handles come exclusively
+        // from the same pool used by uploads and downloads on the GUI thread.
+        std::mutex m_requests_mutex;
+        std::deque<std::shared_ptr<directory_request_t>> m_requests;
     };
 
     auto directory_validate_name(std::string_view name) -> void;
     auto directory_execute(directory_task_t& task) -> void;
+    auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi,
+                                  curl_easy_t&& easy) -> bool;
 
     struct download_chunk_t
     {

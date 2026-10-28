@@ -121,5 +121,5 @@ export {
     auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session, std::string kind,
                     std::string path, std::string pos, std::shared_ptr<task_journal_t> journal = {}) -> void;
 
-    constexpr std::size_t load_easy_count{64};
+    constexpr std::size_t load_easy_count{transfer_slot_count};
 }
