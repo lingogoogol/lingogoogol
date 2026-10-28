@@ -457,7 +457,8 @@ int main(int argc, char** argv)
                 pump();
                 if (clear_control->paused)
                     clear_control->retry();
-                if (phase == "clear-crash" && progress > 0 && progress < total)
+                if (phase == "clear-crash" && progress > 0 && progress < total &&
+                    std::filesystem::exists("clear-half-applied"))
                     std::_Exit(73);
             }
             auto root{job.get()};

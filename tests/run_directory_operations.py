@@ -14,7 +14,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--scroll-only', action='store_true', help='Run only the production directory scrolling scenario.')
@@ -69,20 +69,22 @@ def fixture():
 
 
 def pool_fixture(test):
+    # More than 64 full batches exercise all physical slots after batching.
+    count = 6500
     file = entry('pool-file', 'file', 'pool')
-    file['size'] = 384
+    file['size'] = count * 3
     result = {'root': blob('root', 'null', [file, entry('tiny-file', 'file', 'tiny')]),
               'destination': blob('destination', 'root', []),
-              'pool-file': blob('pool', 'root', ['pool-chunk-0', 'pool-chunk-1'], file=True),
+              'pool-file': blob('pool', 'root', [f'pool-chunk-{i}' for i in range(count // 100)], file=True),
               'tiny-file': blob('tiny', 'root', [], file=True)}
     metadata = json.loads(result['pool-file']['name'])
-    metadata['size'] = 384
+    metadata['size'] = count * 3
     result['pool-file']['name'] = json.dumps(metadata)
     expected = b''
-    for chunk in range(2):
+    for chunk in range(count // 100):
         result[f'pool-chunk-{chunk}'] = {'name': json.dumps({'parent': 'pool-file'}),
-            'description': json.dumps([f'pool-data-{i}' for i in range(chunk*64, (chunk+1)*64)])}
-        for i in range(chunk*64, (chunk+1)*64):
+            'description': json.dumps([f'pool-data-{i}' for i in range(chunk*100, (chunk+1)*100)])}
+        for i in range(chunk*100, (chunk+1)*100):
             content = i.to_bytes(3, 'little')
             expected += content
             result[f'pool-data-{i}'] = {'name': json.dumps({'parent': f'pool-chunk-{chunk}'}),
@@ -145,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == 'PATCH':
                 # A reserved blob ID must already be removed from durable storage
                 # before its first use, including newly allocated overflow pages.
-                if identifier.startswith('reserve-') and identifier in json.loads((self.server.test / 'blob_queue').read_text()):
+                if identifier.startswith('reserve-') and identifier in self.reserved_ids():
                     self.server.violations.append('ID used before durable removal: ' + identifier)
                 value = json.loads(body)
                 blobs.setdefault(identifier, {}).update(value)
@@ -165,22 +167,26 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(3)
         return status, result
 
-    def dispatch(self, method, body=b''):
-        category = None
-        identifier = urlparse(self.path).path.rsplit('/', 1)[-1]
-        stage = ''
+    def reserved_ids(self):
+        path = self.server.test / 'blob_queue'
+        stamp = path.stat().st_mtime_ns
+        if stamp != getattr(self.server, 'queue_stamp', None):
+            self.server.queue_ids = set(json.loads(path.read_text()))
+            self.server.queue_stamp = stamp
+        return self.server.queue_ids
+
+    def checked_resource(self, method, path, body=b''):
+        identifier = urlparse(path).path.rsplit('/', 1)[-1]
+        fields = parse_qs(urlparse(path).query).get('fields', [''])[0]
         if self.server.phase.startswith('unlink-'):
             target = 'visible-folder' if self.server.phase == 'unlink-folder' else 'visible-file'
             with self.server.lock:
                 linked = any(item['id'] == target for page in ('root', 'root2') if page in self.server.blobs
                              for item in json.loads(self.server.blobs[page]['description']))
             if method == 'GET' and identifier == 'elsewhere':
-                self.respond(503, {})
-                return
+                return 503, {}
             if method == 'GET' and identifier == 'root' and not linked and not (self.server.test / 'unlink-release').exists():
-                # A failed reload must not preserve old row controls.
-                self.respond(503, {})
-                return
+                return 503, {}
             if method == 'DELETE':
                 if linked:
                     self.server.violations.append('Content DELETE started before unlinking its parent entry.')
@@ -195,81 +201,104 @@ class Handler(BaseHTTPRequestHandler):
                     fail = not self.server.unlink_failure
                     self.server.unlink_failure = True
                 if fail:
-                    self.respond(503, {})
-                    return
+                    return 503, {}
         if self.server.phase == 'pool':
             marker = self.server.test / 'pool-stage'
             stage = marker.read_text() if marker.exists() else ''
-            if stage == 'retry' and method == 'GET' and identifier == 'tiny-file' and not self.server.retry_failures:
-                self.server.retry_failures += 1
-                self.respond(503, {})
-                return
-            if stage == 'move' and identifier.startswith(('pool-data-', 'pool-chunk-')):
-                self.server.violations.append('Move touched file contents: ' + identifier)
-            if stage == 'copy' and method == 'GET' and identifier.startswith('pool-data-'):
-                category = 'scan'
-            elif stage == 'copy' and method == 'PATCH' and identifier.startswith('reserve-'):
-                category = 'copy'
-            elif stage == 'delete' and method == 'DELETE':
-                category = 'delete'
-        if category:
             with self.server.lock:
-                self.server.active[category] += 1
-                self.server.peak[category] = max(self.server.peak[category], self.server.active[category])
-                if self.server.active[category] == 64:
-                    self.server.gates[category].set()
-            if not self.server.gates[category].wait(15):
-                self.server.violations.append('Did not reach 64 concurrent ' + category + ' requests.')
-                self.server.gates[category].set()
-        try:
-            # Keep the first response outstanding while over 100 later writes
-            # finish. A checkpoint must not skip this unfinished prefix hole.
-            first = category == 'delete' and identifier == 'pool-file'
-            if category == 'copy':
-                name = json.loads(json.loads(body).get('name', '{}'))
-                first = name.get('name') == 'pool'
-            if first:
-                deadline = time.monotonic() + 20
-                while self.server.done[category] < 100 and time.monotonic() < deadline:
-                    time.sleep(.005)
-                if self.server.done[category] < 100:
-                    self.server.violations.append('Parallel pipeline stalled behind its first response.')
-                identifiers = json.loads((self.server.test / 'task').read_text())
-                intents = [json.loads((self.server.test / 'task.data' / value / 'state').read_text())
-                           for value in identifiers]
-                key = 'copy_index' if category == 'copy' else 'delete_index'
-                if any(intent.get(key, 0) != 0 for intent in intents if intent['kind'] == 'directory-' + category):
-                    self.server.violations.append('Checkpoint skipped an unfinished prefix: ' + category)
-            self.respond(*self.resource(method, self.path, body))
-        finally:
-            if category:
-                with self.server.lock:
-                    self.server.active[category] -= 1
-                    self.server.done[category] += 1
+                key = (stage, method, identifier, fields)
+                self.server.calls[key] = self.server.calls.get(key, 0) + 1
+                if stage == 'retry' and method == 'GET' and identifier == 'tiny-file' and not self.server.retry_failures:
+                    self.server.retry_failures += 1
+                    return 503, {}
+                if stage == 'move' and identifier.startswith(('pool-data-', 'pool-chunk-')):
+                    self.server.violations.append('Move touched file contents: ' + identifier)
+                failure = None
+                if stage == 'copy' and method == 'GET' and identifier == 'pool-data-42' and fields == 'description':
+                    failure = 'copy-read'
+                if stage == 'copy' and method == 'PATCH' and json.loads(body).get('description') == base64.urlsafe_b64encode((43).to_bytes(3,'little')).decode():
+                    failure = 'copy-write'
+                if stage == 'delete' and method == 'DELETE' and identifier == 'pool-data-43':
+                    failure = 'delete'
+                if failure and failure not in self.server.failed_once:
+                    self.server.failed_once.add(failure)
+                    if failure == 'copy-write': self.server.failed_copy_id = identifier
+                    return 503, {}
+                if stage == 'delete' and method == 'DELETE' and identifier == 'pool-data-42':
+                    # Simulate an already-applied DELETE with a lost response.
+                    self.server.blobs.pop(identifier, None)
+                    return 404, {}
+        return self.resource(method, path, body)
 
     def do_GET(self):
         if self.path == '/fixture/status':
             with self.server.lock:
                 return self.respond(200, self.server.blobs.copy())
-        self.dispatch('GET')
+        self.respond(*self.checked_resource('GET', self.path))
 
     def do_PATCH(self):
-        self.dispatch('PATCH', self.body())
+        self.respond(*self.checked_resource('PATCH', self.path, self.body()))
 
     def do_DELETE(self):
-        self.dispatch('DELETE')
+        self.respond(*self.checked_resource('DELETE', self.path))
 
     def do_POST(self):
         body = self.body().decode()
-        # Only the empty-file upload's batch metadata is expected here.
-        parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
-        responses = []
-        for identifier, request in parts:
+        raw = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
+        assert 0 < len(raw) <= 100, 'Invalid batch part count.'
+        parts = []
+        for identifier, request in raw:
             header, _, payload = request.partition('\r\n\r\n')
             method, path, *_ = header.splitlines()[0].split(' ')
-            status, value = self.resource(method, path, payload.encode())
-            responses.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n' + json.dumps(value) + '\r\n')
-        self.respond(200, (''.join(responses) + '--fixture--\r\n').encode(), 'multipart/mixed; boundary=fixture')
+            parts.append((identifier, method, path, payload.encode()))
+        category = None
+        stage = (self.server.test / 'pool-stage').read_text() if self.server.phase == 'pool' else ''
+        if stage == 'copy':
+            if any(method == 'GET' and 'pool-data-' in path and
+                   parse_qs(urlparse(path).query).get('fields') == ['name'] for _,method,path,_ in parts):
+                category = 'scan'
+            elif any('pool-data-' in path or method == 'PATCH' and 'reserve-' in path for _,method,path,_ in parts):
+                category = 'copy'
+        elif stage == 'delete' and any(method == 'DELETE' for _,method,_,_ in parts):
+            category = 'delete'
+        if self.server.phase == 'pool':
+            with self.server.lock:
+                self.server.batch_sizes.append(len(parts))
+        if category:
+            with self.server.lock:
+                self.server.active[category] += 1
+                self.server.peak[category] = max(self.server.peak[category], self.server.active[category])
+                if self.server.active[category] == 64: self.server.gates[category].set()
+            if not self.server.gates[category].wait(20):
+                self.server.violations.append('Did not reach 64 concurrent batch ' + category + ' requests.')
+                self.server.gates[category].set()
+        try:
+            first = category == 'delete' and any(path.endswith('/pool-file') for _,_,path,_ in parts)
+            if category == 'copy':
+                first = any(method == 'PATCH' and json.loads(json.loads(payload).get('name','{}')).get('name') == 'pool'
+                            for _,method,_,payload in parts)
+            if first:
+                deadline = time.monotonic() + 25
+                while self.server.done[category] < 100 and time.monotonic() < deadline: time.sleep(.005)
+                if self.server.done[category] < 100:
+                    self.server.violations.append('Parallel batch pipeline stalled behind its first response.')
+                identifiers = json.loads((self.server.test / 'task').read_text())
+                intents = [json.loads((self.server.test / 'task.data' / value / 'state').read_text()) for value in identifiers]
+                key = 'copy_index' if category == 'copy' else 'delete_index'
+                if any(intent.get(key, 0) != 0 for intent in intents if intent['kind'] == 'directory-' + category):
+                    self.server.violations.append('Checkpoint skipped an unfinished prefix: ' + category)
+            responses = []
+            for identifier,method,path,payload in parts:
+                status,value = self.checked_resource(method,path,payload)
+                content = value.decode() if isinstance(value, bytes) else json.dumps(value)
+                responses.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n{content}\r\n')
+            # Google may return subresponses in an arbitrary order.
+            self.respond(200, (''.join(reversed(responses)) + '--fixture--\r\n').encode(), 'multipart/mixed; boundary=fixture')
+        finally:
+            if category:
+                with self.server.lock:
+                    self.server.active[category] -= 1
+                    self.server.done[category] += len(parts)
 
 
 with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
@@ -297,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
         shutil.copytree(runtime / resource, test / resource)
     (test / 'key.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
     (test / 'root').write_text('root')
-    (test / 'blob_queue').write_text(json.dumps([f'reserve-{i}' for i in range(25000)]))
+    (test / 'blob_queue').write_text(json.dumps([f'reserve-{i}' for i in range(40000)]))
     (test / 'empty.bin').write_bytes(b'')
     server = FixtureServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
@@ -338,6 +367,9 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 server.done = server.active.copy()
                 server.gates = {key: threading.Event() for key in server.active}
                 server.retry_failures = 0
+                server.calls = {}
+                server.failed_once = set()
+                server.batch_sizes = []
 
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64', str(test / 'test.exe'), phase],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
@@ -357,7 +389,14 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 assert not server.violations, server.violations
                 assert server.retry_failures == 1, 'Small-file network retry was not exercised.'
                 assert all(identifier not in server.blobs for identifier in ('pool-file', 'pool-chunk-0', 'pool-chunk-1'))
-                assert all(f'pool-data-{i}' not in server.blobs for i in range(128))
+                assert all(f'pool-data-{i}' not in server.blobs for i in range(6500))
+                assert max(server.batch_sizes) == 100, 'Directory requests were not batched.'
+                assert server.failed_once == {'copy-read', 'copy-write', 'delete'}, server.failed_once
+                for (stage, method, identifier, fields), count in server.calls.items():
+                    if stage == 'copy' and method == 'PATCH' and identifier.startswith('reserve-'):
+                        assert count == (2 if identifier == server.failed_copy_id else 1), (identifier, count)
+                    if stage == 'delete' and method == 'DELETE':
+                        assert count == (2 if identifier == 'pool-data-43' else 1), (identifier, count)
                 print('PASS: 64 shared physical handles, concurrent discovery/copy/delete, mixed upload/download, metadata-only move, out-of-order checkpoints and independent content', flush=True)
             if phase.startswith('unlink-'):
                 assert not server.violations, server.violations

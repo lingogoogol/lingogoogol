@@ -66,19 +66,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {'files': [{'id': 'root'}, {'id': 'outside-app-root'}]})
         return self.reply(200, {'name': '{"next":"null"}', 'description': '[]'})
 
-    def do_DELETE(self):
+    def delete_result(self, path):
         phase = self.server.phase
         if phase == 'cancel':
             # Keep a DELETE in flight until the user cancels its curl handle.
             # A separate fixture request releases this server handler afterward.
             (self.server.test / 'delete-pending').touch()
             self.server.release.wait(20)
-            return self.reply(503, {})
+            return 503, {}
         if phase == 'failure':
-            return self.reply(503, {})
+            return 503, {}
         with self.server.lock:
-            self.server.deleted.add(urlparse(self.path).path.rsplit('/', 1)[-1])
-        self.reply(204, b'')
+            self.server.deleted.add(urlparse(path).path.rsplit('/', 1)[-1])
+        return 204, b''
+
+    def do_DELETE(self):
+        self.reply(*self.delete_result(self.path))
 
     def do_POST(self):
         body = self.body()
@@ -86,14 +89,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if urlparse(self.path).path == '/drive/v3/files':
             return self.reply(200, {'id': 'new-root'})
-        identifiers = re.findall(rb'Content-ID: (\d+)\r\n', body)
+        requests = re.findall(rb'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
+        assert 0 < len(requests) <= 100
         parts = []
-        with self.server.lock:
-            for identifier in identifiers:
-                self.server.serial += 1
-                parts.append(b'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-' +
-                             identifier + b'\r\n\r\nHTTP/1.1 200 OK\r\n\r\n' +
-                             json.dumps({'id': f'new-blob-{self.server.serial}'}).encode() + b'\r\n')
+        for identifier, request in requests:
+            method, path, *_ = request.split(b'\r\n', 1)[0].decode().split(' ')
+            if method == 'DELETE':
+                status, value = self.delete_result(path)
+            else:
+                with self.server.lock:
+                    self.server.serial += 1
+                    status, value = 200, {'id': f'new-blob-{self.server.serial}'}
+            data = value if isinstance(value, bytes) else json.dumps(value).encode()
+            parts.append(b'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-' +
+                         identifier + f'\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n'.encode() + data + b'\r\n')
         self.reply(200, b''.join(parts) + b'--fixture--\r\n', 'multipart/mixed; boundary=fixture')
 
 

@@ -120,8 +120,15 @@ class Handler(BaseHTTPRequestHandler):
         if method == 'DELETE':
             time.sleep(.005)
             if account!='mock@example.invalid':self.server.violations.append('Cleared the other account.')
-            with self.server.lock: blobs.pop(identifier,None)
-            return 204, {}
+            with self.server.lock:
+                if self.server.phase == 'resume-clear':
+                    self.server.delete_calls[identifier] = self.server.delete_calls.get(identifier,0)+1
+                    if self.server.clear_retry_id is None:
+                        self.server.clear_retry_id = identifier
+                        return 503, {}
+                present = blobs.pop(identifier,None) is not None
+                if not present: self.server.clear_missing += 1
+            return (204 if present else 404), {}
         if method == 'POST' and identifier == 'files':
             # Clearing restarts the real reserve worker after creating its root.
             # These are new empty blobs, distinct from the deleted inventory.
@@ -148,6 +155,14 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.lock:blobs[identifier]=value
             return self.respond(200,{'id':identifier})
         parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--\+)', body, re.S)
+        assert 0 < len(parts) <= 100
+        interrupted = False
+        if any(request.startswith('DELETE ') for _,request in parts):
+            with self.server.lock:
+                self.server.clear_batch_sizes.append(len(parts))
+                if self.server.phase == 'clear-crash':
+                    self.server.clear_batches += 1
+                    interrupted = self.server.clear_batches == 2
         response=[]
         has_content = False
         for identifier, request in parts:
@@ -157,6 +172,12 @@ class Handler(BaseHTTPRequestHandler):
             has_content |= (method == 'PATCH' and len(payload) > 20000 or
                             method == 'GET' and len(value.get('description', '')) > 20000)
             response.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n'+json.dumps(value)+'\r\n')
+            if interrupted and len(response) == 50:
+                # Apply half of an uncheckpointed batch, then lose its response.
+                # Restore must replay it and accept 404 only for the deletes.
+                (test/'clear-half-applied').touch()
+                time.sleep(3)
+                return self.respond(503, {})
         if self.server.phase == 'pause-controls' and has_content and len(parts) < 100:
             # Keep the final partial chunk in flight while full chunks publish
             # nonzero progress. GUI clicks must not race an already finished task.
@@ -196,6 +217,8 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     server.lock=threading.Lock();server.blobs={'root':{'name':'{"next":"null"}','description':'[]'}}
     server.other={'second-root':{'name':'{"next":"null"}','description':'[]'}};server.violations=[]
     server.gets={};server.upload_calls=server.download_batches=server.retry=server.reserves=0;server.phase=''
+    server.clear_batches=server.clear_missing=0;server.clear_batch_sizes=[]
+    server.delete_calls={};server.clear_retry_id=None
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         for phase in ('upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','pause-controls','features','account-switch','clear-crash','resume-clear'):
@@ -230,6 +253,11 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
         ), 'Clear did not remove the entire original account inventory.'
         assert 'second-root' in server.other, 'Clear affected a different account.'
         assert not server.violations, server.violations
+        assert max(server.clear_batch_sizes)==100, 'Clear did not use full batches.'
+        assert server.clear_missing >= 50, 'Interrupted DELETEs were not replayed as 404.'
+        assert server.clear_retry_id is not None, 'Partial clear failure was not exercised.'
+        assert all(count == (2 if identifier == server.clear_retry_id else 1)
+                   for identifier,count in server.delete_calls.items()), 'Successful clear parts were resent.'
         assert (test/'output.bin').read_bytes()==(test/'source.bin').read_bytes()
         print('PASS: forced process exits preserve blob reservations, upload publication and exact download bytes; no live cloud data')
     finally:server.shutdown();server.server_close()

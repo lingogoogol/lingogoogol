@@ -77,7 +77,7 @@ int main(int argc, char** argv)
                 check(persistent.m_easy_status.contains(key),"A request used a handle outside the shared pool.");
         };
         auto wait = [&](auto done) {
-            const auto deadline{std::chrono::steady_clock::now() + (phase=="pool" ? 60s : 20s)};
+            const auto deadline{std::chrono::steady_clock::now() + (phase=="pool" ? 120s : 20s)};
             while (!done())
             {
                 check(std::chrono::steady_clock::now() < deadline, "Directory operation timed out.");
@@ -88,7 +88,11 @@ int main(int argc, char** argv)
                        std::string name, bool success = true) {
             begin_directory_task(&loads, session, kind, source, entry, destination, name);
             auto task{loads.m_task_list.back()};
-            wait([&] { return task->m_result != task_result_t::active; });
+            wait([&]
+            {
+                if (phase=="pool" && task->m_control->paused) task->m_control->retry();
+                return task->m_result != task_result_t::active;
+            });
             if (task->m_result != (success ? task_result_t::completed : task_result_t::failed))
                 throw std::runtime_error{task->m_progress_text->get_text()};
             check(task->m_confirm_button->get_size().x == 32 && task->m_confirm_button->get_size().y < 32,
@@ -192,7 +196,7 @@ int main(int argc, char** argv)
         else if (phase=="pool")
         {
             auto file=entry("pool-file","pool",true);
-            file["size"]=384;
+            file["size"]=19500;
             storage_atomic_write("pool-stage","move");
             run("directory-move","root",file,"destination","pool");
             storage_atomic_write("pool-stage","copy");
@@ -208,6 +212,8 @@ int main(int argc, char** argv)
             wait([&]
             {
                 peak=std::max(peak,loads.m_end.size());
+                for (const auto& task : {std::static_pointer_cast<load_task_t>(copy),download,upload})
+                    if (task->m_control->paused) task->m_control->retry();
                 return loads.m_task_list.empty();
             });
             for (const auto& task : {std::static_pointer_cast<load_task_t>(copy),download,upload})
