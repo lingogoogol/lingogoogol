@@ -131,7 +131,7 @@ auto app() -> void
         settings_control->cancelled = false;
         settings_control->retry_limit = candidate.network_retries;
         settings_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, "設定更新中", lgo::std_red, lgo::size_1D{256}, false);
+            storage_content_depth, "設定更新中", lgo::std_red_light, lgo::size_1D{256}, false);
         auto settings_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -192,7 +192,7 @@ auto app() -> void
         clear_dismissed = std::make_shared<bool>(false);
         clear_rows.emplace_back(row_id, clear_dismissed);
         clear_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red, lgo::size_1D{256}, false);
+            storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red_light, lgo::size_1D{256}, false);
         auto clear_actions{row->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,

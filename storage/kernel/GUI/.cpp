@@ -784,7 +784,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         main_div->space_x(lgo::std_margin),
         lgo::alignment_2D{lgo::alignment_x::right, lgo::alignment_y::center})};
     persistent->m_directory_status = menu_right->add_object_shared<lgo::text_line_std_t>(
-        storage_content_depth, "", lgo::std_red, lgo::size_1D{96});
+        storage_content_depth, "", lgo::std_red_light, lgo::size_1D{96});
     auto header_line = main_div->add_object_shared<lgo::std_linex_t>(
         storage_content_depth, main_div->space_x(lgo::std_margin), lgo::std_white);
     auto work_div{main_div->add_object_shared<lgo::divx_soft_t>(

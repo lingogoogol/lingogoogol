@@ -48,7 +48,7 @@ while app.poll() is None:
                     for py in range(h):
                         for px in range(w):
                             color=pixels[px,py]
-                            if color[channel] > 100 and all(color[channel] > color[other]*2 for other in range(3) if other!=channel):
+                            if color[channel] > 100 and all(color[channel] > color[other]+20 for other in range(3) if other!=channel):
                                 assert left<=px<right and top<=py<bottom, f'Channel {channel} escaped clip {clip["box"]} at {px,py}.'
                                 visible+=1
                     assert visible>5, f'Channel {channel} did not render.'

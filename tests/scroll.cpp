@@ -52,7 +52,7 @@ int main()
             { return json{{"channel",channel},{"box",{pos.x,pos.y,pos.x+size.x,pos.y+size.y}}}; };
             lgo::scroll_t viewport{&engine,&depth,range,{100,80},{240,160},lgo::scroll_axes_t::x};
             auto contents{body({600,500})};
-            paint(contents,{600,500},lgo::std_red);
+            paint(contents,{600,500},lgo::std_red_light);
             viewport.set_content(contents,{10,15}); viewport.show();
             input(json::array(),{clip(0,{100,80},viewport.view_size())});
             check(contents->get_pos().x==110 && contents->get_pos().y==95,"Content origin is not relative to the viewport.");
@@ -96,7 +96,7 @@ int main()
 
             // A nested XY viewport lives inside an ordinary fixed-size div.
             lgo::scroll_t outer{&engine,&depth,range,{80,70},{320,260},lgo::scroll_axes_t::xy};
-            auto outer_body{body({700,650})}; paint(outer_body,{700,650},lgo::std_red);
+            auto outer_body{body({700,650})}; paint(outer_body,{700,650},lgo::std_red_light);
             auto inner{outer_body->add_object_ghost_shared<lgo::scroll_t>(lgo::depth_range_t{.15f,.6f},
                 lgo::size_2D{160,120},lgo::scroll_axes_t::xy)};
             inner->set_pos({40,40});

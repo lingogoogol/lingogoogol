@@ -46,7 +46,7 @@ while app.poll() is None:
                 screenshot.save(f'/tmp/storage-text-scroll-{value["step"]}.png')
                 for top,bottom in ((80,118),(180,204)):
                     def red(box):
-                        return sum(r > 100 and r > g*2 and r > b*2
+                        return sum(r > 100 and r > g + 20 and r > b + 20
                                    for r,g,b in screenshot.crop(box).convert('RGB').getdata())
                     assert red((100,top,300,bottom)) > 10, 'No visible text in viewport.'
                     assert red((0,top,100,bottom)) == 0, 'Text escaped the left clip edge.'

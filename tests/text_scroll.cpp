@@ -27,10 +27,10 @@ int main()
             std::string text;
             for (int i{}; i < 30; ++i) text += "中文長文字 ABC 0123456789 ";
             lgo::text_line_scroll_t line{&engine, &depth, range, {100,80}, text, {200,40},
-                lgo::std_red, lgo::size_1D{0}, font, lgo::std_red,
+                lgo::std_red_light, lgo::size_1D{0}, font, lgo::std_red_light,
                 lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top}, false};
             lgo::text_line_t plain{&engine, &depth, range, {100,180}, text, {200,24},
-                {0}, font, lgo::std_red,
+                {0}, font, lgo::std_red_light,
                 {lgo::alignment_x::left, lgo::alignment_y::top}};
             line.show(); plain.show();
             auto pump = [&]
