@@ -407,6 +407,10 @@ int main(int argc, char** argv)
                 if (window_width==800) check(size_header->get_size().x==0,"Size column stayed visible at minimum width.");
                 if (window_width>=900) check(size_header->get_size().x>0,"Size column did not return when widened.");
                 check(name_header->get_size().x>=120,"Filename column fell below its minimum width.");
+                const std::map<std::string,std::string> expected_sizes{
+                    {"size-fixture","17179869183 GB"}, {"size-0","0 B"}, {"size-1023","1023 B"},
+                    {"size-1024","1 kB"}, {"size-1536","1 kB"}, {"size-1048575","1023 kB"},
+                    {"size-1048576","1 MB"}, {"size-1073741823","1023 MB"}, {"size-1073741824","1 GB"}};
                 unsigned rows{}, files{};
                 auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer->content())};
                 contents->visit_children([&](auto& row)
@@ -437,16 +441,17 @@ int main(int argc, char** argv)
                               "An action is reordered, wrapped, shrunk or clipped outside the viewport.");
                     check(actions.back()->get_pos().x+32==viewer->get_pos().x+viewer->view_size().x,
                           "Actions are not anchored to the right edge.");
-                    if (name->get_text()=="size-fixture")
+                    if (const auto expected{expected_sizes.find(name->get_text())}; expected!=expected_sizes.end())
                     {
                         ++files;
-                        check(size->get_text()=="18446744073709551615","File size is not isolated in the size column.");
+                        check(size->get_text()==expected->second,"File size has the wrong integer value or unit.");
                     }
                     else check(name->get_text()=="nav-6" && size->get_text().empty(),
                                "Folder label includes a type prefix or a size.");
                     ++rows;
                 });
-                check(rows==2 && files==1,"Column checks did not cover both file and folder entries.");
+                check(files==expected_sizes.size() && rows==files+1,
+                      "Column checks did not cover folders and every file size boundary.");
                 return std::pair{name_header->get_size().x,size_header->get_size().x};
             };
             const auto original_pos{viewer->get_pos()}, original_crumb_pos{crumbs->get_pos()};

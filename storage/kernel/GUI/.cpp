@@ -21,6 +21,20 @@ import storage.kernel.load;
 
 namespace
 {
+    auto file_size_text(std::uint64_t size) -> std::string
+    {
+        constexpr std::array<std::string_view,4> units{"B","kB","MB","GB"};
+        std::size_t unit{};
+        // Integer division truncates fractions without floating-point rounding
+        // or overflow, including UINT64_MAX. GB is the largest display unit.
+        while (size>=1024 && unit+1<units.size())
+        {
+            size/=1024;
+            ++unit;
+        }
+        return std::format("{} {}",size,units[unit]);
+    }
+
     // Header and entries share the same column geometry. Reserve the actions
     // first so narrowing the filename clip can never move buttons off-screen.
     class directory_columns_t: public lgo::divx_soft_t
@@ -797,7 +811,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 },
                 name, folder ? lgo::std_brown_light : lgo::std_green_light, lgo::size_1D{0})};
             auto size_label{columns->add_object_ghost_shared<lgo::text_line_std_t>(
-                storage_content_depth, folder ? "" : std::to_string(entry.at("size").get<std::uint64_t>()),
+                storage_content_depth, folder ? "" : file_size_text(entry.at("size").get<std::uint64_t>()),
                 lgo::std_white, lgo::size_1D{0})};
             auto actions{columns->add_object_ghost_shared<lgo::divx_soft_t>(
                 storage_content_depth, lgo::div_create_from_member{},
