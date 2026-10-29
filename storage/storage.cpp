@@ -287,6 +287,7 @@ auto app() -> void
                 google_account_t::default_shared_set(result.session->account);
                 fonts.push_back(std::move(next_font));
                 lgo::font_preference_t::default_get().assign(1, fonts.back().get());
+                persistent.set_directory_header_font(settings.font_path);
                 lgo::text_line_t::reload_fonts();
                 settings_text->set_text("設定已套用", false);
                 persistent.m_refresh();

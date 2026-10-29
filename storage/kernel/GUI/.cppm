@@ -25,6 +25,9 @@ export {
     struct GUI_persistent_t
     {
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
+        std::vector<std::unique_ptr<lgo::font_face_t>> m_directory_header_faces;
+        lgo::font_preference_t m_directory_header_font;
+        auto set_directory_header_font(const std::string& path) -> void;
         std::shared_ptr<lgo::scroll_t> m_breadcrumbs;
         std::string m_breadcrumb_folder;
         std::map<std::string, std::uint64_t> m_directory_rows;

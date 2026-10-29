@@ -293,8 +293,32 @@ int main(int argc, char** argv)
                                 visible.pos.x+visible.size.x,visible.pos.y+visible.size.y});
                     }
                 });
+                auto dividers = json::array();
+                if (commands.empty())
+                {
+                    std::int64_t actions_x{};
+                    std::function<void(lgo::GUI_object_t&)> find_actions = [&](auto& object)
+                    {
+                        if (auto text{dynamic_cast<lgo::text_line_t*>(&object)}; text && text->get_text()=="操作")
+                            actions_x=text->get_pos().x;
+                        object.visit_children(find_actions);
+                    };
+                    find_actions(*main);
+                    std::function<void(lgo::GUI_object_t&)> find_dividers = [&](auto& object)
+                    {
+                        const auto at{object.get_pos()}; const auto size{object.get_size()};
+                        if (size.x>0 && size.y>0 && at.x>=viewer->get_pos().x &&
+                            at.y>=crumbs->get_pos().y+crumbs->get_size().y &&
+                            at.y+size.y<=viewer->get_pos().y+viewer->view_size().y &&
+                            ((dynamic_cast<lgo::std_liney_t*>(&object) && at.x<actions_x) ||
+                             dynamic_cast<lgo::std_linex_t*>(&object)))
+                            dividers.push_back({at.x+size.x/2,at.y+size.y/2});
+                        object.visit_children(find_dividers);
+                    };
+                    find_dividers(*main);
+                }
                 storage_atomic_write("nav-input.json", json{{"step",++step},{"commands",commands},
-                    {"separators",separators}}.dump());
+                    {"separators",separators},{"dividers",dividers}}.dump());
                 wait([&] { return std::filesystem::exists("nav-ack") && storage_read("nav-ack")==std::to_string(step); });
             };
             auto names = [&]
@@ -359,11 +383,78 @@ int main(int argc, char** argv)
             pos="nav-5"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-5"; });
             check(names()==std::vector<std::string>{"根目錄","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
+            auto verify_columns = [&]
+            {
+                lgo::text_line_t *name_header{}, *size_header{}, *actions_header{};
+                std::function<void(lgo::GUI_object_t&)> headings = [&](auto& object)
+                {
+                    if (auto text{dynamic_cast<lgo::text_line_t*>(&object)})
+                    {
+                        if (text->get_text()=="檔名") name_header=text;
+                        if (text->get_text()=="大小") size_header=text;
+                        if (text->get_text()=="操作") actions_header=text;
+                    }
+                    object.visit_children(headings);
+                };
+                headings(*main);
+                check(name_header && size_header && actions_header,"Missing directory column headings.");
+                check(name_header->get_text_size().y<lgo::font_preference_t::default_get()[0]->leading_get(),
+                      "Column headings did not use the smaller 12px font.");
+                check(name_header->get_pos().y>=crumbs->get_pos().y+crumbs->get_size().y &&
+                      name_header->get_pos().y+name_header->get_size().y<=viewer->get_pos().y,
+                      "Column headings are not between the path and contents.");
+                const auto window_width{engine.get_window_size().x};
+                if (window_width==800) check(size_header->get_size().x==0,"Size column stayed visible at minimum width.");
+                if (window_width>=900) check(size_header->get_size().x>0,"Size column did not return when widened.");
+                check(name_header->get_size().x>=120,"Filename column fell below its minimum width.");
+                unsigned rows{}, files{};
+                auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer->content())};
+                contents->visit_children([&](auto& row)
+                {
+                    lgo::text_line_scroll_std_t* name{};
+                    lgo::text_line_std_t* size{};
+                    std::vector<progress_button_t*> actions;
+                    std::function<void(lgo::GUI_object_t&)> inspect = [&](auto& object)
+                    {
+                        if (auto label{dynamic_cast<lgo::text_line_scroll_std_t*>(&object)}) name=label;
+                        else if (auto button{dynamic_cast<progress_button_t*>(&object)}) actions.push_back(button);
+                        else if (auto label{dynamic_cast<lgo::text_line_std_t*>(&object)}) size=label;
+                        object.visit_children(inspect);
+                    };
+                    inspect(row);
+                    check(name && size && actions.size()==4,"Entry does not have a name, size and four actions.");
+                    check(name->get_pos().x==name_header->get_pos().x &&
+                          name->get_size().x==name_header->get_size().x &&
+                          size->get_pos().x==size_header->get_pos().x &&
+                          size->get_size().x==size_header->get_size().x &&
+                          actions.front()->get_pos().x==actions_header->get_pos().x,
+                          "Header and entry columns are misaligned after resizing.");
+                    for (std::size_t i{}; i<actions.size(); ++i)
+                        check(actions[i]->get_text()==std::array{"下載","剪下","複製","刪除"}[i] &&
+                              actions[i]->get_size().x==32 && actions[i]->get_pos().y==name->get_pos().y &&
+                              actions[i]->get_pos().x>=viewer->get_pos().x &&
+                              actions[i]->get_pos().x+32<=viewer->get_pos().x+viewer->view_size().x,
+                              "An action is reordered, wrapped, shrunk or clipped outside the viewport.");
+                    check(actions.back()->get_pos().x+32==viewer->get_pos().x+viewer->view_size().x,
+                          "Actions are not anchored to the right edge.");
+                    if (name->get_text()=="size-fixture")
+                    {
+                        ++files;
+                        check(size->get_text()=="18446744073709551615","File size is not isolated in the size column.");
+                    }
+                    else check(name->get_text()=="nav-6" && size->get_text().empty(),
+                               "Folder label includes a type prefix or a size.");
+                    ++rows;
+                });
+                check(rows==2 && files==1,"Column checks did not cover both file and folder entries.");
+                return std::pair{name_header->get_size().x,size_header->get_size().x};
+            };
             const auto original_pos{viewer->get_pos()}, original_crumb_pos{crumbs->get_pos()};
             const auto original_size{viewer->get_size()};
             for (int cycle{}; cycle<2; ++cycle)
             {
                 for (const auto size : {lgo::size_2D{800,600}, lgo::size_2D{1200,900},
+                                       lgo::size_2D{820,600}, lgo::size_2D{830,600},
                                        lgo::size_2D{900,700}, lgo::size_2D{1536,1024}})
                 {
                     // Resize through Win32/GLFW: changing only the X11 wrapper
@@ -380,6 +471,7 @@ int main(int argc, char** argv)
                             "Resize to {}x{} left viewport at ({},{}) sized {}x{}, breadcrumbs at ({},{}) sized {}x{}.",
                             size.x,size.y,at.x,at.y,extent.x,extent.y,crumbs->get_pos().x,crumbs->get_pos().y,
                             crumbs->get_size().x,crumbs->get_size().y)};
+                    verify_columns();
                     input(json::array()); // Check rendered path pixels at every size.
                 }
                 if (!(viewer->get_pos().x==original_pos.x && viewer->get_pos().y==original_pos.y &&
@@ -391,6 +483,32 @@ int main(int argc, char** argv)
                         viewer->get_pos().x,viewer->get_pos().y,viewer->get_size().x,viewer->get_size().y,
                         original_crumb_pos.x,original_crumb_pos.y,crumbs->get_pos().x,crumbs->get_pos().y)};
             }
+            const auto threshold{engine.get_window_size().x-verify_columns().first+120};
+            for (const auto width : {threshold,threshold-1,threshold+1})
+            {
+                glfwSetWindowSize(engine.window_get(),static_cast<int>(width),600);
+                wait([&] { return engine.get_window_size().x==width; });
+                const auto [name_width,size_width]{verify_columns()};
+                if (width==threshold)
+                    check(name_width==120 && size_width>0,"Size disappeared before the name reached its minimum.");
+                if (width<threshold)
+                    check(size_width==0,"Size stayed visible after the filename reached its minimum.");
+                if (width>threshold)
+                    check(name_width==121 && size_width>0,"Size did not recover at the column threshold.");
+                input(json::array());
+            }
+            glfwSetWindowSize(engine.window_get(),800,600);
+            wait([&] { return engine.get_window_size().x==800; });
+            const auto right{viewer->get_pos().x+viewer->view_size().x};
+            const auto row_y{viewer->get_pos().y+12};
+            input({{"move",right-116,row_y},{"click"}});
+            check(persistent.m_clipboard && !persistent.m_clipboard->copy &&
+                  persistent.m_clipboard->entity.at("id")=="nav-6",
+                  "Cut did not hit the right-hand action on a narrow window.");
+            input({{"move",right-66,row_y},{"click"}});
+            check(persistent.m_clipboard && persistent.m_clipboard->copy &&
+                  persistent.m_clipboard->entity.at("id")=="nav-6",
+                  "Copy did not hit the right-hand action on a narrow window.");
             input(json::array());
             persistent.m_reset_view();
             check(!crumbs->content() && persistent.m_breadcrumb_folder.empty(),"Reset retained an old account path.");

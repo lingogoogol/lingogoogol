@@ -27,7 +27,7 @@ if len(sys.argv) > 2 and sys.argv[2] == 'breadcrumbs':
                         subprocess.run(['xdotool',*commands[kind],*map(str,args)],check=True)
                         time.sleep(.08)
                     time.sleep(.15)
-                    if value.get('separators'):
+                    if value.get('separators') or value.get('dividers'):
                         geometry = dict(line.split('=',1) for line in subprocess.check_output(
                             ['xdotool','getwindowgeometry','--shell',window],text=True).splitlines())
                         x,y,width,height=(int(geometry[key]) for key in ('X','Y','WIDTH','HEIGHT'))
@@ -36,6 +36,10 @@ if len(sys.argv) > 2 and sys.argv[2] == 'breadcrumbs':
                         for box in value['separators']:
                             ink=sum(min(pixel)>180 and max(pixel)-min(pixel)<8 for pixel in image.crop(box).getdata())
                             assert ink>2, 'Breadcrumb > has no visible white glyph pixels: ' + str(box)
+                        for point in value['dividers']:
+                            pixel = image.getpixel(tuple(point))
+                            assert 130 <= min(pixel) <= max(pixel) <= 165 and max(pixel)-min(pixel)<3, \
+                                'Column or row divider is not dark gray: ' + str((point, pixel))
                     step = value['step']
                     Path('nav-ack').write_text(str(step))
             time.sleep(.02)
@@ -111,7 +115,7 @@ try:
     wait_for(find_window, 'Window did not appear.', 30)
     run('windowfocus', '--sync', window)
     time.sleep(1)
-    screenshot('initial')
+    initial = screenshot('initial')
     # All toolbar buttons have the same 96x32 geometry. Empty paste remains
     # gray through hover/press and must not open even an informational dialog.
     for state in ('idle', 'hover', 'press'):
@@ -128,34 +132,35 @@ try:
     run('mouseup','1')
     time.sleep(.3)
     image = screenshot('paste-disabled-release')
-    assert image.getpixel((500,490)) == (0,0,0), 'Empty paste opened a dialog.'
+    assert image.getpixel((500,490)) == initial.getpixel((500,490)), 'Empty paste opened a dialog.'
     if len(sys.argv) > 2 and sys.argv[2] == 'scroll':
         # A wheel event over the name must reach the containing list; horizontal
         # events subsequently move that name without selecting another row.
         def thumb_top():
             image = screenshot('scroll-sync')
-            return next((y for y in range(98, 1016) if image.getpixel((1526, y))[0] > 180), None)
+            return next((y for y in range(122, 1016) if image.getpixel((1526, y))[0] > 180), None)
         # Await rendered state rather than assuming that Lavapipe has finished
         # rebuilding thousands of deferred glyphs after an arbitrary delay.
-        wait_for(lambda: thumb_top() == 98, 'Directory scrollbar did not appear.')
-        run('mousemove', '--window', window, 400, 110)
+        wait_for(lambda: thumb_top() == 122, 'Directory scrollbar did not appear.')
+        run('mousemove', '--window', window, 400, 134)
         time.sleep(.3)
         run('click', '--repeat', '3', '--delay', '80', '5')
-        wait_for(lambda: (thumb_top() or 0) >= 120, 'Vertical wheel did not update the viewport.')
-        before = screenshot('scroll-vertical').crop((285,100,1500,134))
+        wait_for(lambda: (thumb_top() or 0) >= 160, 'Vertical wheel did not update the viewport.')
+        run('mousemove', '--window', window, 400, 164)
+        before = screenshot('scroll-vertical').crop((290,155,1100,180))
         run('click', '7')
-        wait_for(lambda: screenshot('scroll-horizontal').crop((285,100,1500,134)).tobytes() != before.tobytes(),
+        wait_for(lambda: screenshot('scroll-horizontal').crop((290,155,1100,180)).tobytes() != before.tobytes(),
                  'Horizontal name scrolling did not redraw.')
-        click(456, 136)
+        click(1504, 164)
         screenshot('scroll-delete-confirm')
         click(1056, 584)
-        wait_for(lambda: 'folder-01' not in status(), 'Wheel axes selected the wrong directory row.')
-        assert 'folder-00' in status() and 'folder-02' in status()
+        wait_for(lambda: 'folder-03' not in status(), 'Wheel axes selected the wrong directory row.')
+        assert 'folder-02' in status() and 'folder-04' in status()
         # Replacing 39 long-name rows also rebuilds their deferred glyphs.
         # Let the mocked refresh finish before beginning the native drag.
         time.sleep(2)
         # Drag the thin vertical thumb down, beyond the list, then release.
-        run('mousemove', '--window', window, 1526, 130)
+        run('mousemove', '--window', window, 1526, 190)
         time.sleep(.3)
         run('mousedown', '1')
         time.sleep(2)
@@ -166,10 +171,10 @@ try:
         run('mousemove', '--window', window, 1550, 1150)
         time.sleep(.3)
         run('mouseup', '1')
-        wait_for(lambda: (thumb_top() or 0) > 700, 'Dragging did not move the vertical thumb to the bottom.')
+        wait_for(lambda: (thumb_top() or 0) > 500, 'Dragging did not move the vertical thumb to the bottom.')
         screenshot('scroll-bottom')
         # Pixel scrolling aligns the content bottom with the viewport bottom.
-        click(456, 994)
+        click(1504, 990)
         click(1056, 584)
         wait_for(lambda: 'folder-39' not in status(), 'Dragging did not expose the last directory row.')
         run('key', 'alt+F4')
@@ -196,14 +201,14 @@ try:
     screenshot('created')
     # Download | Cut | Copy | Delete use the standard vertical dividers.
     image = screenshot('actions')
-    for x in (330, 380, 430):
+    for x in (1378, 1428, 1478):
         assert sum(b > 240 and 150 < r < 220 and abs(r-g) < 3
-                   for r,g,b in (image.getpixel((x,y)) for y in range(138,165))) >= 18, 'Missing light-blue action separator.'
-    click(356, 150)  # Cut records a selection; it must not mutate Drive.
+                   for r,g,b in (image.getpixel((x,y)) for y in range(122,145))) >= 18, 'Missing light-blue action separator.'
+    click(1404, 134)  # Cut records a selection; it must not mutate Drive.
     image = screenshot('paste-enabled')
     assert image.getpixel((808,16))[0] > 240, 'Cut did not enable the standard-size paste button.'
     assert json.loads(status()['file']['name'])['parent'] == 'root'
-    click(450, 192)  # Browse the destination folder.
+    click(450, 177)  # Browse the destination folder.
     time.sleep(.6)
     click(880, 24)  # Paste opens a confirmation for the visible folder.
     screenshot('paste-cut')
@@ -215,7 +220,7 @@ try:
     time.sleep(.6)
     image = screenshot('paste-empty-after-cut')
     assert 80 < image.getpixel((808,16))[0] < 200, 'Cut paste did not disable the empty clipboard.'
-    click(406, 151)  # Copy the file to the same visible folder.
+    click(1454, 134)  # Copy the file to the same visible folder.
     click(880, 24)
     screenshot('paste-copy')
     click(1056, 584)
@@ -226,11 +231,11 @@ try:
     assert json.loads(status()[copied]['name'])['parent'] == 'destination'
     click(310, 70)  # Return to root while retaining the copy selection.
     time.sleep(.6)
-    click(456, 150)  # Delete the first folder, including both file instances.
+    click(1504, 134)  # Delete the first folder, including both file instances.
     screenshot('delete')
     click(936, 584)
     assert 'destination' in status() and 'file' in status(), 'Cancelled deletion changed Drive.'
-    click(456, 150)
+    click(1504, 134)
     click(1056, 584)
     wait_for(lambda: 'destination' not in status() and 'file' not in status() and copied not in status(), 'Recursive deletion did not finish.')
     glow('glow', 1000, 900)

@@ -19,6 +19,67 @@ import storage.http;
 import storage.google;
 import storage.kernel.load;
 
+namespace
+{
+    // Header and entries share the same column geometry. Reserve the actions
+    // first so narrowing the filename clip can never move buttons off-screen.
+    class directory_columns_t: public lgo::divx_soft_t
+    {
+        std::shared_ptr<lgo::GUI_object_t> m_name, m_size_label, m_actions;
+        std::shared_ptr<lgo::std_liney_t> m_size_line, m_actions_line;
+
+        auto layout() -> void
+        {
+            if (!m_name) return;
+            constexpr std::int64_t name_min{120}, size_width{192};
+            const auto gap{2 * lgo::std_margin.x + lgo::std_line_size.x};
+            const auto actions_width{4 * 32 + 3 * lgo::std_line_size.x + 6 * lgo::std_margin.x};
+            const auto width{get_size().x}, height{get_size().y};
+            const bool show_size{width >= name_min + size_width + actions_width + 2 * gap};
+            const auto name_width{std::max<std::int64_t>(0,
+                width - actions_width - gap - (show_size ? size_width + gap : 0))};
+            const auto at{get_pos()};
+            m_name->set_size({name_width, height});
+            m_name->set_pos(at);
+            const auto size_x{at.x + name_width + gap};
+            // Hidden children still have layout margins in a div. Ghost children
+            // and explicit positions remove the entire optional column and gap.
+            m_size_line->set_pos({size_x - lgo::std_margin.x - lgo::std_line_size.x, at.y});
+            m_size_line->set_size({show_size ? lgo::std_line_size.x : 0, height});
+            m_size_label->set_pos({size_x, at.y});
+            m_size_label->set_size({show_size ? size_width : 0, height});
+            const auto actions_x{at.x + width - actions_width};
+            m_actions_line->set_pos({actions_x - lgo::std_margin.x - lgo::std_line_size.x, at.y});
+            m_actions_line->set_size({lgo::std_line_size.x, height});
+            m_actions->set_pos({actions_x, at.y});
+            m_actions->set_size({actions_width, height});
+        }
+      public:
+        directory_columns_t(lgo::engine_t* engine, lgo::depth_tracker_t* tracker,
+                            lgo::depth_range_t depth, lgo::pos_2D pos, lgo::size_2D size)
+            : lgo::divx_soft_t{engine, tracker, depth, pos, size, lgo::std_margin,
+                {lgo::alignment_x::left, lgo::alignment_y::top}}
+        {
+            m_size_line = add_object_ghost_shared<lgo::std_liney_t>(
+                depth, lgo::size_1D{size.y}, lgo::std_dark_gray);
+            m_actions_line = add_object_ghost_shared<lgo::std_liney_t>(
+                depth, lgo::size_1D{size.y}, lgo::std_dark_gray);
+        }
+        auto columns(std::shared_ptr<lgo::GUI_object_t> name,
+                     std::shared_ptr<lgo::GUI_object_t> size,
+                     std::shared_ptr<lgo::GUI_object_t> actions) -> void
+        {
+            m_name = std::move(name); m_size_label = std::move(size); m_actions = std::move(actions);
+            layout();
+        }
+        auto set_size(lgo::size_2D size) -> void override
+        {
+            lgo::divx_soft_t::set_size(size);
+            layout();
+        }
+    };
+}
+
 auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,
                   load_state_t* load_state, blob_queue_t* blob_queue) -> bool
 {
@@ -725,19 +786,23 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
             rows.emplace(id, row_id);
             auto row{contents->get_object_shared<lgo::divy_flex_soft_t>(row_id)};
-            row->add_object<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
+            const auto height{lgo::font_preference_t::default_get()[0]->leading_get() + 2};
+            auto columns{row->add_object_shared<directory_columns_t>(
+                storage_content_depth, lgo::size_2D{row->get_size().x, height})};
+            auto label{columns->add_object_ghost_shared<lgo::button_text_t<lgo::text_line_scroll_std_t>>(
                 storage_content_depth, [=, viewer = std::weak_ptr{viewer_div}]
                 {
                     if (auto target{viewer.lock()}; folder && target)
                         folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
                 },
-                (folder ? "資料夾，名稱：" : "檔案，名稱：") + name +
-                    (folder ? "" : "，大小：" + std::to_string(entry.at("size").get<std::uint64_t>())),
-                folder ? lgo::std_brown_light : lgo::std_green_light, row->space_x(lgo::std_margin));
-            auto actions{row->add_object_shared<lgo::divx_soft_t>(
+                name, folder ? lgo::std_brown_light : lgo::std_green_light, lgo::size_1D{0})};
+            auto size_label{columns->add_object_ghost_shared<lgo::text_line_std_t>(
+                storage_content_depth, folder ? "" : std::to_string(entry.at("size").get<std::uint64_t>()),
+                lgo::std_white, lgo::size_1D{0})};
+            auto actions{columns->add_object_ghost_shared<lgo::divx_soft_t>(
                 storage_content_depth, lgo::div_create_from_member{},
                 lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
-                row->space_x(lgo::std_margin),
+                lgo::size_1D{0},
                 lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 {
@@ -761,8 +826,9 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { delete_dialog(engine, persistent, load_state, session, source, entry); },
                 "刪除", lgo::std_blue_light, lgo::size_1D{32});
+            columns->columns(label, size_label, actions);
             row->add_object<lgo::std_linex_t>(
-                storage_content_depth, row->space_x(lgo::std_margin), lgo::std_blue_light);
+                storage_content_depth, row->space_x(lgo::std_margin), lgo::std_dark_gray);
         }
         const bool same_path{persistent->m_breadcrumb_folder == source};
         const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};
@@ -870,8 +936,22 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     persistent->m_breadcrumbs = browser_div->add_object_shared<lgo::scroll_t>(
         storage_content_depth, lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
             lgo::font_preference_t::default_get()[0]->leading_get() + 8}, lgo::scroll_axes_t::x, lgo::std_margin);
+    persistent->set_directory_header_font(load_state->m_settings.font_path);
+    auto directory_header{browser_div->add_object_shared<directory_columns_t>(
+        storage_content_depth, lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
+            persistent->m_directory_header_font[0]->leading_get()})};
+    auto heading = [&](std::string text)
+    {
+        return directory_header->add_object_ghost_shared<lgo::text_line_t>(
+            storage_content_depth, std::move(text), lgo::size_2D{}, lgo::size_1D{0},
+            persistent->m_directory_header_font, lgo::std_white,
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::center});
+    };
+    auto name_heading{heading("檔名")}, size_heading{heading("大小")}, actions_heading{heading("操作")};
+    directory_header->columns(name_heading, size_heading, actions_heading);
     auto viewer_div{browser_div->add_object_shared<lgo::scroll_t>(
         storage_content_depth, browser_div->space_2D(lgo::std_margin), lgo::scroll_axes_t::y, lgo::std_margin)};
+    directory_header->set_size({viewer_div->view_size().x, directory_header->get_size().y});
     viewer_div->set_content(std::make_shared<lgo::divy_flex_soft_t>(engine, state->get_depth_tracker(),
         storage_content_depth, lgo::pos_2D{}, lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
         lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top}));
@@ -1089,6 +1169,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
          header = std::weak_ptr{header_line}, work = std::weak_ptr{work_div},
          status = std::weak_ptr{state_div}, progress = std::weak_ptr{*progress_column},
          separator = std::weak_ptr{column_line}, browser = std::weak_ptr{browser_div}, viewer = std::weak_ptr{viewer_div},
+         headings = std::weak_ptr{directory_header},
          center = std::weak_ptr{center_div}, persistent](lgo::size_2D size)
         {
             auto main_div{main.lock()};
@@ -1101,9 +1182,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto column_line{separator.lock()};
             auto viewer_div{viewer.lock()};
             auto browser_div{browser.lock()};
+            auto directory_header{headings.lock()};
             auto center_div{center.lock()};
             if (!main_div || !menu_left || !menu_right || !header_line || !work_div || !state_div ||
-                !progress_column || !column_line || !browser_div || !viewer_div || !center_div)
+                !progress_column || !column_line || !browser_div || !viewer_div || !directory_header || !center_div)
             {
                 return;
             }
@@ -1139,10 +1221,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto viewer_size{browser_div->space_2D(lgo::std_margin)};
             viewer_size.y += viewer_div->get_size().y + lgo::std_margin.x;
             viewer_div->set_size(viewer_size);
+            directory_header->set_size({viewer_div->view_size().x, directory_header->get_size().y});
             auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
             contents->set_size({viewer_div->view_size().x,contents->get_size().y});
             contents->fit_children_sideways();
-            // Each entry is itself a div containing a name, actions and separator.
+            // Resizing the horizontal child recomputes all three entry columns.
             contents->visit_children([](lgo::GUI_object_t& child)
                 { if (auto row{dynamic_cast<lgo::divy_flex_soft_t*>(&child)}) row->fit_children_sideways(); });
 
@@ -1211,4 +1294,12 @@ GUI_persistent_t::~GUI_persistent_t()
         listing.control->cancel();
     m_dialog_done = {};
     m_dialog.reset();
+}
+
+auto GUI_persistent_t::set_directory_header_font(const std::string& path) -> void
+{
+    // Glyph caches retain face pointers. Keep prior 12px faces alive through
+    // settings changes, just as storage.cpp retains the normal-size faces.
+    m_directory_header_faces.push_back(std::make_unique<lgo::font_face_t>(path, 12));
+    m_directory_header_font.assign(1, m_directory_header_faces.back().get());
 }

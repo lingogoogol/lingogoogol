@@ -458,6 +458,9 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
             for i in range(8):
                 server.blobs[f'nav-{i}'] = blob(f'nav-{i}-' + 'long-folder-name-' * 5,
                     'root' if i == 0 else f'nav-{i-1}', [entry(f'nav-{i+1}')] if i < 7 else [])
+            size_fixture = entry('size-fixture', 'file')
+            size_fixture['size'] = 18446744073709551615
+            server.blobs['nav-5']['description'] = json.dumps([entry('nav-6'), size_fixture])
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
                 'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'test.exe'), 'breadcrumbs'],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
