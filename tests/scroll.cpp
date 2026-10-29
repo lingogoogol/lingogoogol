@@ -85,10 +85,10 @@ int main()
             std::vector<lgo::scroll_t*> scrollers;
             std::vector<lgo::text_line_scroll_std_t*> text_scrollers;
             unsigned step{};
-            auto input = [&](json commands, json clips = json::array())
+            auto input = [&](json commands, json clips = json::array(), json pixels = json::array())
             {
                 for (int i{};i<3;++i) pump();
-                { std::ofstream file{"input.json"}; file << json{{"step",++step},{"commands",commands},{"clips",clips}}; }
+                { std::ofstream file{"input.json"}; file << json{{"step",++step},{"commands",commands},{"clips",clips},{"pixels",pixels}}; }
                 const auto deadline{std::chrono::steady_clock::now()+10s};
                 while (true)
                 {
@@ -107,12 +107,27 @@ int main()
             };
             auto clip = [](int channel,lgo::pos_2D pos,lgo::size_2D size)
             { return json{{"channel",channel},{"box",{pos.x,pos.y,pos.x+size.x,pos.y+size.y}}}; };
+            auto bar_pixels = [](lgo::scroll_t& scroll, bool x, json thumb_rgb, json track_rgb)
+            {
+                const auto pos{scroll.scrollbar_pos(x)}; const auto size{scroll.scrollbar_size(x)};
+                const auto origin{scroll.get_pos()}; const auto view{scroll.view_size()};
+                const auto start{x ? origin.x : origin.y}, end{start+(x ? view.x : view.y)};
+                const auto thumb_end{x ? pos.x+size.x : pos.y+size.y};
+                const auto remaining{thumb_end<end ? end-1 : start};
+                return json::array({
+                    {{"point",{pos.x+size.x/2,pos.y+size.y/2}},{"rgb",thumb_rgb}},
+                    {{"point",{x ? remaining : pos.x+size.x/2,x ? pos.y+size.y/2 : remaining}},{"rgb",track_rgb}}});
+            };
             lgo::scroll_t viewport{&engine,&depth,range,{100,80},{240,160},lgo::scroll_axes_t::x};
             scrollers.push_back(&viewport);
             auto contents{body({600,500})};
             paint(contents,{600,500},lgo::std_red_light);
             viewport.set_content(contents,{10,15}); viewport.show();
-            input(json::array(),{clip(0,{100,80},viewport.view_size())});
+            input(json::array(),{clip(0,{100,80},viewport.view_size())},
+                  bar_pixels(viewport,true,{0,0,0},{211,211,211}));
+            viewport.set_scrollbar_colors({.25f,.25f,.25f},{.5f,.5f,.5f});
+            input(json::array(),json::array(),bar_pixels(viewport,true,{137,137,137},{188,188,188}));
+            viewport.set_scrollbar_colors(lgo::std_black,{.65f,.65f,.65f});
             check(contents->get_pos().x==110 && contents->get_pos().y==95,"Content origin is not relative to the viewport.");
             viewport.motion_limits_set({400.,100.});
             bool intermediate{};
@@ -158,6 +173,10 @@ int main()
             auto button{contents->add_object_ghost_shared<lgo::button_classic_std_t>(range,[&]{++clicks;},"裁切測試")};
             button->set_pos(contents->get_pos()+lgo::size_2D{10,145});
             viewport.show();
+            input(json::array(),json::array(),bar_pixels(viewport,false,{0,0,0},{211,211,211}));
+            viewport.set_scrollbar_colors({.25f,.25f,.25f},{.5f,.5f,.5f});
+            input(json::array(),json::array(),bar_pixels(viewport,false,{137,137,137},{188,188,188}));
+            viewport.set_scrollbar_colors(lgo::std_black,{.65f,.65f,.65f});
             input({{"move",120,230},{"click"}});
             check(clicks==1,"Visible portion of a clipped button is not clickable.");
             input({{"move",120,250},{"click"},{"wheel",5}});

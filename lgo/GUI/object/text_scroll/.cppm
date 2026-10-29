@@ -93,8 +93,8 @@ export namespace lgo
                 size_2D{m_size.x, std::max<std::int64_t>(0, m_size.y - bar_height)},
                 std::forward<t_arg>(arg)...);
             m_track = rect_t{engine, tracker, depth_range_t{(depth.near + depth.far) / 2, depth.far},
-                             pos, size_2D{}, color_t{.15f,.15f,.15f}};
-            m_thumb = rect_t{engine, tracker, depth, pos, size_2D{}, color};
+                             pos, size_2D{}, color};
+            m_thumb = rect_t{engine, tracker, depth, pos, size_2D{}, color_t{0.f,0.f,0.f}};
             m_initialized = true;
             update_bar();
         }
@@ -142,7 +142,14 @@ export namespace lgo
             t_text::set_text(std::move(text), load_now);
         }
         auto set_frame_color(color_t color) -> void { set_scrollbar_color(color); }
-        auto set_scrollbar_color(color_t color) -> void { m_thumb.set_color(color); }
+        // Text buttons recolor the remaining track on hover/press; the thumb
+        // keeps its independently configured color, including the black default.
+        auto set_scrollbar_color(color_t color) -> void { m_track.set_color(color); }
+        auto set_scrollbar_colors(color_t thumb_color, color_t track_color) -> void
+        {
+            m_thumb.set_color(thumb_color);
+            m_track.set_color(track_color);
+        }
         auto log(std::uint32_t tab_count) const -> void override { t_text::log(tab_count); }
         auto show_impl(bool base) -> void override
         {

@@ -237,10 +237,10 @@ export namespace lgo
         scroll_t(engine_t* engine, depth_tracker_t* tracker, depth_range_t depth, pos_2D pos,
                  size_2D size, scroll_axes_t axes = scroll_axes_t::xy, size_1D margin = {8})
             : m_engine{engine},m_tracker{tracker},m_depth{depth},m_pos{pos},m_size{std::max<std::int64_t>(0,size.x),std::max<std::int64_t>(0,size.y)},m_margin{margin},m_axes{axes},
-              m_x_track{engine,tracker,{(depth.near+depth.far)/2,depth.far},pos,{},color_t{.15f,.15f,.15f}},
-              m_x_thumb{engine,tracker,depth,pos,{},color_t{.65f,.65f,.65f}},
-              m_y_track{engine,tracker,{(depth.near+depth.far)/2,depth.far},pos,{},color_t{.15f,.15f,.15f}},
-              m_y_thumb{engine,tracker,depth,pos,{},color_t{.65f,.65f,.65f}} { layout(); }
+              m_x_track{engine,tracker,{(depth.near+depth.far)/2,depth.far},pos,{},color_t{.65f,.65f,.65f}},
+              m_x_thumb{engine,tracker,depth,pos,{},color_t{0.f,0.f,0.f}},
+              m_y_track{engine,tracker,{(depth.near+depth.far)/2,depth.far},pos,{},color_t{.65f,.65f,.65f}},
+              m_y_thumb{engine,tracker,depth,pos,{},color_t{0.f,0.f,0.f}} { layout(); }
         ~scroll_t() override { hide(); set_content({}); }
         auto get_pos() const -> pos_2D override { return m_pos; }
         auto get_size() const -> size_2D override { return m_size; }
@@ -305,6 +305,11 @@ export namespace lgo
             m_motion_x.snap(offset.x); m_motion_y.snap(offset.y);
             if (offset.x == m_offset.x && offset.y == m_offset.y) return;
             m_offset = offset; layout();
+        }
+        auto set_scrollbar_colors(color_t thumb_color, color_t track_color) -> void
+        {
+            m_x_thumb.set_color(thumb_color); m_y_thumb.set_color(thumb_color);
+            m_x_track.set_color(track_color); m_y_track.set_color(track_color);
         }
         auto scrollbar_pos(bool x) const -> pos_2D { return (x ? m_x_thumb : m_y_thumb).get_pos(); }
         auto scrollbar_size(bool x) const -> size_2D { return (x ? m_x_thumb : m_y_thumb).get_size(); }

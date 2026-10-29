@@ -138,7 +138,12 @@ try:
         # events subsequently move that name without selecting another row.
         def thumb_top():
             image = screenshot('scroll-sync')
-            return next((y for y in range(122, 1016) if image.getpixel((1526, y))[0] > 180), None)
+            # The visible interval is the black gap in the original gray track.
+            dark = [image.getpixel((1526,y))[0]<20 for y in range(122,1016)]
+            if all(dark):
+                return None
+            return next((122+i for i in range(len(dark)-1) if dark[i] and dark[i+1] and
+                         (i==0 or not dark[i-1])),None)
         # Await rendered state rather than assuming that Lavapipe has finished
         # rebuilding thousands of deferred glyphs after an arbitrary delay.
         wait_for(lambda: thumb_top() == 122, 'Directory scrollbar did not appear.')

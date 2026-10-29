@@ -39,10 +39,11 @@ int main()
                 lgo::text_line_t::pending_load();
             };
             unsigned step{};
-            auto input = [&](nlohmann::json commands, nlohmann::json screenshot = false)
+            auto input = [&](nlohmann::json commands, nlohmann::json screenshot = false,
+                             nlohmann::json pixels = nlohmann::json::array())
             {
                 for (int i{}; i < 8; ++i) pump();
-                const auto request = nlohmann::json{{"step", ++step}, {"commands", commands}, {"screenshot", screenshot}};
+                const auto request = nlohmann::json{{"step", ++step}, {"commands", commands}, {"screenshot", screenshot}, {"pixels", pixels}};
                 { std::ofstream out{"input.json"}; out << request.dump(); }
                 const auto deadline{std::chrono::steady_clock::now() + 10s};
                 while (true)
@@ -62,7 +63,22 @@ int main()
                 }
                 for (int i{}; i < 8; ++i) pump();
             };
-            input(nlohmann::json::array(), true);
+            for (int i{}; i<8; ++i) pump(); // Load deferred glyphs before sampling thumb geometry.
+            auto bar_pixels = [&](nlohmann::json thumb_rgb, nlohmann::json track_rgb)
+            {
+                const auto pos{line.scrollbar_pos()}; const auto size{line.scrollbar_size()};
+                const auto end{line.get_pos().x+line.get_size().x};
+                const auto remaining{pos.x+size.x<end ? end-1 : line.get_pos().x};
+                return nlohmann::json::array({
+                    {{"point",{pos.x+size.x/2,pos.y}},{"rgb",thumb_rgb}},
+                    {{"point",{remaining,pos.y}},{"rgb",track_rgb}}});
+            };
+            input(nlohmann::json::array(), true,bar_pixels({0,0,0},{255,188,188}));
+            line.set_scrollbar_colors({.25f,.25f,.25f},{.5f,.5f,.5f});
+            input(nlohmann::json::array(),false,bar_pixels({137,137,137},{188,188,188}));
+            line.set_frame_color(lgo::std_blue_light);
+            input(nlohmann::json::array(),false,bar_pixels({137,137,137},{188,188,255}));
+            line.set_scrollbar_colors(lgo::std_black,lgo::std_red_light);
             check(line.get_clip_size().x == 200 && line.get_clip_size().y == 38 && line.scrollbar_size().y == 2,
                   "Single line reserves a vertical scrollbar or lacks a horizontal track.");
             line.motion_limits_set({400.,100.});

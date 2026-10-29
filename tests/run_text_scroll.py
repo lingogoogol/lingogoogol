@@ -38,7 +38,7 @@ while app.poll() is None:
                 subprocess.run(['xdotool',*action,*map(str,args)], check=True)
                 time.sleep(.08)
             time.sleep(.15)
-            if value['screenshot']:
+            if value['screenshot'] or value['pixels']:
                 geometry = dict(line.split('=',1) for line in subprocess.check_output(
                     ['xdotool','getwindowgeometry','--shell',window], text=True).splitlines())
                 x,y = int(geometry['X']),int(geometry['Y'])
@@ -51,6 +51,10 @@ while app.poll() is None:
                     assert red((100,top,300,bottom)) > 10, 'No visible text in viewport.'
                     assert red((0,top,100,bottom)) == 0, 'Text escaped the left clip edge.'
                     assert red((300,top,800,bottom)) == 0, 'Text escaped the right clip edge.'
+                for sample in value['pixels']:
+                    observed = screenshot.convert('RGB').getpixel(tuple(sample['point']))
+                    assert all(abs(a-b)<=2 for a,b in zip(observed,sample['rgb'])), \
+                        'Wrong scrollbar color: ' + str((sample,observed))
             step = value['step']
             Path('ack').write_text(str(step))
     time.sleep(.02)

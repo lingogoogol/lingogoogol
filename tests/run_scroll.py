@@ -37,7 +37,7 @@ while app.poll() is None:
                 subprocess.run(['xdotool',*actions[kind],*map(str,args)],check=True)
                 time.sleep(.08)
             time.sleep(.15)
-            if value['clips']:
+            if value['clips'] or value['pixels']:
                 geometry = dict(line.split('=',1) for line in subprocess.check_output(['xdotool','getwindowgeometry','--shell',window],text=True).splitlines())
                 x,y,w,h=(int(geometry[key]) for key in ('X','Y','WIDTH','HEIGHT'))
                 shot=ImageGrab.grab().crop((x,y,x+w,y+h)).convert('RGB')
@@ -52,6 +52,10 @@ while app.poll() is None:
                                 assert left<=px<right and top<=py<bottom, f'Channel {channel} escaped clip {clip["box"]} at {px,py}.'
                                 visible+=1
                     assert visible>5, f'Channel {channel} did not render.'
+                for sample in value['pixels']:
+                    observed = shot.convert('RGB').getpixel(tuple(sample['point']))
+                    assert all(abs(a-b)<=2 for a,b in zip(observed,sample['rgb'])), \
+                        'Wrong scrollbar color: ' + str((sample,observed))
             step=value['step']; Path('ack').write_text(str(step))
     time.sleep(.02)
 sys.exit(app.wait())
