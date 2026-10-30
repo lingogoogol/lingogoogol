@@ -15,6 +15,8 @@ constexpr auto GLFW_FALSE_export{ GLFW_FALSE };
 #undef GLFW_FALSE
 constexpr auto GLFW_MOUSE_BUTTON_LEFT_export{ GLFW_MOUSE_BUTTON_LEFT };
 #undef GLFW_MOUSE_BUTTON_LEFT
+constexpr auto GLFW_KEY_ESCAPE_export{ GLFW_KEY_ESCAPE };
+#undef GLFW_KEY_ESCAPE
 constexpr auto GLFW_KEY_F3_export{ GLFW_KEY_F3 };
 #undef GLFW_KEY_F3
 constexpr auto GLFW_PRESS_export{ GLFW_PRESS };
@@ -111,6 +113,7 @@ export
     constexpr auto GLFW_MOUSE_BUTTON_LEFT{ GLFW_MOUSE_BUTTON_LEFT_export };
     constexpr auto GLFW_KEY_LEFT_SHIFT{ GLFW_KEY_LEFT_SHIFT_export };
     constexpr auto GLFW_KEY_RIGHT_SHIFT{ GLFW_KEY_RIGHT_SHIFT_export };
+    constexpr auto GLFW_KEY_ESCAPE{ GLFW_KEY_ESCAPE_export };
     constexpr auto GLFW_KEY_F3{ GLFW_KEY_F3_export };
     constexpr auto GLFW_PRESS{ GLFW_PRESS_export };
     constexpr auto GLFW_RELEASE{ GLFW_RELEASE_export };

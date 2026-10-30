@@ -35,6 +35,7 @@ export {
                    std::atomic_uint64_t& total) -> std::string;
         auto cleared(const std::shared_ptr<storage_session_t>& session, std::string root) -> void;
         auto stop() -> void;
+        auto sign_out(const std::string& storage_id) -> void;
         auto retry_accounts() -> void;
     };
 }

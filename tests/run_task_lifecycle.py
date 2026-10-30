@@ -221,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     server.delete_calls={};server.clear_retry_id=None
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
-        for phase in ('upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','pause-controls','features','account-switch','clear-crash','resume-clear'):
+        for phase in ('upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','signout-resume','pause-controls','features','account-switch','clear-crash','resume-clear'):
             server.phase=phase
             # xvfb-run can leave Wine children alive if only the wrapper is killed.
             # Give each trial its own process group so timeout cleanup is complete.

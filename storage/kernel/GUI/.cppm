@@ -37,6 +37,11 @@ export {
         std::function<void(storage_settings_t)> m_apply_settings;
         std::function<void()> m_clear_account;
         std::function<void()> m_login;
+        std::function<std::vector<oauth_saved_account_t>()> m_saved_accounts;
+        std::function<void(const std::string&)> m_select_account, m_remove_account;
+        std::function<void()> m_logout, m_toggle_accounts, m_close_accounts, m_layout_accounts;
+        std::unique_ptr<lgo::state_t> m_account_menu;
+        lgo::engine_t::callback_key_t* m_account_menu_key{};
         std::function<void(bool,const std::string&)> m_profile;
         std::shared_ptr<lgo::button_text_t<lgo::text_line_std_t>> m_login_button;
         std::vector<std::shared_ptr<lgo::button_classic_std_t>> m_account_buttons;

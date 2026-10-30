@@ -278,6 +278,12 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         persistent->m_paste_button->set_enabled(persistent->m_clipboard &&
             persistent->m_clipboard->session == load_state->m_session &&
             load_state->m_session && !load_state->m_session->clearing && !persistent->m_switching);
+    if (persistent->m_account_menu)
+    {
+        if (persistent->m_switching || persistent->m_dialog)
+            persistent->m_close_accounts();
+        else persistent->m_layout_accounts();
+    }
     collect_finished_tasks(*load_state, *multi);
     for (auto entry{load_state->m_task_list.begin()}; entry != load_state->m_task_list.end();)
     {
@@ -697,8 +703,13 @@ auto restore_tasks(load_state_t* state,
 {
     for (auto& journal : task_journal_t::restore())
     {
+        const auto already_loaded = [&](const auto& task)
+            { return task->m_journal && task->m_journal->path()==journal->path(); };
+        if (std::ranges::any_of(state->m_task_list,already_loaded) ||
+            std::ranges::any_of(state->m_finished_tasks,already_loaded)) continue;
         const auto intent = journal->data();
-        begin_task(state, session(intent), intent.at("kind"), intent.at("path"), intent.at("pos"), journal);
+        if (auto target = session(intent))
+            begin_task(state, std::move(target), intent.at("kind"), intent.at("path"), intent.at("pos"), journal);
     }
 }
 
@@ -986,6 +997,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
           std::shared_ptr<lgo::divy_soft_t>* progress_column, load_state_t* load_state,
           curl_multi_worker_t* multi, blob_queue_t* blob_queue, std::string* pos) -> void
 {
+    if (persistent->m_close_accounts) persistent->m_close_accounts();
     persistent->m_account_buttons.clear();
     state->clear_state();
     engine->cursor_highlight_set(true);
@@ -1309,10 +1321,117 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         lgo::size_2D{32,32},lgo::size_1D{0},
         lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
     persistent->m_login_button = identity->add_object_ghost_shared<lgo::button_text_t<lgo::text_line_std_t>>(
-        storage_content_depth,[persistent] { if(persistent->m_login) persistent->m_login(); },
+        storage_content_depth,[persistent]
+        { persistent->m_deferred.push_back(persistent->m_toggle_accounts); },
         "登入",lgo::std_white,lgo::size_1D{32});
     persistent->m_login_button->set_size({32,32});
     auto portrait = identity->add_object_ghost_shared<profile_image_t>(storage_content_depth,lgo::size_2D{32,32});
+    persistent->m_close_accounts = [persistent]
+    {
+        // state_t destruction alone does not hide its objects. Unregister
+        // input handlers and GPU primitives before releasing the overlay.
+        if (persistent->m_account_menu)
+        {
+            if (persistent->m_account_menu_key)
+                persistent->m_account_menu->get_engine()->callback_key_remove(
+                    std::exchange(persistent->m_account_menu_key,nullptr));
+            persistent->m_account_menu->clear_state();
+        }
+        persistent->m_layout_accounts = {};
+        persistent->m_account_menu.reset();
+    };
+    persistent->m_toggle_accounts = [engine,state,persistent,load_state]
+    {
+        if (persistent->m_account_menu) { persistent->m_close_accounts(); return; }
+        if (persistent->m_switching || persistent->m_dialog) return;
+        std::vector<oauth_saved_account_t> accounts;
+        try { if (persistent->m_saved_accounts) accounts = persistent->m_saved_accounts(); }
+        catch (const std::exception&) { persistent->m_directory_status->set_text("無法讀取帳號列表"); }
+        auto menu = std::make_unique<lgo::state_t>(engine,state->get_depth_tracker());
+        // An independent overlay avoids toolbar clipping. Modal dialogs remain
+        // in front; the full-window click area prevents clicks reaching files.
+        constexpr lgo::depth_range_t content{.14f,.15f};
+        auto outside = menu->add_object_shared<lgo::click_area_t>(
+            lgo::depth_range_t{.159f,.159f},lgo::pos_2D{},engine->get_window_size(),
+            []{},[](auto){},[](auto){},[](auto){},[persistent]
+            { persistent->m_deferred.push_back(persistent->m_close_accounts); });
+        const auto width = std::min<std::int64_t>(560,engine->get_window_size().x-16);
+        auto panel = menu->add_object_shared<lgo::divy_soft_t>(content,lgo::pos_2D{},
+            lgo::size_2D{width,0},lgo::size_1D{8},
+            lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top});
+        auto background = panel->add_object_ghost_shared<lgo::rect_t>(
+            lgo::depth_range_t{.158f,.158f},lgo::size_2D{width,0},lgo::std_black);
+        auto block = panel->add_object_ghost_shared<lgo::click_area_t>(
+            lgo::depth_range_t{.157f,.157f},lgo::size_2D{width,0},
+            []{},[](auto){},[](auto){},[](auto){},[]{});
+        const auto list_height = std::min<std::int64_t>(accounts.size()*48,
+            std::max<std::int64_t>(48,engine->get_window_size().y-144));
+        auto viewport = panel->add_object_shared<lgo::scroll_t>(content,
+            lgo::size_2D{width-16,list_height},lgo::scroll_axes_t::y,lgo::size_1D{0});
+        const auto row_width = viewport->view_size().x;
+        auto rows = std::make_shared<lgo::divy_flex_soft_t>(engine,state->get_depth_tracker(),
+            content,lgo::pos_2D{},lgo::size_1D{row_width},lgo::size_1D{0},
+            lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top});
+        auto defer = [persistent](std::function<void()> action)
+        {
+            persistent->m_deferred.push_back([persistent,action=std::move(action)]
+            { persistent->m_close_accounts(); if (action) action(); });
+        };
+        for (const auto& account : accounts)
+        {
+            auto row = rows->add_object_shared<lgo::divx_soft_t>(content,
+                lgo::size_2D{row_width,48},lgo::size_1D{8},
+                lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
+            auto photo = row->add_object_shared<profile_image_t>(content,lgo::size_2D{32,32});
+            photo->picture(account.portrait);
+            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
+            // Reserve both separators and the two 32px text actions before
+            // assigning the email's scrollable width, so options never overlap.
+            row->add_object<lgo::text_line_scroll_std_t>(content,account.address,lgo::std_white,
+                lgo::size_1D{row_width-170},false);
+            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
+            row->add_object<progress_button_t>(content,[persistent,defer,email=account.address]
+                { defer([persistent,email]{ if(persistent->m_select_account) persistent->m_select_account(email); }); },
+                "登入",lgo::std_blue_light,lgo::size_1D{32});
+            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
+            auto remove = row->add_object_shared<progress_button_t>(content,[persistent,defer,email=account.address]
+                { defer([persistent,email]{ if(persistent->m_remove_account) persistent->m_remove_account(email); }); },
+                "移除",lgo::std_blue_light,lgo::size_1D{32});
+            remove->set_enabled(!load_state->m_session || !load_state->m_session->oauth ||
+                load_state->m_session->address!=account.address);
+        }
+        viewport->set_content(std::move(rows));
+        auto footer = panel->add_object_shared<lgo::divx_soft_t>(content,
+            lgo::size_2D{width-16,32},lgo::size_1D{8},
+            lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
+        footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
+            { defer(persistent->m_login); },"新增帳戶");
+        if (load_state->m_session)
+            footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
+                { defer(persistent->m_logout); },"登出");
+        persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
+        {
+            const auto window = engine->get_window_size();
+            const auto anchor = persistent->m_login_button->get_pos();
+            const auto height = std::min(list_height,std::max<std::int64_t>(0,window.y-anchor.y-112));
+            viewport->set_size({viewport->get_size().x,height});
+            panel->set_size({panel->get_size().x,height+64});
+            panel->set_pos({std::clamp<std::int64_t>(anchor.x+32-panel->get_size().x,8,
+                std::max<std::int64_t>(8,window.x-panel->get_size().x-8)),anchor.y+40});
+            background->set_pos(panel->get_pos());
+            block->set_pos(panel->get_pos());
+            background->set_size(panel->get_size());
+            block->set_size(panel->get_size());
+            outside->set_size(window);
+        };
+        persistent->m_account_menu = std::move(menu);
+        persistent->m_account_menu_key = engine->callback_key_add([persistent](int key,int action,int)
+        {
+            if (key==GLFW_KEY_ESCAPE && action==GLFW_PRESS)
+                persistent->m_deferred.push_back(persistent->m_close_accounts);
+        });
+        persistent->m_layout_accounts();
+    };
     persistent->m_profile = [portrait=std::weak_ptr{portrait},login=std::weak_ptr{persistent->m_login_button}]
         (bool signed_in,const std::string& image)
     {
@@ -1323,7 +1442,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         }
         if (auto button = login.lock())
         {
-            if (signed_in) button->hide(); else button->show();
+            button->set_text(signed_in ? "" : "登入");
+            button->show();
         }
     };
     persistent->m_profile(load_state->m_session && load_state->m_session->oauth,{});
@@ -1458,6 +1578,7 @@ GUI_persistent_t::~GUI_persistent_t()
         listing.control->cancel();
     m_dialog_done = {};
     m_dialog.reset();
+    if (m_close_accounts) m_close_accounts();
 }
 
 auto GUI_persistent_t::set_directory_header_font(const std::string& path) -> void

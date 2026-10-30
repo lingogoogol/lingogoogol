@@ -72,7 +72,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith('/drive/v3/about?'):
             assert self.headers.get('Authorization', '').startswith('Bearer fixture-access-')
             assert urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)['fields'] == ['user(emailAddress,photoLink)']
-            return self.reply(200, {'user': {'emailAddress': 'oauth@example.invalid',
+            return self.reply(200, {'user': {'emailAddress': getattr(self.server, 'email', 'oauth@example.invalid'),
                                            'photoLink': self.server.host + '/photo'}})
         if self.path == '/photo':
             assert not self.headers.get('Authorization'), 'Credentials leaked to the picture URL.'
@@ -295,6 +295,9 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         run('restore')
         run('relogin', authorize=True)
         assert server.deleted == {'appdata-a', 'appdata-b'} and server.created == 12
+        server.email = 'second@example.invalid'
+        run('second-login', authorize=True)
+        server.email = 'oauth@example.invalid'
         files = list(vault.rglob('*.json'))
         assert len(files) == 1
         envelope = files[0].read_text()
@@ -326,15 +329,43 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 std::filesystem::remove("lose-device");
                 engine.device_lost();
             }
+            if (std::filesystem::exists("prepare-paused-task"))
+            {
+                std::filesystem::remove("prepare-paused-task");
+                storage_atomic_write("paused-source.bin","resume this after logout");
+                begin_task(&load_state,load_state.m_session,"upload-file","paused-source.bin",pos);
+                load_state.m_task_list.back()->pause(true);
+            }
+            auto actions = nlohmann::json::array(), footer = nlohmann::json::array();
+            std::function<void(lgo::GUI_object_t&)> inspect = [&](auto& object)
+            {
+                const auto p=object.get_pos(); const auto z=object.get_size();
+                auto location=nlohmann::json{{"x",p.x+z.x/2},{"y",p.y+z.y/2}};
+                if (auto button=dynamic_cast<progress_button_t*>(&object))
+                {
+                    location["text"]=button->get_text(); location["enabled"]=button->enabled();
+                    actions.push_back(location);
+                }
+                if (dynamic_cast<lgo::button_classic_std_t*>(&object)) footer.push_back(location);
+                object.visit_children(inspect);
+            };
+            if (persistent.m_account_menu)
+                inspect(*persistent.m_account_menu->get_object_shared<lgo::divy_soft_t>(1));
             const auto at=persistent.m_login_button->get_pos();
             const auto size=persistent.m_login_button->get_size();
             const auto window=engine.get_window_size();
             storage_atomic_write("oauth-ui.json",nlohmann::json{{"x",at.x},{"y",at.y},
                 {"w",size.x},{"h",size.y},{"window_w",window.x},{"window_h",window.y},
                 {"signed_in",load_state.m_session && load_state.m_session->oauth},
-                {"switching",persistent.m_switching}}.dump());
+                {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},
+                {"actions",actions},{"footer",footer},{"tasks",load_state.m_task_list.size()},
+                {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
         }
 '''
+        entry = entry.replace('return google_oauth_user_t::saved_accounts(candidate.account_path);', r'''auto accounts = google_oauth_user_t::saved_accounts(candidate.account_path);
+        if (std::filesystem::exists("many-accounts") && !accounts.empty())
+            for (int i{};i<30;++i) accounts.push_back({"fixture-"+std::to_string(i)+"@example.invalid",accounts.front().portrait});
+        return accounts;''')
         entry = entry.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
         (test / 'entry.cpp').write_text(entry)
         compile_source('storage/storage.cpp', test / 'entry.cpp', test / 'entry.obj')
@@ -378,6 +409,10 @@ try:
     narrow=wait(lambda:snapshot() if snapshot()['window_w']==800 else None,'Narrow layout did not appear.')
     assert narrow['x']+32<=800 and narrow['x']>=752
     command('mousemove','--window',window,narrow['x']+16,narrow['y']+16,'click','1')
+    menu=wait(lambda:snapshot() if snapshot()['menu'] else None,'Signed-out dropdown missing.')
+    assert not menu['actions'] and len(menu['footer'])==1
+    def click(at):command('mousemove','--window',window,at['x'],at['y'],'click','1')
+    click(menu['footer'][0])
     wait(lambda:snapshot()['signed_in'] and not snapshot()['switching'],'Google login did not become active.')
     command('mousemove',1500,1100) # Remove the cursor highlight before checking photo colors.
     def colored():
@@ -397,11 +432,64 @@ try:
     Path('resize-wide').touch()
     wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Wide layout did not return.')
     assert wide['w']==wide['h']==32 and wide['x']+32<=1536
+    def open_menu():
+        at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
+        return wait(lambda:snapshot() if snapshot()['menu'] else None,'Account dropdown missing.')
+    menu=open_menu()
+    assert [a['text'] for a in menu['actions']]==['登入','移除']
+    assert menu['actions'][0]['enabled'] and not menu['actions'][1]['enabled']
+    click(menu['actions'][1]);time.sleep(.2)
+    assert snapshot()['menu'] and snapshot()['signed_in'],'Disabled removal handled a click.'
+    command('mousemove',1500,1100)
+    ImageGrab.grab().save('/tmp/storage-account-dropdown.png')
+    command('key','Escape')
+    wait(lambda:not snapshot()['menu'],'Escape did not dismiss dropdown.')
+    menu=open_menu();click({'x':700,'y':400})
+    wait(lambda:not snapshot()['menu'],'Outside click did not dismiss dropdown.')
+    Path('many-accounts').touch()
+    menu=open_menu();assert len(menu['actions'])==62
+    last_y=menu['actions'][-1]['y']
+    click_at={'x':menu['actions'][0]['x']-150,'y':menu['actions'][0]['y']}
+    command('mousemove','--window',window,click_at['x'],click_at['y'],'click','--repeat','8','--delay','50','5')
+    wait(lambda:snapshot()['actions'][-1]['y']<last_y-100,'Account list did not scroll.')
+    Path('resize-small').touch()
+    wait(lambda:snapshot()['window_w']==800 and all(0<a['x']<800 and 0<a['y']<600
+         for a in snapshot()['footer']),'Open dropdown did not resize within the window.')
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Large dropdown did not close.')
+    Path('many-accounts').unlink()
+    Path('resize-wide').touch()
+    wait(lambda:snapshot()['window_w']==1536,'Wide layout did not return after dropdown resize.')
+    Path('prepare-paused-task').touch()
+    wait(lambda:snapshot()['tasks']==1 and snapshot()['paused'],'Paused fixture was not created.')
+    index=Path('task').read_text()
+    menu=open_menu();assert len(menu['footer'])==2
+    click(menu['footer'][1])
+    wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Logout failed.')
+    assert Path('task').read_text()==index,'Logout deleted the transfer checkpoint.'
+    command('key','alt+F4');app.wait(timeout=10)
+    assert app.returncode==0
+    Path('oauth-ui.json').unlink()
+    app=subprocess.Popen(['wine64',sys.argv[1]])
+    wait(lambda:Path('oauth-ui.json').exists(),'Signed-out restart failed.')
+    assert not snapshot()['signed_in'] and snapshot()['tasks']==0,'Restart resumed a signed-out account.'
+    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+    command('windowfocus','--sync',window)
+    menu=open_menu();assert menu['actions'][1]['enabled'] and len(menu['footer'])==1
+    click(menu['actions'][0])
+    wait(lambda:snapshot()['signed_in'] and not snapshot()['switching'] and snapshot()['tasks']==1,
+         'Saved-account login did not restore the transfer.')
+    assert snapshot()['paused'],'Login lost explicit pause state.'
+    menu=open_menu();click(menu['footer'][1])
+    wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Second logout failed.')
+    menu=open_menu();click(menu['actions'][1])
+    wait(lambda:not snapshot()['switching'] and not snapshot()['menu'],'Removal did not finish.')
+    menu=open_menu();assert not menu['actions'] and len(menu['footer'])==1,'Removed account remains in history.'
+    assert Path('task').read_text()==index,'Removal deleted the transfer checkpoint.'
     command('key','alt+F4')
     app.wait(timeout=10)
     assert app.returncode==0
     assert Path('root').read_text()=='original-service-account-root'
-    print('PASS: production signed-out GUI, 32px borderless login, 800px toolbar, browser login, color profile, isolated root and clean close.')
+    print('PASS: signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''

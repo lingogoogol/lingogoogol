@@ -45,7 +45,10 @@ auto finish_task(load_task_t& task, task_result_t result, std::string text) -> v
 {
     if (task.m_result != task_result_t::active) return;
     if (result != task_result_t::completed) task.m_control->cancel();
-    if (task.m_journal) task.m_journal->finish();
+    // Sign-out interrupts work like process shutdown: keep its last durable
+    // checkpoint, including the user's explicit pause state, for next login.
+    if (task.m_journal && result != task_result_t::signed_out) task.m_journal->finish();
+    if (result == task_result_t::signed_out) task.m_dismissed = true;
     task.m_result = result == task_result_t::cancelled ? task_result_t::cancelling : result;
     if (result == task_result_t::cancelled && text.starts_with("已取消："))
         text.replace(0, std::string_view{"已取消："}.size(), "取消中：");

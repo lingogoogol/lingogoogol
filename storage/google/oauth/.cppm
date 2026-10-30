@@ -3,6 +3,10 @@ import std;
 import storage.state;
 
 export {
+    struct oauth_saved_account_t
+    {
+        std::string address, portrait;
+    };
     struct oauth_tokens_t
     {
         std::string access, refresh, nonce;
@@ -23,6 +27,10 @@ export {
         static auto login(const std::string& client_path,
                           const std::shared_ptr<request_control_t>& control)
             -> std::shared_ptr<google_oauth_user_t>;
+        static auto saved_accounts(const std::string& client_path) -> std::vector<oauth_saved_account_t>;
+        static auto select(const std::string& client_path, const std::string& email) -> void;
+        static auto sign_out(const std::string& client_path) -> void;
+        static auto remove(const std::string& client_path, const std::string& email) -> void;
         auto refresh(const std::shared_ptr<request_control_t>& control) -> oauth_tokens_t;
         auto tokens() const -> oauth_tokens_t;
         auto address() const -> std::string;

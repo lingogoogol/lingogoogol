@@ -56,6 +56,7 @@ export {
       public:
         task_journal_t(std::filesystem::path path, nlohmann::json intent);
         auto data() const -> nlohmann::json;
+        auto path() const -> const std::filesystem::path& { return m_path; }
         auto set(std::string key, nlohmann::json value) -> void;
         auto allocate(std::string key, std::size_t count,
                       const std::function<std::vector<std::string>(std::size_t)>& reserve)

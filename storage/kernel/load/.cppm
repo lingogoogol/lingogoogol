@@ -117,7 +117,7 @@ export
         std::function<void(const directory_task_t&)> m_on_directory_changed;
     };
     
-    enum class task_result_t { active, cancelling, completed, cancelled, failed };
+    enum class task_result_t { active, cancelling, completed, cancelled, failed, signed_out };
 
     using progress_button_t = lgo::button_text_t<lgo::text_line_std_t>;
 

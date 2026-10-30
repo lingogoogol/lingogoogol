@@ -146,6 +146,53 @@ int main(int argc, char** argv)
                           });
             check(loads.m_task_list.size() == 1, "Expected one persisted task.");
         }
+        else if (phase == "signout-resume")
+        {
+            google_easy_t request;
+            const auto content = list_folder_content(request,&pos);
+            begin_task(&loads,session,"download-file","signedout.bin",content[0]["id"]);
+            auto download = std::dynamic_pointer_cast<download_task_t>(loads.m_task_list.back());
+            begin_task(&loads,session,"upload-file","second.bin",pos);
+            auto upload = loads.m_task_list.back();
+            upload->pause(true);
+            const auto deadline = std::chrono::steady_clock::now()+40s;
+            while (!multi.pending(download->m_control))
+            {
+                check(std::chrono::steady_clock::now()<deadline,"No in-flight download before sign-out.");
+                pump();
+            }
+            check(download->m_result==task_result_t::active,"Download completed before sign-out fixture.");
+            const auto index = storage_read("task");
+            for (auto task : {std::static_pointer_cast<load_task_t>(download),upload})
+                finish_task(*task,task_result_t::signed_out,"等待帳號登入");
+            multi.interrupt();
+            loads.m_session.reset();
+            runtime.sign_out(session->storage_id);
+            while (!loads.m_finished_tasks.empty())
+            {
+                check(std::chrono::steady_clock::now()<deadline,"Signed-out requests did not drain.");
+                pump();
+            }
+            check(storage_read("task")==index,"Sign-out removed durable checkpoints.");
+            check(std::filesystem::exists(download->m_journal->path()/"state"),"Download checkpoint was deleted.");
+            session=runtime.open(settings,control);
+            loads.m_session=session;
+            auto restore = [&](const auto&) { return session; };
+            restore_tasks(&loads,restore);
+            restore_tasks(&loads,restore);
+            check(loads.m_task_list.size()==2,"Login lost tasks or restored duplicates.");
+            check(loads.m_task_list.back()->m_control->user_paused,"Login lost explicit pause state.");
+            loads.m_task_list.back()->pause(false);
+            while (!loads.m_task_list.empty())
+            {
+                check(std::chrono::steady_clock::now()<deadline,"Resumed transfer did not complete.");
+                pump();
+            }
+            check(storage_read("signedout.bin")==storage_read("source.bin"),"Signed-out download resumed with wrong bytes.");
+            check(nlohmann::json::parse(storage_read("task")).empty(),"Resumed task journals remain.");
+            std::println("PASS: sign-out drains live transfers, preserves checkpoints and pause state, and login resumes exact bytes once.");
+            return 0;
+        }
         else if (phase == "pause-controls")
         {
             google_easy_t request;

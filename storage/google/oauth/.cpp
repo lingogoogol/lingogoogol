@@ -247,6 +247,8 @@ namespace
         std::lock_guard lock{vault_mutex};
         if (!select)
         {
+            // Removal wins over an already-running token refresh or photo download.
+            if (!std::filesystem::exists(vault_directory(client)/(account+".json"))) return;
             // A previous login may still finish an in-flight refresh after a
             // new consent issued another device key. Never replace that login's
             // durable credentials with the superseded refresh token.
@@ -501,7 +503,7 @@ namespace
 struct google_oauth_user_t::implementation_t
 {
     client_t client;
-    std::string email, photo, key_name;
+    std::string email, photo, key_name, portrait;
     oauth_tokens_t tokens;
     std::unique_ptr<key_t> key;
     mutable std::mutex mutex;
@@ -509,7 +511,7 @@ struct google_oauth_user_t::implementation_t
     auto save(bool select = false) -> void
     {
         save_vault(client,storage_digest(email),json{{"client_id",client.id},{"scope",drive_scope},{"email",email},
-            {"photo",photo},{"dpop_key",key_name},{"access",tokens.access},
+            {"photo",photo},{"portrait",portrait},{"dpop_key",key_name},{"access",tokens.access},
             {"refresh",tokens.refresh},{"nonce",tokens.nonce},{"expires",tokens.expires}},select);
     }
 };
@@ -531,6 +533,7 @@ auto google_oauth_user_t::restore(const std::string& path, std::string expected_
         require(saved.at("client_id")==impl->client.id && saved.at("scope")==drive_scope && storage_digest(impl->email)==account &&
             (expected_email.empty() || expected_email==impl->email),"Saved Google account does not match.");
         impl->photo = saved.value("photo","");
+        impl->portrait = saved.value("portrait","");
         impl->key_name = saved.at("dpop_key");
         require(impl->key_name.starts_with("lingogoogol.storage.dpop."),"Invalid saved DPoP key name.");
         impl->key = std::make_unique<key_t>(widen_ascii(impl->key_name),false,true);
@@ -575,6 +578,62 @@ auto google_oauth_user_t::login(const std::string& path, const std::shared_ptr<r
     impl->key->remove_on_close = false;
     return std::shared_ptr<google_oauth_user_t>{new google_oauth_user_t{std::move(impl)}};
 }
+auto google_oauth_user_t::saved_accounts(const std::string& path) -> std::vector<oauth_saved_account_t>
+{
+    const client_t client{path};
+    std::lock_guard lock{vault_mutex};
+    const auto directory = vault_directory(client);
+    std::vector<oauth_saved_account_t> accounts;
+    if (!std::filesystem::exists(directory)) return accounts;
+    for (const auto& entry : std::filesystem::directory_iterator{directory})
+    {
+        const auto id = entry.path().stem().string();
+        if (entry.path().extension()!=".json" || id.size()!=64 ||
+            id.find_first_not_of("0123456789abcdef")!=std::string::npos) continue;
+        try
+        {
+            const auto saved = load_vault_locked(client,id);
+            const auto email = saved.at("email").get<std::string>();
+            require(saved.at("client_id")==client.id && saved.at("scope")==drive_scope &&
+                storage_digest(email)==id,"Saved Google account does not match.");
+            accounts.push_back({email,oauth_unbase64(saved.value("portrait",""))});
+        }
+        catch (...) { /* An unreadable vault must not hide the other accounts. */ }
+    }
+    std::ranges::sort(accounts,{},&oauth_saved_account_t::address);
+    return accounts;
+}
+auto google_oauth_user_t::select(const std::string& path, const std::string& email) -> void
+{
+    const client_t client{path};
+    std::lock_guard lock{vault_mutex};
+    const auto id = storage_digest(email);
+    require(load_vault_locked(client,id).at("email")==email,"Saved Google account does not match.");
+    storage_atomic_write(vault_directory(client)/"active",id);
+}
+auto google_oauth_user_t::sign_out(const std::string& path) -> void
+{
+    const client_t client{path};
+    std::lock_guard lock{vault_mutex};
+    std::filesystem::remove(vault_directory(client)/"active");
+}
+auto google_oauth_user_t::remove(const std::string& path, const std::string& email) -> void
+{
+    const client_t client{path};
+    std::lock_guard lock{vault_mutex};
+    const auto id = storage_digest(email);
+    const auto directory = vault_directory(client);
+    const auto saved = load_vault_locked(client,id);
+    require(saved.at("email")==email,"Saved Google account does not match.");
+    key_t wrapping{crypt_key_name(client,id),false};
+    const auto signing_name = saved.at("dpop_key").get<std::string>();
+    require(signing_name.starts_with("lingogoogol.storage.dpop."),"Invalid saved DPoP key name.");
+    key_t signing{widen_ascii(signing_name),false,true};
+    if (std::filesystem::exists(directory/"active") && storage_read(directory/"active")==id)
+        std::filesystem::remove(directory/"active");
+    std::filesystem::remove(directory/(id+".json"));
+    wrapping.remove_on_close = signing.remove_on_close = true;
+}
 auto google_oauth_user_t::refresh(const std::shared_ptr<request_control_t>& control) -> oauth_tokens_t
 {
     std::lock_guard lock{m_impl->mutex};
@@ -601,7 +660,28 @@ auto google_oauth_user_t::download_picture(const std::shared_ptr<request_control
     {
         // The public photo URL gets no Authorization header or OAuth credentials.
         const auto response = request(m_impl->photo,"",{},control);
-        if (response.status==200) return response.body;
+        if (response.status==200)
+        {
+            // Merge only the cached image into the latest envelope. A photo
+            // finishing after token rotation must not restore stale tokens.
+            const auto id = storage_digest(m_impl->email);
+            try
+            {
+                std::lock_guard lock{m_impl->mutex};
+                auto saved = load_vault(m_impl->client,id);
+                if (saved.at("dpop_key")==m_impl->key_name && response.body.size()<=256*1024)
+                {
+                    // Bound the optional cache inside the 1 MiB token envelope.
+                    // Failed caching must not poison later token refresh saves.
+                    const auto portrait = oauth_base64(response.body);
+                    saved["portrait"] = portrait;
+                    save_vault(m_impl->client,id,saved,false);
+                    m_impl->portrait = portrait;
+                }
+            }
+            catch (...) { /* The portrait remains usable when caching fails. */ }
+            return response.body;
+        }
     }
     catch (...) { }
     return {};

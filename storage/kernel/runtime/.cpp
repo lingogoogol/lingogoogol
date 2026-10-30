@@ -238,6 +238,24 @@ auto storage_runtime_t::stop() -> void
         queue->stop();
 }
 
+auto storage_runtime_t::sign_out(const std::string& storage_id) -> void
+{
+    std::lock_guard lock{m_mutex};
+    if (const auto queue = m_queues.find(storage_id); queue!=m_queues.end())
+    {
+        queue->second->stop();
+        m_queues.erase(queue);
+    }
+    std::erase_if(m_accounts,[&](const auto& entry)
+    {
+        const bool matches = std::ranges::any_of(m_sessions,[&](const auto& session)
+            { return session->storage_id==storage_id && session->account==entry.second; });
+        if (matches) entry.second->stop();
+        return matches;
+    });
+    std::erase_if(m_sessions,[&](const auto& session) { return session->storage_id==storage_id; });
+}
+
 auto storage_runtime_t::retry_accounts() -> void
 {
     std::lock_guard lock{m_mutex};

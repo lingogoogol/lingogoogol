@@ -39,6 +39,24 @@ int main(int argc,char** argv)
             }
             throw std::logic_error{"Unexpected CNG capability."};
         }
+        if (mode=="second-login")
+        {
+            auto second = google_oauth_user_t::login("client.json",control);
+            check(second->address()=="second@example.invalid","Wrong second account.");
+            const auto saved = google_oauth_user_t::saved_accounts("client.json");
+            check(saved.size()==2 && saved[0].address=="oauth@example.invalid" && !saved[0].portrait.empty(),
+                "History did not retain both accounts and the cached portrait.");
+            google_oauth_user_t::sign_out("client.json");
+            check(!google_oauth_user_t::restore("client.json"),"Sign-out selected an account.");
+            check(google_oauth_user_t::saved_accounts("client.json").size()==2,"Sign-out deleted history.");
+            google_oauth_user_t::select("client.json","oauth@example.invalid");
+            check(google_oauth_user_t::restore("client.json")->address()=="oauth@example.invalid","Selection was not durable.");
+            google_oauth_user_t::remove("client.json",second->address());
+            (void)second->refresh(control); // Simulate a delayed refresh from a removed user.
+            check(google_oauth_user_t::saved_accounts("client.json").size()==1,"Refresh resurrected a removed account.");
+            std::println("PASS: account history, cached photo, durable selection, sign-out and removal race.");
+            return 0;
+        }
         auto user=mode=="login" ? google_oauth_user_t::login("client.json",control) :
             google_oauth_user_t::restore("client.json");
         check(user && user->address()=="oauth@example.invalid","Wrong authorized user.");
