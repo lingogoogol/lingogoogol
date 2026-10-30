@@ -39,6 +39,7 @@ export
         auto run_clear_if_full() -> void;
         virtual auto parse() -> void;
         virtual auto valid() -> bool override;
+        auto failure_reason() const -> std::string override;
         virtual auto resume() -> void override;
         auto saved_response() -> std::string override;
         auto restore_response(std::string_view value) -> void override;
@@ -60,6 +61,7 @@ export
         std::uint64_t m_id_current{};
         std::string m_body{};
         bool m_auth_rejected{};
+        std::string m_failure;
         //The number of parts generated in `m_body` in the last call to `body_generate`.
         std::uint64_t m_count{};
     };

@@ -297,7 +297,9 @@ auto curl_easy_t::run() -> void
         );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
         //folder publication retries send an empty body after the first attempt.
-        failed("HTTP request failed (status " + std::to_string(m_response_code) + ").");
+        const auto reason = failure_reason();
+        lgo::log_file(reason + "\n");
+        failed(reason);
         }
 	return;
 }
@@ -434,6 +436,11 @@ auto curl_easy_t::parse() -> void {}
 auto curl_easy_t::valid() -> bool
 {
     return m_response_code >= 200 && m_response_code < 300;
+}
+
+auto curl_easy_t::failure_reason() const -> std::string
+{
+    return "HTTP request failed (status " + std::to_string(m_response_code) + ").";
 }
 
 auto curl_easy_t::resume() -> void

@@ -12,6 +12,40 @@ import lgo.io.file;
 import storage.http;
 import storage.google.easy;
 
+namespace
+{
+    auto api_error_reason(const std::string& body) -> std::string
+    {
+        // Messages may contain filenames, file contents or credentials. Only
+        // emit documented reason identifiers, never arbitrary server strings.
+        static constexpr std::string_view known[]{
+            "badRequest", "invalid", "invalidParameter", "invalidValue", "parseError", "required",
+            "notFound", "insufficientPermissions", "appNotAuthorizedToFile", "forbidden", "authError",
+            "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "storageQuotaExceeded",
+            "activeItemCreationLimitExceeded", "teamDriveFileLimitExceeded", "teamDriveHierarchyTooDeep",
+            "numChildrenInNonRootLimitExceeded", "notSupportedForAppDataFolderFiles",
+            "downloadQuotaExceeded", "sharingRateLimitExceeded", "backendError", "internalError"};
+        if (body.size() > 65536) return {};
+        const auto data = nlohmann::json::parse(body, nullptr, false);
+        if (!data.is_object()) return {};
+        const auto error = data.find("error");
+        if (error == data.end() || !error->is_object()) return {};
+        const auto errors = error->find("errors");
+        if (errors == error->end() || !errors->is_array()) return {};
+        for (const auto& item : *errors)
+        {
+            if (!item.is_object()) continue;
+            const auto reason = item.find("reason");
+            if (reason != item.end() && reason->is_string())
+            {
+                const auto& text = reason->get_ref<const std::string&>();
+                if (std::ranges::find(known, text) != std::end(known)) return text;
+            }
+        }
+        return {};
+    }
+}
+
 google_batch_t::google_batch_t()
 : google_easy_t{} {}
 
@@ -33,6 +67,7 @@ auto google_batch_t::clear() -> void
     m_part.clear();
     m_id_current = 0;
     m_auth_rejected = false;
+    m_failure.clear();
     return;
 }
 
@@ -112,6 +147,7 @@ auto google_batch_t::run_clear_if_full() -> void
 auto google_batch_t::parse() -> void
 {
     m_auth_rejected = false;
+    m_failure.clear();
     if (!curl_easy_t::valid()) return;
 
     // A successful outer HTTP response can still contain a truncated or invalid
@@ -175,21 +211,41 @@ auto google_batch_t::parse() -> void
         }
         if (parsed.size() != m_count)
             throw std::invalid_argument{ "Missing multipart subresponses." };
+        std::map<std::string, std::size_t> failures;
         for (auto& [id, response] : parsed)
         {
             auto& part{ m_part.at(id) };
             part.m_valid = response.status_code_get().starts_with('2') ||
                 (part.m_allow_missing && response.status_code_get() == "404");
             if (response.status_code_get() == "401") m_auth_rejected = true;
+            if (!part.m_valid)
+            {
+                auto status = "HTTP " + response.status_code_get();
+                const auto reason = api_error_reason(response.body_get());
+                if (!reason.empty()) status += " (" + reason + ")";
+                ++failures[status];
+            }
             part.m_response = std::move(response);
+        }
+        for (const auto& [status, count] : failures)
+        {
+            if (m_failure.empty()) m_failure = "Google batch subrequests failed: ";
+            else m_failure += "; ";
+            m_failure += std::to_string(count) + " x " + status;
         }
     }
     catch (const std::invalid_argument& error)
     {
         // Leave pending parts invalid so the existing retry path resends them.
         // Responses from earlier successful attempts remain available.
-        lgo::log_file(std::string{ "Invalid Google batch response; retrying: " } + error.what() + "\n");
+        m_failure = std::string{"Invalid Google batch response: "} + error.what();
+        lgo::log_file(m_failure + "\n");
     }
+}
+
+auto google_batch_t::failure_reason() const -> std::string
+{
+    return m_failure.empty() ? curl_easy_t::failure_reason() : m_failure;
 }
 
 auto google_batch_t::valid() -> bool

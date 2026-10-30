@@ -223,9 +223,9 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
                             "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + "\n"
                         );
-                        easy_ptr->failed(
-                            "Network request failed (HTTP " +
-                            std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + ").");
+                        const auto reason = successful ? easy_ptr->failure_reason() : "Network connection failed.";
+                        lgo::log_file(reason + "\n");
+                        easy_ptr->failed(reason);
                         m_waiting.emplace(message->easy_handle);
                         ++failed_count;
                     }

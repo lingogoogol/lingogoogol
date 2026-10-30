@@ -290,6 +290,47 @@ auto retry_backoff(lgo::engine_t& engine) -> void
     std::println("PASS: unlimited retry backoff, manual reset and finite retry budget");
 }
 
+auto batch_errors(lgo::engine_t& engine) -> void
+{
+    auto failure = [&]
+    {
+        google_batch_t batch;
+        batch.host_set(host);
+        batch.boundary_set("fixture");
+        batch.path_set("/drive/v3");
+        for (const auto* id : {"rate-a", "rate-b", "missing", "private-reason"})
+            blob_get(batch, id, "description");
+        batch.method_post();
+        quiet(batch);
+        return batch;
+    };
+    auto failed = failure();
+    failed.run_try();
+    check(!failed.valid(), "Outer HTTP 200 hid failed batch subrequests.");
+    const auto reason = failed.failure_reason();
+    check(reason.find("2 x HTTP 403 (rateLimitExceeded)") != std::string::npos &&
+          reason.find("HTTP 404 (notFound)") != std::string::npos &&
+          reason.find("HTTP 400") != std::string::npos && reason.find("fixture-token-") == std::string::npos,
+          "Batch failure did not safely summarize actual inner statuses/reasons.");
+    curl_multi_worker_t worker;
+    auto control = std::make_shared<request_control_t>();
+    control->retry_limit = 0;
+    auto background = failure();
+    background.control_set(control);
+    worker.add(std::move(background));
+    const auto deadline = std::chrono::steady_clock::now() + 8s;
+    while (!control->paused)
+    {
+        worker.run();
+        check(std::chrono::steady_clock::now() < deadline, "Failed batch was not reported to its task.");
+        pump(engine);
+    }
+    check(control->reason() == reason, "GUI failure reason lost the batch's inner error.");
+    worker.stop();
+
+    std::println("PASS: inner HTTP errors and safe task/log diagnostics");
+}
+
 int main(int argc, char** argv)
 {
     std::set_terminate([] { std::_Exit(42); });
@@ -304,6 +345,7 @@ int main(int argc, char** argv)
         lgo::engine_t engine{ lgo::size_2D{ 800, 600 }, "Token refresh regression" };
         if (mode == "batch-headers") batch_headers(engine);
         else if (mode == "retry-backoff") retry_backoff(engine);
+        else if (mode == "batch-errors") batch_errors(engine);
         else if (mode == "recovery") recovery(engine);
         else if (mode == "shutdown" || mode == "queue-error") queue_case(engine, mode == "shutdown");
         else failure_case(engine, mode == "temporary");

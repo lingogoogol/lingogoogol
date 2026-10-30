@@ -71,6 +71,8 @@ export
         virtual auto parse() -> void;
         //valid() is meaningful only after a call to parse().
         virtual auto valid() -> bool;
+        // Safe status-only default; batch responses report their inner failures.
+        virtual auto failure_reason() const -> std::string;
         virtual auto resume() -> void;
 
         auto payload() -> std::string;

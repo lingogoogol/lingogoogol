@@ -18,7 +18,7 @@ source = Path(__file__).resolve().parents[1]
 build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
-modes = ('batch-headers', 'retry-backoff', 'recovery', 'temporary', 'invalid',
+modes = ('batch-headers', 'retry-backoff', 'batch-errors', 'recovery', 'temporary', 'invalid',
          'malformed', 'missing', 'lifetime', 'unavailable', 'queue-error', 'shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
@@ -133,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1.2)  # Arrives after the replacement token has been cached.
             return self.respond(401, {})
 
-        if path.startswith('/batch') and state.mode == 'batch-headers':
+        if path.startswith('/batch') and state.mode in ('batch-headers', 'batch-errors'):
             parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
             response = []
             for identifier, part in parts:
@@ -146,6 +146,11 @@ class Handler(BaseHTTPRequestHandler):
                     if not valid:
                         state.violations.append('Missing JSON Content-Type or malformed Host in batch upload.')
                     status, value = (200, {'id': 'fixture-created', **json.loads(content)}) if valid else (400, {})
+                else:
+                    status, reason = (403, 'rateLimitExceeded') if name.startswith('rate-') else \
+                        (404, 'notFound') if name == 'missing' else (400, 'fixture-token-private-reason')
+                    value = {'error': {'message': 'fixture-token-private-message',
+                                       'errors': [{'reason': reason}]}}
                 response.append(f'--fixture\r\nContent-Type: application/http\r\n'
                                 f'Content-ID: response-{identifier}\r\n\r\n'
                                 f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\n\r\n'
