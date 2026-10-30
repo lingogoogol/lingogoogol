@@ -44,6 +44,8 @@ export {
         auto cleared(const std::shared_ptr<storage_session_t>& session, std::string root) -> void;
         auto stop() -> void;
         auto sign_out(const std::string& storage_id) -> void;
+        // Switching the browser retains these sessions and their background tasks.
+        auto signed_in_sessions() -> std::vector<std::shared_ptr<storage_session_t>>;
         auto retry_accounts() -> void;
     };
 }

@@ -44,6 +44,10 @@ export {
         std::function<void(const service_account_file_t&)> m_select_service_account;
         std::function<std::vector<oauth_saved_account_t>()> m_saved_accounts;
         std::function<void(const std::string&)> m_select_account, m_remove_account;
+        // The bool distinguishes OAuth users from service accounts with the same email.
+        std::function<bool(const std::string&,bool)> m_account_signed_in;
+        std::function<void(const std::string&,bool)> m_logout_account;
+        std::function<bool()> m_has_signed_in_accounts;
         std::function<void()> m_logout, m_toggle_accounts, m_close_accounts, m_layout_accounts;
         std::unique_ptr<lgo::state_t> m_account_menu;
         lgo::engine_t::callback_key_t* m_account_menu_key{};

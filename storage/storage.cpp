@@ -260,6 +260,25 @@ auto app() -> void
         }
         catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入帳號"); }
     };
+    auto find_account_session = [&](const std::string& email, bool oauth)
+        -> std::shared_ptr<storage_session_t>
+    {
+        auto id = email;
+        if (oauth)
+        {
+            const auto config = nlohmann::json::parse(storage_read(oauth_settings().account_path));
+            id = "appdata:"+storage_digest(config.at("installed").at("client_id").get<std::string>())+":"+email;
+        }
+        for (auto session : runtime.signed_in_sessions())
+            if (session->storage_id==id && bool(session->oauth)==oauth) return session;
+        return {};
+    };
+    persistent.m_account_signed_in = [&](const std::string& email, bool oauth)
+    {
+        try { return bool(find_account_session(email,oauth)); }
+        catch (const std::exception&) { return false; }
+    };
+    persistent.m_has_signed_in_accounts = [&] { return !runtime.signed_in_sessions().empty(); };
     auto suspend_account_tasks = [&](const std::string& id)
     {
         // Keep every checkpoint; this is shutdown, not user cancellation.
@@ -271,8 +290,7 @@ auto app() -> void
     };
     persistent.m_remove_account = [&](const std::string& email)
     {
-        if (persistent.m_switching || clearing_session || (load_state.m_session && load_state.m_session->oauth &&
-            load_state.m_session->address==email)) return;
+        if (persistent.m_switching || clearing_session || persistent.m_account_signed_in(email,true)) return;
         try
         {
             const auto candidate = oauth_settings();
@@ -290,25 +308,70 @@ auto app() -> void
         }
         catch (const std::exception&) { persistent.m_directory_status->set_text("無法移除帳號"); }
     };
-    persistent.m_logout = [&]
+    auto logout_accounts = [&](std::vector<std::shared_ptr<storage_session_t>> targets, bool all)
     {
-        if (!load_state.m_session || settings_job.valid() || clearing_session) return;
-        const auto target = load_state.m_session;
-        suspend_account_tasks(target->storage_id);
-        persistent.m_reset_view();
-        persistent.m_clipboard.reset();
-        profile_control->cancel();
-        begin_settings_row("登出："+target->address,false);
+        if (targets.empty() || settings_job.valid() || clearing_session) return;
+        auto candidate = settings;
+        std::string oauth_path;
+        if (all)
+        {
+            // Include known credentials even if their account currently has no
+            // task/session, so journal restoration cannot log it back in.
+            for (const auto& account : storage_service_accounts())
+                candidate.signed_out_service_accounts.insert(account.address);
+            try
+            {
+                const auto path = oauth_settings().account_path;
+                if (std::filesystem::exists(path) &&
+                    nlohmann::json::parse(storage_read(path)).contains("installed")) oauth_path = path;
+            }
+            catch (const std::exception&) { } // Live sessions still carry their own client paths.
+        }
+        auto current = load_state.m_session;
+        const auto selected = [&](const std::shared_ptr<storage_session_t>& session)
+        {
+            return session && std::ranges::any_of(targets,[&](const auto& target)
+                { return target->storage_id==session->storage_id; });
+        };
+        for (const auto& target : targets) suspend_account_tasks(target->storage_id);
+        for (auto& listing : persistent.m_listings)
+            if (selected(listing.session)) listing.control->cancel();
+        if (persistent.m_clipboard && selected(persistent.m_clipboard->session)) persistent.m_clipboard.reset();
+        if (selected(current))
+        {
+            persistent.m_reset_view();
+            profile_control->cancel();
+            current.reset();
+        }
+        begin_settings_row(all ? "登出所有" : "登出："+targets.front()->address,false);
         persistent.m_switching = account_action = true;
         persistent.m_directory_status->set_text("登出中");
-        settings_job = std::async(std::launch::async,[&,target]
+        settings_job = std::async(std::launch::async,
+            [&,targets=std::move(targets),candidate=std::move(candidate),current,all,oauth_path]() mutable
         {
-            runtime.sign_out(target->storage_id);
-            auto candidate = settings;
-            if (target->oauth) google_oauth_user_t::sign_out(target->account_path);
-            else candidate.signed_out_service_accounts.insert(target->address);
-            return settings_result_t{std::move(candidate),{}};
+            for (const auto& target : targets)
+            {
+                runtime.sign_out(target->storage_id);
+                if (target->oauth)
+                    google_oauth_user_t::sign_out(target->account_path,all ? std::string{} : target->address);
+                else candidate.signed_out_service_accounts.insert(target->address);
+            }
+            if (!oauth_path.empty()) google_oauth_user_t::sign_out(oauth_path);
+            return settings_result_t{std::move(candidate),current};
         });
+    };
+    persistent.m_logout_account = [&](const std::string& email, bool oauth)
+    {
+        try
+        {
+            if (auto target = find_account_session(email,oauth)) logout_accounts({std::move(target)},false);
+        }
+        catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出帳號"); }
+    };
+    persistent.m_logout = [&]
+    {
+        try { logout_accounts(runtime.signed_in_sessions(),true); }
+        catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出所有帳號"); }
     };
     auto update_profile = [&]
     {

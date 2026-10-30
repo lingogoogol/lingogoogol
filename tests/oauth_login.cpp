@@ -51,6 +51,9 @@ int main(int argc,char** argv)
             check(google_oauth_user_t::saved_accounts("client.json").size()==2,"Sign-out deleted history.");
             google_oauth_user_t::select("client.json","oauth@example.invalid");
             check(google_oauth_user_t::restore("client.json")->address()=="oauth@example.invalid","Selection was not durable.");
+            google_oauth_user_t::sign_out("client.json",second->address());
+            check(google_oauth_user_t::restore("client.json")->address()=="oauth@example.invalid",
+                  "Signing out a background user cleared another user's selection.");
             google_oauth_user_t::remove("client.json",second->address());
             (void)second->refresh(control); // Simulate a delayed refresh from a removed user.
             check(google_oauth_user_t::saved_accounts("client.json").size()==1,"Refresh resurrected a removed account.");

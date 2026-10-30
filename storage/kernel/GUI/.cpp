@@ -1415,7 +1415,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             // Keep the same email/action columns for both account kinds, even
             // though service-account files are managed outside the application.
             row->add_object<lgo::text_line_scroll_std_t>(content,account.address,lgo::std_white,
-                lgo::size_1D{row_width-170},false);
+                lgo::size_1D{row_width-220},false);
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
             row->add_object<progress_button_t>(content,[persistent,defer,account]
                 {
@@ -1427,13 +1427,23 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                     });
                 },
                 "登入",lgo::std_blue_light,lgo::size_1D{32});
+            const bool oauth = !account.service;
+            const bool signed_in = persistent->m_account_signed_in ?
+                persistent->m_account_signed_in(account.address,oauth) :
+                load_state->m_session && bool(load_state->m_session->oauth)==oauth &&
+                    load_state->m_session->address==account.address;
+            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
+            auto logout = row->add_object_shared<progress_button_t>(content,[persistent,defer,account,oauth]
+                { defer([persistent,email=account.address,oauth]
+                    { if (persistent->m_logout_account) persistent->m_logout_account(email,oauth); }); },
+                "登出",lgo::std_blue_light,lgo::size_1D{32});
+            logout->set_enabled(signed_in);
             if (account.service) continue;
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
             auto remove = row->add_object_shared<progress_button_t>(content,[persistent,defer,email=account.address]
                 { defer([persistent,email]{ if(persistent->m_remove_account) persistent->m_remove_account(email); }); },
                 "移除",lgo::std_blue_light,lgo::size_1D{32});
-            remove->set_enabled(!load_state->m_session || !load_state->m_session->oauth ||
-                load_state->m_session->address!=account.address);
+            remove->set_enabled(!signed_in);
         }
         // Include the soft div's gaps between rows in the viewport height.
         // Counting only row heights adds a scrollbar even when all rows fit.
@@ -1445,9 +1455,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
         footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
             { defer(persistent->m_login); },"新增帳戶");
-        if (load_state->m_session)
+        if (persistent->m_has_signed_in_accounts ? persistent->m_has_signed_in_accounts() : bool(load_state->m_session))
             footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
-                { defer(persistent->m_logout); },"登出");
+                { defer(persistent->m_logout); },"登出所有");
         persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
         {
             const auto window = engine->get_window_size();

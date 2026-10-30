@@ -611,11 +611,14 @@ auto google_oauth_user_t::select(const std::string& path, const std::string& ema
     require(load_vault_locked(client,id).at("email")==email,"Saved Google account does not match.");
     storage_atomic_write(vault_directory(client)/"active",id);
 }
-auto google_oauth_user_t::sign_out(const std::string& path) -> void
+auto google_oauth_user_t::sign_out(const std::string& path, const std::string& email) -> void
 {
     const client_t client{path};
     std::lock_guard lock{vault_mutex};
-    std::filesystem::remove(vault_directory(client)/"active");
+    const auto active = vault_directory(client)/"active";
+    // Signing out a background user must preserve another user's selection.
+    if (email.empty() || (std::filesystem::exists(active) && storage_read(active)==storage_digest(email)))
+        std::filesystem::remove(active);
 }
 auto google_oauth_user_t::remove(const std::string& path, const std::string& email) -> void
 {

@@ -29,7 +29,7 @@ export {
             -> std::shared_ptr<google_oauth_user_t>;
         static auto saved_accounts(const std::string& client_path) -> std::vector<oauth_saved_account_t>;
         static auto select(const std::string& client_path, const std::string& email) -> void;
-        static auto sign_out(const std::string& client_path) -> void;
+        static auto sign_out(const std::string& client_path, const std::string& email = {}) -> void;
         static auto remove(const std::string& client_path, const std::string& email) -> void;
         auto refresh(const std::shared_ptr<request_control_t>& control) -> oauth_tokens_t;
         auto tokens() const -> oauth_tokens_t;

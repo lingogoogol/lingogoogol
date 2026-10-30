@@ -295,3 +295,13 @@ auto storage_runtime_t::retry_accounts() -> void
     for (auto& [email, account] : m_accounts)
         account->retry();
 }
+
+auto storage_runtime_t::signed_in_sessions() -> std::vector<std::shared_ptr<storage_session_t>>
+{
+    std::lock_guard lock{m_mutex};
+    std::vector<std::shared_ptr<storage_session_t>> sessions;
+    std::set<std::string> identities;
+    for (const auto& session : m_sessions)
+        if (identities.insert(session->storage_id).second) sessions.push_back(session);
+    return sessions;
+}
