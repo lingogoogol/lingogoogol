@@ -74,6 +74,8 @@ int main(int argc, char** argv)
             check(storage_settings_t{}.root_path=="root", "Default root directory changed.");
             storage_atomic_write("settings.json", R"({"root_path":"custom-roots"})");
             check(storage_settings_t::load().root_path=="custom-roots", "Custom root directory changed.");
+            storage_atomic_write("settings.json", R"({"root_path":"root/root"})");
+            check(storage_settings_t::load().root_path=="root", "Old default introduced an extra root directory.");
             std::atomic_bool close{};
             for (const auto name : {"root", "blob_queue"})
             {

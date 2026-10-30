@@ -90,6 +90,10 @@ auto storage_settings_t::load() -> storage_settings_t
     result.font_path = data.value("font_path", result.font_path);
     result.account_path = data.value("account_path", result.account_path);
     result.root_path = data.value("root_path", result.root_path);
+    // An intermediate layout saved the old default filename as root/root.
+    // root_path now names a directory; keep that default from nesting again.
+    if (std::filesystem::path{result.root_path}.lexically_normal()==std::filesystem::path{"root/root"})
+        result.root_path = "root";
     result.network_retries = data.value("network_retries", -1);
     if (result.network_retries < -1)
         throw std::runtime_error{"Network retries must be nonnegative or -1 (unlimited)."};
