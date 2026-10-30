@@ -17,7 +17,7 @@ export {
         auto queue(const std::shared_ptr<storage_session_t>& session) -> std::shared_ptr<blob_queue_t>;
 
       public:
-        explicit storage_runtime_t(std::atomic_bool* close) : m_close{close} {}
+        explicit storage_runtime_t(std::atomic_bool* close);
         ~storage_runtime_t()
         {
             stop();

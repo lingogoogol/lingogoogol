@@ -67,6 +67,30 @@ int main(int argc, char** argv)
     {
         check(argc == 2, "Expected lifecycle phase.");
         const std::string phase{argv[1]};
+        if (phase=="layout")
+        {
+            std::filesystem::create_directory("layout-probe");
+            std::filesystem::current_path("layout-probe");
+            check(storage_settings_t{}.root_path=="root", "Default root directory changed.");
+            storage_atomic_write("settings.json", R"({"root_path":"custom-roots"})");
+            check(storage_settings_t::load().root_path=="custom-roots", "Custom root directory changed.");
+            std::atomic_bool close{};
+            for (const auto name : {"root", "blob_queue"})
+            {
+                storage_atomic_write(name,"preserve this legacy state");
+                bool rejected{};
+                try { storage_runtime_t runtime{&close}; }
+                catch (const std::runtime_error& error)
+                { rejected = std::string_view{error.what()}.starts_with("Move the existing "); }
+                check(rejected && storage_read(name)=="preserve this legacy state",
+                      "Legacy data was imported, overwritten or silently ignored.");
+                std::filesystem::remove(name);
+            }
+            std::filesystem::current_path("..");
+            std::filesystem::remove_all("layout-probe");
+            std::puts("PASS: new root paths, saved settings/journals and manual legacy relocation.");
+            return 0;
+        }
         lgo::init_logfile("logfile/lifecycle.txt");
         // Exercise real GUI and scheduler against a mock Drive, never live credentials.
         lgo::FreeType_t freetype;
@@ -467,8 +491,18 @@ int main(int argc, char** argv)
             begin_task(&loads, session, "upload-file", "second.bin", pos);
             auto saved_settings{settings};
             saved_settings.account_path = "second.json";
-            saved_settings.root_path = "second-root";
             auto second{runtime.open(saved_settings, control)};
+            check(session->root_path=="root/"+storage_digest(session->storage_id) &&
+                  second->root_path=="root/"+storage_digest(second->storage_id) &&
+                  session->root_path!=second->root_path && second->root=="second-root",
+                  "Service accounts did not use separate hashed roots in the same directory.");
+            auto custom_settings = settings;
+            custom_settings.root_path = "custom-roots";
+            const auto custom_path = "custom-roots/"+storage_digest(session->storage_id);
+            storage_atomic_write(custom_path,session->root);
+            const auto custom = runtime.open(custom_settings,control);
+            check(custom->root_path==custom_path && custom->root==session->root && custom->queue==session->queue,
+                  "Custom root directory changed the account or created a separate blob queue.");
             loads.m_session = second;
             google_account_t::default_shared_set(second->account);
             loads.m_settings = saved_settings;

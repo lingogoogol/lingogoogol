@@ -36,18 +36,25 @@
 
 需要 Windows x64、支援 Vulkan 1.3 且具備必要 features 與圖形／呈現佇列的圖形環境，以及可連線至 Google API 的網路。
 
-準備編譯後的 `storage.exe` 與完整執行期資源，放在同一個目錄：
+將執行檔與 DLL 集中放在 `bin/`，字型、shader、設定與狀態保留在其上一層的資料目錄：
 
 ```text
 runtime/
-├── storage.exe
-├── libc++.dll
-├── libunwind.dll
-├── glfw3.dll
-├── libcurl.dll
-├── libcrypto-3-x64.dll
-├── libssl-3-x64.dll
+├── bin/
+│   ├── storage.exe
+│   ├── compare.exe
+│   ├── filegen.exe
+│   ├── libc++.dll
+│   ├── libunwind.dll
+│   ├── glfw3.dll
+│   ├── libcurl.dll
+│   ├── libcrypto-3-x64.dll
+│   └── libssl-3-x64.dll
 ├── key.json
+├── root/
+│   └── <資料空間雜湊>
+├── blob_queue/
+│   └── <資料空間雜湊>
 ├── font/
 │   └── NotoSansTC-VariableFont_wght.ttf
 └── shader/
@@ -55,13 +62,13 @@ runtime/
     └── texture.spv
 ```
 
-字型使用 [Noto Sans TC](https://fonts.google.com/noto/specimen/Noto+Sans+TC)。目前 CMake 安裝流程會複製主程式、上述 DLL 與 shader；字型及帳戶設定需要自行準備。
+字型使用 [Noto Sans TC](https://fonts.google.com/noto/specimen/Noto+Sans+TC)。目前 CMake 安裝流程會將三個執行檔與上述 DLL 安裝至 `bin/`，將 shader 安裝至 `shader/`；字型及帳戶設定需要自行準備。
 
 ### 2. 設定 Google Drive 存取
 
 1. 在 Google Cloud 專案中啟用 Google Drive API。
 2. 準備具有所需 Drive 操作權限的服務帳戶，下載其 JSON 金鑰。
-3. 將金鑰命名為 `key.json`，放在執行目錄中。程式會讀取其中的 `client_email` 與 `private_key`。
+3. 將金鑰命名為 `key.json`，放在資料目錄中。程式會讀取其中的 `client_email` 與 `private_key`。
 
 目前採用服務帳戶驗證。請確認帳戶能建立、讀取與更新所需的 Drive 物件；啟用 API 後若仍遇到權限或配額錯誤，需依 Google 的錯誤回應檢查帳戶設定。
 
@@ -69,16 +76,22 @@ runtime/
 
 ### 3. 啟動程式
 
-在 PowerShell 中先切換到執行目錄，再啟動程式：
+可直接雙擊 `bin/storage.exe`，或在 PowerShell 中啟動：
 
 ```powershell
 Set-Location "C:\path\to\runtime"
-.\storage.exe
+.\bin\storage.exe
 ```
 
-程式依目前工作目錄尋找字型、shader、金鑰與狀態檔，請從上述目錄啟動。
+主程式位於 `bin/`（不分大小寫）時，會根據執行檔位置將 CWD 設成 `bin` 的上一層，從那裡尋找字型、shader、金鑰與狀態；不受啟動時的 CWD 影響。開發時直接執行未放進 `bin/` 的主程式，仍使用原本 CWD。`compare.exe` 與 `filegen.exe` 保留命令列啟動時的 CWD，方便使用相對檔案路徑。
 
-首次啟動時，若沒有 `root` 檔案，程式會建立雲端邏輯根目錄並儲存其 ID。背景工作也會預先建立大量空白 blob，累積可供上傳使用的物件。初次準備會產生較多 API 請求，請等待 `blob_queue_count` 累積。
+首次啟動時，若沒有該帳號的 `root/<資料空間雜湊>` 檔案，程式會建立雲端邏輯根目錄並儲存其 ID。背景工作也會預先建立大量空白 blob，累積可供上傳使用的物件。初次準備會產生較多 API 請求，請等待 `blob_queue_count` 累積。
+
+服務帳戶與 OAuth 帳號採用同一套命名：根目錄 ID 存在 `root/<資料空間雜湊>`，預備 blob ID 清單存在 `blob_queue/<資料空間雜湊>`，不再區分第一個帳號，也不建立 `blob_queue.account`。資料空間識別對服務帳戶為 email，對 OAuth 為 `appdata:<OAuth 用戶端 ID 的 SHA-256>:<使用者 email>`；檔名是該識別字串 UTF-8 位元組的 SHA-256 小寫十六進位值。
+
+舊版資料不會自動搬移。升級前請先關閉程式，依上述規則將舊的 `root`、`root.appdata.<雜湊>` 與 blob 佇列搬到新路徑：已有雜湊後綴的檔案去掉 `root.appdata.` 或 `blob_queue.` 前綴，單一 `root` 使用其所屬服務帳戶的雜湊；單一 `blob_queue` 的歸屬可由舊的 `blob_queue.account` 讀取，該綁定檔不再使用。若舊檔與新資料夾同名，可先暫時改名再建立資料夾；原有 exe 與 DLL 請移入 `bin/`。舊版 `root` 或 `blob_queue` 檔案若仍佔住新資料夾位置，程式會提示先搬移並停止啟動，不覆寫或匯入舊資料。
+
+設定中的 `root_path` 現在表示根目錄 ID 的資料夾，預設是 `root`。若先前設定的是檔案路徑，請改成放置雜湊檔案的資料夾。新續傳紀錄保存這個資料夾位置；舊紀錄仍以已保存的雲端 root ID 恢復，並使用目前設定的根目錄 ID 資料夾。
 
 ### 4. 上傳、瀏覽與下載
 
@@ -105,7 +118,7 @@ Set-Location "C:\path\to\runtime"
 
 ### 5. 設定與清除
 
-「設定」使用 lgo.GUI 表單，提供日誌資料夾、字型檔案、帳戶 JSON 檔案、根目錄 ID 檔案，以及網路失敗重試次數。次數可填非負整數或「無限」（檔案中以 `-1` 表示）；`0` 表示首次失敗即暫停，預設無限。按「取消」不套用，按「確定」驗證並在背景載入帳戶／根目錄，成功後寫入 CWD 的 `settings.json`。新設定立即生效，字型和日誌路徑也會更新；既有傳輸保留建立工作時的帳戶、根目錄與目的地，新操作使用新設定。每個帳戶的 blob 佇列獨立保存，避免混用 ID。表單支援 UTF-8 中文輸入、Backspace、Ctrl+A 全選及 Ctrl+V 貼上。OAuth 自身的三次嘗試與 HTTP 401 刷新上限仍獨立計算。
+「設定」使用 lgo.GUI 表單，提供日誌資料夾、字型檔案、帳戶 JSON 檔案、根目錄 ID 資料夾（預設 `root`），以及網路失敗重試次數。次數可填非負整數或「無限」（檔案中以 `-1` 表示）；`0` 表示首次失敗即暫停，預設無限。按「取消」不套用，按「確定」驗證並在背景載入帳戶／根目錄，成功後寫入 CWD 的 `settings.json`。新設定立即生效，字型和日誌路徑也會更新；既有傳輸保留建立工作時的帳戶、根目錄與目的地，新操作使用新設定。每個帳戶的 blob 佇列獨立保存，避免混用 ID。表單支援 UTF-8 中文輸入、Backspace、Ctrl+A 全選及 Ctrl+V 貼上。OAuth 自身的三次嘗試與 HTTP 401 刷新上限仍獨立計算。
 
 設定更新、清除進度及目錄錯誤等紅色提示統一使用淺紅色 `std_red_light`。
 
@@ -123,9 +136,8 @@ Google 使用者登入時，「清除」只列舉並永久刪除此應用程式�
 | --- | --- |
 | `key.json` | 存取雲端資料使用的服務帳戶金鑰；使用 Google 登入時不需要。 |
 | `client.json` | Google 桌面 OAuth 用戶端設定，不包含使用者登入權杖。 |
-| `root.appdata.<資料空間雜湊>` | 使用預設根目錄路徑時，各 OAuth 用戶端／Google 使用者的邏輯根目錄 ID。 |
-| `root` | 雲端邏輯根目錄的 ID。刪除後，下次啟動會建立另一個根目錄。 |
-| `blob_queue`、`blob_queue.account`、`blob_queue.<資料空間雜湊>` | 各服務帳戶或 OAuth 用戶端／使用者資料空間的預備 blob ID 與初始佇列綁定。 |
+| `root/<資料空間雜湊>` | 各服務帳戶或 OAuth 資料空間的雲端邏輯根目錄 ID。刪除後，下次登入會建立另一個根目錄；可在設定中更換存放資料夾。 |
+| `blob_queue/<資料空間雜湊>` | 同一資料空間的預備 blob ID 清單，檔名與該空間的 root 檔案相同。 |
 | `settings.json` | 已套用的設定，未建立時使用原先的預設相對路徑。 |
 | `task`、`task.data/` | 未完成工作索引、意圖、blob ID 分配、下載進度及成功回應快取。 |
 | `clear.<資料空間雜湊>` | 尚未完成的清除紀錄；服務帳戶涵蓋全部 Drive 檔案，Google 使用者只涵蓋該應用程式的 appDataFolder。 |
@@ -252,9 +264,9 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `run_token_refresh.py` 另以嚴格的 JSON 子請求驗證批次建立／更新、Host／自訂標頭保存、外層 200 內層 403／404 錯誤摘要、敏感訊息排除，以及無限重試退避與手動重設。它也會嚴格檢查 JWT bearer grant type 與 assertion，使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
 
-`python3 tests/run_oauth_login.py` 使用一次性的用戶端設定、本機 OAuth／Drive 模擬服務與軟體測試 KSP，驗證 loopback 回呼、PKCE S256、state／重複參數拒絕、以獨立 OpenSSL 驗證 ES256 簽章、授權碼雜湊 jti、nonce 挑戰、權杖輪替、16 個並行讀取共用背景換發、重新登入更新共用帳戶、舊登入延遲換發不覆寫新憑證、延遲 401、跨程序還原、加密檔竄改拒絕與取消。另驗證雙帳號歷史、加密頭像快取、帳號選取持久化，以及移除後延遲換發不重建憑證；只要求 `drive.appdata`、一般／批次 blob 的 appDataFolder parent，以及清除只列舉和刪除 appDataFolder 的檔案。另操作正式 GUI，檢查登入前後帳號選單、目前帳號禁止移除、登出後重啟、重新登入恢復暫停工作、移除保留續傳紀錄、32×32 無外框登入、800 像素工具列、主迴圈暫停期間連續縮放仍同步對齊選單與頭像、照片的實際 sRGB 色彩與 GPU 重建恢復、服務帳戶 root 保留與正常關閉，並檢查權杖沒有出現在輸出或日誌。`tests/run_task_lifecycle.py` 另驗證實際傳輸中登出會保留檢查點與暫停狀態，重新登入後只恢復一次並產生完全相同的下載內容。Wine 缺少所需的 CNG ECDSA／RSA-OAEP 實作，因此協定測試僅在測試副本替換 KSP 與瀏覽器啟動器；另用未替換的正式實作確認 CNG 失敗不會降級。原生 Windows KSP 與真實 Google 授權仍需在 Windows 上驗證；測試不讀取正式 client.json／key.json，不操作雲端帳戶。
+`python3 tests/run_oauth_login.py` 使用一次性的用戶端設定、本機 OAuth／Drive 模擬服務與軟體測試 KSP，驗證 loopback 回呼、PKCE S256、state／重複參數拒絕、以獨立 OpenSSL 驗證 ES256 簽章、授權碼雜湊 jti、nonce 挑戰、權杖輪替、16 個並行讀取共用背景換發、重新登入更新共用帳戶、舊登入延遲換發不覆寫新憑證、延遲 401、跨程序還原、加密檔竄改拒絕與取消。另驗證雙帳號歷史、加密頭像快取、帳號選取持久化，以及移除後延遲換發不重建憑證；只要求 `drive.appdata`、一般／批次 blob 的 appDataFolder parent，以及清除只列舉和刪除 appDataFolder 的檔案。另將正式 GUI 放在 `bin/` 並從無關 CWD 啟動及重啟，檢查資料寫入 `bin` 的上一層、root 與佇列只產生雜湊檔名、舊版續傳紀錄仍可恢復、登入前後帳號選單、目前帳號禁止移除、登出後重啟、重新登入恢復暫停工作、移除保留續傳紀錄、32×32 無外框登入、800 像素工具列、主迴圈暫停期間連續縮放仍同步對齊選單與頭像、照片的實際 sRGB 色彩與 GPU 重建恢復、服務帳戶 root 保留與正常關閉，並檢查權杖沒有出現在輸出或日誌。`tests/run_task_lifecycle.py` 另驗證實際傳輸中登出會保留檢查點與暫停狀態，重新登入後只恢復一次並產生完全相同的下載內容。Wine 缺少所需的 CNG ECDSA／RSA-OAEP 實作，因此協定測試僅在測試副本替換 KSP 與瀏覽器啟動器；另用未替換的正式實作確認 CNG 失敗不會降級。原生 Windows KSP 與真實 Google 授權仍需在 Windows 上驗證；測試不讀取正式 client.json／key.json，不操作雲端帳戶。
 
-`python3 tests/run_task_lifecycle.py` 使用本機模擬 Drive，實際強制終止 Windows 程序並重新啟動，驗證上下載續傳、精確位元組內容、blob ID 保存、避免重複發布、切換帳戶後的工作隔離、目的地覆寫拒絕、網路重試／取消、非同步瀏覽、UTF-8 輸入與 lgo.GUI 對話框，以及全部檔案清除中斷後的恢復。另驗證手動暫停在重啟後仍保留、繼續不會清除網路錯誤；以實際滑鼠點擊測試上下載的暫停／繼續／取消，圖形進度與成功／取消／拒絕覆寫後的「確定」，取消收尾期間的「取消中」，進度列移除後平滑往下補位、不超越目標及游標原地連點、不同間距與排列方向下的移除／再新增，以及 F3 面板在 800×600 視窗下的分頁與欄位間距。測試使用一次性帳戶資料及至少 25,000 個佔位 ID，完全不讀取正式憑證或刪除雲端資料。
+`python3 tests/run_task_lifecycle.py` 使用本機模擬 Drive，實際強制終止 Windows 程序並重新啟動，驗證上下載續傳、精確位元組內容、blob ID 保存、避免重複發布、切換帳戶後的工作隔離、目的地覆寫拒絕、網路重試／取消、非同步瀏覽、UTF-8 輸入與 lgo.GUI 對話框，以及全部檔案清除中斷後的恢復。另驗證服務帳戶使用同一資料夾內的獨立雜湊檔名、自訂根目錄 ID 資料夾與續傳路徑、舊檔未搬移時保留原檔並拒絕啟動，以及手動暫停在重啟後仍保留、繼續不會清除網路錯誤；以實際滑鼠點擊測試上下載的暫停／繼續／取消，圖形進度與成功／取消／拒絕覆寫後的「確定」，取消收尾期間的「取消中」，進度列移除後平滑往下補位、不超越目標及游標原地連點、不同間距與排列方向下的移除／再新增，以及 F3 面板在 800×600 視窗下的分頁與欄位間距。測試使用一次性帳戶資料及至少 25,000 個佔位 ID，完全不讀取正式憑證或刪除雲端資料。
 
 清除續作測試會在第二批刪除僅套用 50 個子請求、尚未收到回應時強制結束程序，重啟後驗證 404 重播、同批部分 503 重試及成功子請求不重送。
 

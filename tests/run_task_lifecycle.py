@@ -2,6 +2,7 @@
 """Crash/restart real Windows task scheduler against an isolated in-memory Drive."""
 import base64
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -203,15 +204,16 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     command[command.index('storage/google/easy/libstorage.google.easy.a')]=str(test/'mock.obj')
     command.append('storage/google/easy/CMakeFiles/storage.google.easy.dir/.cppm.obj')
     subprocess.run(command,cwd=build,check=True)
-    for library in runtime.glob('*.dll'): shutil.copy2(library,test/library.name)
+    for library in (runtime / 'bin').glob('*.dll'): shutil.copy2(library,test/library.name)
     for resource in ('font','shader'): shutil.copytree(runtime/resource,test/resource)
+    (test / 'root').mkdir()
+    (test / 'blob_queue').mkdir()
     (test/'key.json').write_text(json.dumps({'client_email':'mock@example.invalid','private_key':'mock-only-key'}))
     (test/'second.json').write_text(json.dumps({'client_email':'second@example.invalid','private_key':'mock-only-key'}))
-    (test/'second-root').write_text('second-root')
-    import hashlib
-    (test/('blob_queue.'+hashlib.sha256(b'second@example.invalid').hexdigest())).write_text(json.dumps([f'second-{i}' for i in range(25000)]))
+    (test/'root'/hashlib.sha256(b'second@example.invalid').hexdigest()).write_text('second-root')
+    (test/'blob_queue'/hashlib.sha256(b'second@example.invalid').hexdigest()).write_text(json.dumps([f'second-{i}' for i in range(25000)]))
     (test/'second.bin').write_bytes(b'second source'*10000)
-    (test/'root').write_text('root'); (test/'blob_queue').write_text(json.dumps([f'blob-{i}' for i in range(25000)]))
+    (test/'root'/hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root'); (test/'blob_queue'/hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps([f'blob-{i}' for i in range(25000)]))
     (test/'source.bin').write_bytes(bytes(range(256))*20000)
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);server.daemon_threads=True
     server.lock=threading.Lock();server.blobs={'root':{'name':'{"next":"null"}','description':'[]'}}
@@ -221,7 +223,7 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     server.delete_calls={};server.clear_retry_id=None
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
-        for phase in ('upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','signout-resume','pause-controls','features','account-switch','clear-crash','resume-clear'):
+        for phase in ('layout','upload-crash','resume-upload','download-crash','resume-download','pause-save','pause-restore','signout-resume','pause-controls','features','account-switch','clear-crash','resume-clear'):
             server.phase=phase
             # xvfb-run can leave Wine children alive if only the wrapper is killed.
             # Give each trial its own process group so timeout cleanup is complete.
@@ -252,6 +254,13 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
             identifier == 'fresh-root' or identifier.startswith('reserve-') for identifier in server.blobs
         ), 'Clear did not remove the entire original account inventory.'
         assert 'second-root' in server.other, 'Clear affected a different account.'
+        account_hashes = {hashlib.sha256(email).hexdigest() for email in
+                          (b'mock@example.invalid', b'second@example.invalid')}
+        for directory in ('root', 'blob_queue'):
+            assert {p.name for p in (test / directory).iterdir()} == account_hashes, 'State names differ by login order.'
+        assert (test/'root'/hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'fresh-root'
+        assert (test/'root'/hashlib.sha256(b'second@example.invalid').hexdigest()).read_text() == 'second-root'
+
         assert not server.violations, server.violations
         assert max(server.clear_batch_sizes)==100, 'Clear did not use full batches.'
         assert server.clear_missing >= 50, 'Interrupted DELETEs were not replayed as 404.'

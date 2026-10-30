@@ -239,7 +239,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     compile_source('storage/storage.cpp', source / 'tests/oauth_login.cpp', test / 'test.obj')
     link(test / 'test.exe', test / 'test.obj', test / 'oauth.obj', test / 'easy.obj')
     link(test / 'production.exe', test / 'test.obj')
-    for dll in runtime.glob('*.dll'):
+    for dll in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(dll, test / dll.name)
     vault = test / 'vault'
     vault.mkdir()
@@ -389,22 +389,28 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         entry = entry.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
         (test / 'entry.cpp').write_text(entry)
         compile_source('storage/storage.cpp', test / 'entry.cpp', test / 'entry.obj')
-        link(test / 'gui.exe', test / 'entry.obj', test / 'oauth.obj', test / 'easy.obj', gui=True)
+        (test / 'bin').mkdir()
+        (test / 'launch-cwd').mkdir()
+        for dll in (runtime / 'bin').glob('*.dll'):
+            shutil.copy2(dll, test / 'bin' / dll.name)
+        link(test / 'bin/gui.exe', test / 'entry.obj', test / 'oauth.obj', test / 'easy.obj', gui=True)
         for resource in ('font', 'shader'):
             shutil.copytree(runtime / resource, test / resource)
+        (test / 'root').mkdir()
+        (test / 'blob_queue').mkdir()
         storage_id = 'appdata:' + hashlib.sha256(b'fixture.apps.googleusercontent.com').hexdigest() + ':oauth@example.invalid'
-        (test / 'blob_queue.account').write_text(storage_id)
-        (test / 'blob_queue').write_text(json.dumps(['oauth-gui-placeholder'] * 21000))
-        root = test / ('root.appdata.' + hashlib.sha256(storage_id.encode()).hexdigest())
+        (test / 'blob_queue' / hashlib.sha256(storage_id.encode()).hexdigest()).write_text(json.dumps(['oauth-gui-placeholder'] * 21000))
+        root = test / 'root' / hashlib.sha256(storage_id.encode()).hexdigest()
         root.write_text('fixture-root')
-        # The legacy root is preserved when Google login selects a user root.
-        (test / 'root').write_text('original-service-account-root')
+        # The service-account root is preserved when Google login selects a user root.
+        (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('original-service-account-root')
         (test / 'browser-url').unlink(missing_ok=True)
         interaction = r'''
+import hashlib
 import json,subprocess,sys,time
 from pathlib import Path
 from PIL import ImageGrab
-app=subprocess.Popen(['wine64',sys.argv[1]])
+app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
 def command(*args):
     return subprocess.run(['xdotool',*map(str,args)],check=True,capture_output=True,text=True).stdout
 def wait(predicate,message,timeout=25):
@@ -490,8 +496,13 @@ try:
     assert Path('task').read_text()==index,'Logout deleted the transfer checkpoint.'
     command('key','alt+F4');app.wait(timeout=10)
     assert app.returncode==0
+    checkpoint=Path('task.data')/json.loads(index)[0]/'state'
+    saved=json.loads(checkpoint.read_text())
+    assert saved.pop('root_directory')=='root','New checkpoint did not save the root directory.'
+    saved['root_path']='root.appdata.'+'a'*64  # Older journals saved a root file path.
+    checkpoint.write_text(json.dumps(saved))
     Path('oauth-ui.json').unlink()
-    app=subprocess.Popen(['wine64',sys.argv[1]])
+    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
     wait(lambda:Path('oauth-ui.json').exists(),'Signed-out restart failed.')
     assert not snapshot()['signed_in'] and snapshot()['tasks']==0,'Restart resumed a signed-out account.'
     window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
@@ -510,13 +521,17 @@ try:
     command('key','alt+F4')
     app.wait(timeout=10)
     assert app.returncode==0
-    assert Path('root').read_text()=='original-service-account-root'
-    print('PASS: signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text()=='original-service-account-root'
+    assert not list(Path('launch-cwd').iterdir()),'GUI wrote state into the launching CWD.'
+    assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
+    assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
+               for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
+    print('PASS: bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
         process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
-                                    'python3', '-c', interaction, str(test / 'gui.exe')],
+                                    'python3', '-c', interaction, str(test / 'bin/gui.exe')],
                                    cwd=test, env={**env, 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:

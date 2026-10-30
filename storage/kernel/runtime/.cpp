@@ -11,17 +11,22 @@ namespace
 {
     auto queue_path(std::string_view address) -> std::filesystem::path
     {
-        if (!std::filesystem::exists("blob_queue.account"))
-            storage_atomic_write("blob_queue.account", address);
-        if (storage_read("blob_queue.account") == address)
-            return "blob_queue";
-        return "blob_queue." + storage_digest(address);
+        return std::filesystem::path{"blob_queue"}/storage_digest(address);
     }
     auto clear_path(std::string_view address) -> std::filesystem::path
     {
         return "clear." + storage_digest(address);
     }
 } // namespace
+storage_runtime_t::storage_runtime_t(std::atomic_bool* close) : m_close{close}
+{
+    // The old files have the same names as the new directories. Do not replace
+    // or import them: the user moves existing data before launching this version.
+    for (const auto name : {"root", "blob_queue"})
+        if (std::filesystem::exists(name) && !std::filesystem::is_directory(name))
+            throw std::runtime_error{std::string{"Move the existing "}+name+
+                " file into a directory with the same name before starting Storage."};
+}
 auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
     -> std::shared_ptr<blob_queue_t>
 {
@@ -59,7 +64,7 @@ auto storage_runtime_t::open(const storage_settings_t& settings,
     session->address = address;
     session->storage_id = address;
     session->account_path = settings.account_path;
-    session->root_path = settings.root_path;
+    session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
     {
         std::lock_guard lock{m_mutex};
         if (*m_close)
@@ -75,15 +80,15 @@ auto storage_runtime_t::open(const storage_settings_t& settings,
     }
     if (!saved_root.empty())
         session->root = std::move(saved_root);
-    else if (std::filesystem::exists(settings.root_path))
-        session->root = storage_read(settings.root_path);
+    else if (std::filesystem::exists(session->root_path))
+        session->root = storage_read(session->root_path);
     else
     {
         google_easy_t request;
         request.m_account_context = session->account;
         request.control_set(control);
         session->root = folder_root_create(request);
-        storage_atomic_write(settings.root_path, session->root);
+        storage_atomic_write(session->root_path, session->root);
     }
     if (session->root.empty())
         throw std::runtime_error{"Root file is empty."};
@@ -98,11 +103,9 @@ auto storage_runtime_t::open_oauth(const storage_settings_t& settings,
     session->address = user->address();
     session->storage_id = user->storage_id();
     session->account_path = settings.account_path;
-    // appDataFolder belongs to an OAuth application AND user. Keep roots and
-    // reserves separate even when two client.json files authorize the same email.
-    // Journals store the suffixed path, so restoration must not append it twice.
-    const auto suffix = ".appdata."+storage_digest(session->storage_id);
-    session->root_path = settings.root_path.ends_with(suffix) ? settings.root_path : settings.root_path+suffix;
+    // Use the same account-specific file naming for service accounts and OAuth.
+    // The OAuth storage ID includes its client, so two apps cannot share roots.
+    session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
     session->clearing = std::filesystem::exists(clear_path(session->storage_id));
     {
         std::lock_guard lock{m_mutex};

@@ -554,7 +554,7 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     if (!journal)
         journal = task_journal_t::create(nlohmann::json{{"kind", kind}, {"path", name}, {"pos", source},
             {"entity", entity}, {"destination", destination}, {"account_path", session->account_path},
-            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_path", session->root_path}, {"root", session->root}});
+            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()}, {"root", session->root}});
     auto task{std::make_shared<directory_task_t>()};
     task->m_session = session; task->m_journal = journal; task->m_type = "directory";
     task->m_kind = kind; task->m_name = name; task->m_source = source;
@@ -596,7 +596,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                         {"pos", pos},
                                                         {"account_path", session->account_path},
                                                         {"account_email", session->address}, {"account_namespace", session->storage_id},
-                                                        {"root_path", session->root_path},
+                                                        {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()},
                                                         {"root", session->root}});
     if (upload)
     {
@@ -1207,7 +1207,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"日誌資料夾", settings.logfile_path},
                         {"字型檔案", settings.font_path},
                         {"帳戶檔案", settings.account_path},
-                        {"根目錄檔案", settings.root_path},
+                        {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)}});
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)

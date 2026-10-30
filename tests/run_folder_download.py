@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
     command[command.index('storage/dialog/libstorage.dialog.a')] = str(test / 'dialog.obj')
     command.append('storage/dialog/CMakeFiles/storage.dialog.dir/.cppm.obj')
     subprocess.run(command, cwd=build, check=True)
-    for library in runtime.glob('*.dll'):
+    for library in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(library, test / library.name)
     for resource in ('font', 'shader'):
         shutil.copytree(runtime / resource, test / resource)

@@ -42,6 +42,7 @@ export
     using ::OutputDebugStringW;
     using ::MessageBoxW;
     using ::GetModuleHandleW;
+    using ::GetModuleFileNameW;
     using ::GetProcAddress;
     using ::FileTimeToSystemTime;
     

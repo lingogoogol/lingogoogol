@@ -26,7 +26,7 @@ if args.inside:
            'VK_ICD_FILENAMES': str(test / 'missing-driver.json')}
     if env.get('WINEPREFIX'):
         Path(env['WINEPREFIX']).mkdir(parents=True, exist_ok=True)
-    process = subprocess.Popen(['wine64', str(test / 'storage.exe')], cwd=test, env=env,
+    process = subprocess.Popen(['wine64', str(test / 'bin/storage.exe')], cwd=test / 'bin', env=env,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         deadline = time.monotonic() + 30
@@ -53,9 +53,10 @@ if args.inside:
 else:
     with tempfile.TemporaryDirectory(prefix='storage-startup-test-') as directory:
         test = Path(directory)
-        shutil.copy2(args.build / 'storage/storage.exe', test / 'storage.exe')
-        for library in args.runtime.glob('*.dll'):
-            shutil.copy2(library, test / library.name)
+        (test / 'bin').mkdir()
+        shutil.copy2(args.runtime / 'bin/storage.exe', test / 'bin/storage.exe')
+        for library in (args.runtime / 'bin').glob('*.dll'):
+            shutil.copy2(library, test / 'bin' / library.name)
         for resource in ('font', 'shader'):
             shutil.copytree(args.runtime / resource, test / resource)
         subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',

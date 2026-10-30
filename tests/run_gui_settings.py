@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Operate the production Windows settings/clear dialogs using only a local fake Drive."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -109,6 +110,7 @@ class Handler(BaseHTTPRequestHandler):
 # Coordinates are client coordinates at the production 1536 x 1024 initial size.
 # No real file picker, credentials or Drive endpoint is involved.
 interaction = r'''
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -201,14 +203,14 @@ try:
     mode('cancel')
     click(1480, 24)  # Clear
     click(1056, 632)  # Empty confirmation must be rejected.
-    assert Path('root').read_text() == 'root'
+    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'root'
     click(500, 540)
     subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
     run('key', 'ctrl+v')
     time.sleep(.3)
     capture('clear-dialog')
     click(936, 632)  # Typed confirmation followed by Cancel must still do nothing.
-    assert Path('root').read_text() == 'root'
+    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'root'
     click(1480, 24)
     click(500, 540)
     subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
@@ -236,7 +238,7 @@ try:
     wait_ui(lambda s: s.get('text', '').startswith('清除失敗：'), 'Second clear did not reach the network error.')
     mode('success')
     action('retry')
-    wait_for(lambda: Path('root').read_text() == 'new-root', 'Retried clear did not finish.')
+    wait_for(lambda: (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'new-root', 'Retried clear did not finish.')
     value = wait_ui(lambda s: s.get('text') == '清除完成', 'Clear completion was not displayed.')
     assert value['confirm']['shown'] and not value['retry']['shown'] and not value['cancel']['shown']
     assert value['confirm']['x'] == value['retry']['x']
@@ -322,14 +324,16 @@ int wmain(int argc, wchar_t** argv) {
     command[command.index('storage/google/easy/libstorage.google.easy.a')] = str(test / 'mock.obj')
     command.append('storage/google/easy/CMakeFiles/storage.google.easy.dir/.cppm.obj')
     subprocess.run(command, cwd=build, check=True)
-    for library in runtime.glob('*.dll'):
+    for library in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(library, test / library.name)
     for resource in ('font', 'shader'):
         shutil.copytree(runtime / resource, test / resource)
     shutil.copy2(test / 'font/NotoSansTC-VariableFont_wght.ttf', test / 'font/alternate.ttf')
+    (test / 'root').mkdir()
+    (test / 'blob_queue').mkdir()
     (test / 'key.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
-    (test / 'root').write_text('root')
-    (test / 'blob_queue').write_text(json.dumps(['gui-placeholder'] * 21000))
+    (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root')
+    (test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps(['gui-placeholder'] * 21000))
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
     server.lock = threading.Lock()

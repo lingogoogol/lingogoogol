@@ -38,7 +38,7 @@ install(
     TARGETS
         storage
     DESTINATION
-        ${CMAKE_INSTALL_PREFIX}
+        bin
 )
 
 if(MINGW AND CMAKE_FIND_ROOT_PATH)
@@ -51,6 +51,6 @@ if(MINGW AND CMAKE_FIND_ROOT_PATH)
             "${CMAKE_FIND_ROOT_PATH}/bin/libcrypto-3-x64.dll"
             "${CMAKE_FIND_ROOT_PATH}/bin/libssl-3-x64.dll"
         DESTINATION
-            ${CMAKE_INSTALL_PREFIX}
+            bin
     )
 endif()

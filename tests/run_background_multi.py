@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix='storage-background-test-') as directory
     command[command.index('-o') + 1] = str(test / 'test.exe')
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test / 'test.obj')
     subprocess.run(command, cwd=build, check=True)
-    for library in runtime.glob('*.dll'):
+    for library in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(library, test / library.name)
     shutil.copytree(runtime / 'shader', test / 'shader')
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',

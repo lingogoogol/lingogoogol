@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='storage-scroll-test-') as directory:
     command[command.index('-o')+1] = str(test/'test.exe')
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test/'test.obj')
     subprocess.run(command, cwd=build, check=True)
-    for library in runtime.glob('*.dll'): shutil.copy2(library, test/library.name)
+    for library in (runtime / 'bin').glob('*.dll'): shutil.copy2(library, test/library.name)
     for resource in ('font','shader'): shutil.copytree(runtime/resource, test/resource)
     process = subprocess.Popen(['xvfb-run','-a','-s','-screen 0 1024x768x24',sys.executable,'-c',driver,str(test/'test.exe')],
         cwd=test, env={**os.environ,'WINEDEBUG':'-all'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

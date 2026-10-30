@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -168,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
         return status, result
 
     def reserved_ids(self):
-        path = self.server.test / 'blob_queue'
+        path = self.server.test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()
         stamp = path.stat().st_mtime_ns
         if stamp != getattr(self.server, 'queue_stamp', None):
             self.server.queue_ids = set(json.loads(path.read_text()))
@@ -320,13 +321,15 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
     command[command.index('-o') + 1] = str(test / 'test.exe')
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test / 'test.obj')
     subprocess.run(command, cwd=build, check=True)
-    for library in runtime.glob('*.dll'):
+    for library in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(library, test / library.name)
     for resource in ('font', 'shader'):
         shutil.copytree(runtime / resource, test / resource)
+    (test / 'root').mkdir()
+    (test / 'blob_queue').mkdir()
     (test / 'key.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
-    (test / 'root').write_text('root')
-    (test / 'blob_queue').write_text(json.dumps([f'reserve-{i}' for i in range(40000)]))
+    (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root')
+    (test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps([f'reserve-{i}' for i in range(40000)]))
     (test / 'empty.bin').write_bytes(b'')
     server = FixtureServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True

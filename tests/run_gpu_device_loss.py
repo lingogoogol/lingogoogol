@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='storage-gpu-test-') as directory:
     compile_test('storage/google/easy/.cpp', 'mock_google_easy.cpp', test / 'mock.obj')
     link_test(test, test / 'transfer.obj', 'transfer.exe', test / 'mock.obj')
     # Copy only public GUI resources and libraries. No credentials, root or real blob queue.
-    for library in args.runtime.glob('*.dll'):
+    for library in (args.runtime / 'bin').glob('*.dll'):
         shutil.copy2(library, test / library.name)
     for resource in ('font', 'shader'):
         shutil.copytree(args.runtime / resource, test / resource)

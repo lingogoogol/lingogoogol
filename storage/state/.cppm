@@ -15,6 +15,7 @@ export {
         std::string logfile_path{"logfile"};
         std::string font_path{"font/NotoSansTC-VariableFont_wght.ttf"};
         std::string account_path{"key.json"};
+        // Directory containing one root ID file per storage identity.
         std::string root_path{"root"};
         int network_retries{-1};
         static auto load() -> storage_settings_t;

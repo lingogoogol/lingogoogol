@@ -20,6 +20,18 @@ std::atomic_bool close_app{false};
 
 auto app() -> void
 {
+    // Explorer may start with bin as CWD. Packaged GUI resources and state
+    // always belong beside bin; command-line helper tools retain their CWD.
+    std::vector<wchar_t> executable_name(32768);
+    const auto length = GetModuleFileNameW(nullptr,executable_name.data(),
+        static_cast<DWORD>(executable_name.size()));
+    if (!length || length==executable_name.size())
+        throw std::runtime_error{"Cannot determine the executable path."};
+    const std::filesystem::path executable{std::wstring{executable_name.data(),length}};
+    auto directory = executable.parent_path().filename().wstring();
+    std::ranges::transform(directory,directory.begin(),[](wchar_t c)
+        { return c>=L'A' && c<=L'Z' ? c-L'A'+L'a' : c; });
+    if (directory==L"bin") std::filesystem::current_path(executable.parent_path().parent_path());
     auto settings{storage_settings_t::load()};
     auto log_path = [](const storage_settings_t& value)
     {
@@ -383,13 +395,15 @@ auto app() -> void
                         return {}; // Keep signed-out account journals until that user logs in.
                     auto saved = settings;
                     saved.account_path = intent.at("account_path");
-                    saved.root_path = intent.at("root_path");
+                    // Old journals already carry the cloud root ID; after manual
+                    // relocation they use the configured root directory.
+                    saved.root_path = intent.value("root_directory",settings.root_path);
                     // The task's root can differ from the user's current browser root.
                     return runtime.open_oauth(saved,load_state.m_session->oauth,startup_control,intent.at("root"));
                 }
                 auto saved = settings;
                 saved.account_path = intent.at("account_path");
-                saved.root_path = intent.at("root_path");
+                saved.root_path = intent.value("root_directory",settings.root_path);
                 try { return runtime.open(saved,startup_control,intent.at("account_email"),intent.at("root"),space); }
                 catch (const std::exception&) { return {}; }
             });

@@ -14,7 +14,7 @@ install(
     TARGETS
         compare
     DESTINATION
-        ${CMAKE_INSTALL_PREFIX}
+        bin
 )
 
 add_executable(
@@ -32,5 +32,5 @@ install(
     TARGETS
         filegen
     DESTINATION
-        ${CMAKE_INSTALL_PREFIX}
+        bin
 )

@@ -246,7 +246,7 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
         command[command.index('storage/google/account/libstorage.google.account.a')] = str(test / 'account.obj')
         command.append('storage/google/account/CMakeFiles/storage.google.account.dir/.cppm.obj')
         subprocess.run(command, cwd=build, check=True)
-        for library in runtime.glob('*.dll'):
+        for library in (runtime / 'bin').glob('*.dll'):
             shutil.copy2(library, test / library.name)
         shutil.copytree(runtime / 'shader', test / 'shader')
         subprocess.run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:2048',
