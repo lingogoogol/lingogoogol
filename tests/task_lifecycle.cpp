@@ -98,17 +98,48 @@ int main(int argc, char** argv)
             for (const auto name : {"root", "blob_queue"})
             {
                 storage_atomic_write(name,"preserve this legacy state");
-                bool rejected{};
-                try { storage_runtime_t runtime{&close}; }
-                catch (const std::runtime_error& error)
-                { rejected = std::string_view{error.what()}.starts_with("Move the existing "); }
-                check(rejected && storage_read(name)=="preserve this legacy state",
-                      "Legacy data was imported, overwritten or silently ignored.");
+                storage_runtime_t runtime{&close};
+                check(storage_read(name)=="preserve this legacy state",
+                      "Runtime construction changed an unrelated legacy file.");
                 std::filesystem::remove(name);
             }
             std::filesystem::current_path("..");
             std::filesystem::remove_all("layout-probe");
-            std::puts("PASS: service account discovery, missing directory and invalid-file isolation; new root paths, saved settings/journals and manual legacy relocation.");
+            std::puts("PASS: service account discovery, missing directory and invalid-file isolation; new root paths and unrelated legacy files preserved.");
+            return 0;
+        }
+        if (phase=="configured-root")
+        {
+            const auto credential = storage_read("key.json");
+            std::filesystem::create_directory("root-probe");
+            std::filesystem::current_path("root-probe");
+            storage_atomic_write("key.json",credential);
+            storage_atomic_write("root","unrelated legacy root");
+            storage_atomic_write("blob_queue/"+storage_digest("mock@example.invalid"),
+                                 nlohmann::json(std::vector<std::string>(25000,"placeholder")).dump());
+            storage_settings_t settings;
+            settings.root_path = "custom/nested-roots";
+            settings.network_retries = 0;
+            std::atomic_bool close{};
+            {
+                storage_runtime_t runtime{&close};
+                const auto control = std::make_shared<request_control_t>();
+                const auto session = runtime.open(settings,control);
+                const auto expected = settings.root_path+"/"+storage_digest(session->storage_id);
+                check(session->root_path==expected && session->root=="fresh-root" &&
+                      storage_read(expected)==session->root && storage_read("root")=="unrelated legacy root",
+                      "Missing configured roots were not created independently of the legacy root file.");
+                storage_atomic_write(expected,"configured-root");
+                check(runtime.open(settings,control)->root=="configured-root",
+                      "Login did not read the configured root file.");
+                settings.root_path = "restored-roots";
+                const auto restored = runtime.open(settings,control,session->address,"checkpoint-root");
+                check(std::filesystem::is_directory(settings.root_path) && restored->root=="checkpoint-root",
+                      "Checkpoint restoration did not create the missing configured directory.");
+            }
+            std::filesystem::current_path("..");
+            std::filesystem::remove_all("root-probe");
+            std::puts("PASS: only configured roots are used; missing directories/IDs are created; unrelated root files are preserved.");
             return 0;
         }
         lgo::init_logfile("logfile/lifecycle.txt");

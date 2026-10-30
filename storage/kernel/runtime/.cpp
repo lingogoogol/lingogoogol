@@ -50,12 +50,6 @@ auto storage_service_accounts(const std::filesystem::path& directory)
 }
 storage_runtime_t::storage_runtime_t(std::atomic_bool* close) : m_close{close}
 {
-    // The old files have the same names as the new directories. Do not replace
-    // or import them: the user moves existing data before launching this version.
-    for (const auto name : {"root", "blob_queue"})
-        if (std::filesystem::exists(name) && !std::filesystem::is_directory(name))
-            throw std::runtime_error{std::string{"Move the existing "}+name+
-                " file into a directory with the same name before starting Storage."};
 }
 auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
     -> std::shared_ptr<blob_queue_t>
@@ -94,6 +88,8 @@ auto storage_runtime_t::open(const storage_settings_t& settings,
     session->address = address;
     session->storage_id = address;
     session->account_path = settings.account_path;
+    // Validate/create only the configured directory, before any cloud creation.
+    std::filesystem::create_directories(settings.root_path);
     session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
     {
         std::lock_guard lock{m_mutex};
@@ -135,6 +131,7 @@ auto storage_runtime_t::open_oauth(const storage_settings_t& settings,
     session->account_path = settings.account_path;
     // Use the same account-specific file naming for service accounts and OAuth.
     // The OAuth storage ID includes its client, so two apps cannot share roots.
+    std::filesystem::create_directories(settings.root_path);
     session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
     session->clearing = std::filesystem::exists(clear_path(session->storage_id));
     {
