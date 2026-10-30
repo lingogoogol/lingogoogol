@@ -17,6 +17,8 @@ export {
         std::string account_path{"key.json"};
         // Directory containing one root ID file per storage identity.
         std::string root_path{"root"};
+        // Keep sign-out per service identity so another login cannot resume it.
+        std::set<std::string> signed_out_service_accounts;
         int network_retries{-1};
         static auto load() -> storage_settings_t;
         auto save() const -> void;

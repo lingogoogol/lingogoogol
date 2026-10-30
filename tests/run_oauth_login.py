@@ -712,10 +712,56 @@ try:
     Path('lose-device').touch()
     wait(lambda:not Path('lose-device').exists(),'Service GPU recovery was not requested.')
     wait(lambda:green_at([(snapshot()['x']+16,snapshot()['y']+16)]),'Green portrait did not survive GPU recovery.')
+    Path('prepare-paused-task').touch()
+    wait(lambda:snapshot()['tasks']==1 and snapshot()['paused'],'Service paused task was not created.')
+    service_index=Path('task').read_text()
+    assert len(json.loads(service_index))==2 and set(json.loads(index))<set(json.loads(service_index))
     menu=open_menu();click(menu['footer'][1])
     wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'],'Service logout failed.')
     acknowledge('登出：oauth@example.invalid')
-    assert Path('task').read_text()==index,'Service switch or logout modified the OAuth checkpoint.'
+    assert Path('task').read_text()==service_index,'Service logout modified transfer checkpoints.'
+    assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==['oauth@example.invalid']
+    command('key','alt+F4');app.wait(timeout=10)
+    assert app.returncode==0
+    Path('oauth-ui.json').unlink()
+    queue=Path('blob_queue')/hashlib.sha256(b'oauth@example.invalid').hexdigest()
+    queue_before=queue.read_bytes()
+    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
+    wait(lambda:Path('oauth-ui.json').exists(),'Service signed-out restart failed.')
+    assert not snapshot()['has_session'] and snapshot()['tasks']==0,'Restart resumed a signed-out service account.'
+    assert queue.read_bytes()==queue_before and Path('task').read_text()==service_index
+    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+    command('windowfocus','--sync',window)
+    menu=open_menu();assert len(menu['footer'])==1 and len(menu['account_rows'])==3
+    click(menu['actions'][1])
+    wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and snapshot()['tasks']==1,
+         'Explicit service login did not restore its transfer.')
+    assert snapshot()['paused'],'Service login lost the saved pause state.'
+    assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==[]
+    acknowledge('切換帳戶：oauth@example.invalid')
+    command('key','alt+F4');app.wait(timeout=10)
+    assert app.returncode==0
+    Path('oauth-ui.json').unlink()
+    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
+    wait(lambda:Path('oauth-ui.json').exists(),'Signed-in service restart failed.')
+    wait(lambda:snapshot()['service_account'] and snapshot()['tasks']==1,'Signed-in service state was not restored.')
+    assert snapshot()['paused']
+    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+    command('windowfocus','--sync',window)
+    menu=open_menu();click(menu['footer'][1])
+    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'],'Restored service logout failed.')
+    acknowledge('登出：oauth@example.invalid')
+    menu=open_menu();click(menu['actions'][0])
+    wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and snapshot()['root_id']=='service-root-A',
+         'Other service login failed.')
+    assert snapshot()['tasks']==0,'Another service login resumed a signed-out service transfer.'
+    assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==['oauth@example.invalid']
+    acknowledge('切換帳戶：aaa-service@example.invalid')
+    menu=open_menu();click(menu['footer'][1])
+    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'],'Other service logout failed.')
+    acknowledge('登出：aaa-service@example.invalid')
+    assert Path('task').read_text()==service_index,'Service relogin changed the paused transfer index.'
+    index=service_index
     assert original_keys=={p.name:p.read_bytes() for p in Path('key').iterdir()},'Service credentials were modified.'
     for p in Path('key').iterdir():p.unlink()
     Path('key').rmdir()
@@ -732,7 +778,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; durable service sign-out/restart, explicit relogin, paused task restoration and other-account isolation; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -750,7 +796,7 @@ finally:
                     process.kill()
                     stdout, stderr = process.communicate()
                 raise AssertionError('GUI did not launch browser: ' + stdout + stderr)
-            stdout, stderr = process.communicate(timeout=90)
+            stdout, stderr = process.communicate(timeout=120)
             assert process.returncode == 0, stdout + stderr
             assert not server.errors, server.errors
             logs = ''.join(p.read_text(errors='replace') for p in (test / 'logfile').glob('*.txt'))

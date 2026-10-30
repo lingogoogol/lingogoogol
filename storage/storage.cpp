@@ -235,6 +235,7 @@ auto app() -> void
             selected_email = account.address;
             auto candidate = settings;
             candidate.account_path = account.account_path;
+            candidate.signed_out_service_accounts.erase(account.address);
             apply_settings(std::move(candidate),false);
         }
         catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入服務帳戶"); }
@@ -303,8 +304,10 @@ auto app() -> void
         settings_job = std::async(std::launch::async,[&,target]
         {
             runtime.sign_out(target->storage_id);
+            auto candidate = settings;
             if (target->oauth) google_oauth_user_t::sign_out(target->account_path);
-            return settings_result_t{settings,{}};
+            else candidate.signed_out_service_accounts.insert(target->address);
+            return settings_result_t{std::move(candidate),{}};
         });
     };
     auto update_profile = [&]

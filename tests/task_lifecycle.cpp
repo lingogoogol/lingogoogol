@@ -76,6 +76,12 @@ int main(int argc, char** argv)
             check(storage_settings_t::load().root_path=="custom-roots", "Custom root directory changed.");
             storage_atomic_write("settings.json", R"({"root_path":"root/root"})");
             check(storage_settings_t::load().root_path=="root", "Old default introduced an extra root directory.");
+            auto saved_settings = storage_settings_t::load();
+            check(saved_settings.signed_out_service_accounts.empty(), "Old settings signed out existing accounts.");
+            saved_settings.signed_out_service_accounts.insert("service@example.invalid");
+            saved_settings.save();
+            check(storage_settings_t::load().signed_out_service_accounts==saved_settings.signed_out_service_accounts,
+                  "Service sign-out state was not saved and restored.");
             check(storage_service_accounts().empty() && !std::filesystem::exists("key"),
                   "A missing service account directory was created or rejected.");
             const auto credential = [](std::string email)

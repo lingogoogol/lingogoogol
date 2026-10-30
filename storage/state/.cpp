@@ -90,6 +90,7 @@ auto storage_settings_t::load() -> storage_settings_t
     result.font_path = data.value("font_path", result.font_path);
     result.account_path = data.value("account_path", result.account_path);
     result.root_path = data.value("root_path", result.root_path);
+    result.signed_out_service_accounts = data.value("signed_out_service_accounts", result.signed_out_service_accounts);
     // An intermediate layout saved the old default filename as root/root.
     // root_path now names a directory; keep that default from nesting again.
     if (std::filesystem::path{result.root_path}.lexically_normal()==std::filesystem::path{"root/root"})
@@ -105,6 +106,7 @@ auto storage_settings_t::save() const -> void
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},
+                                                         {"signed_out_service_accounts", signed_out_service_accounts},
                                                          {"network_retries", network_retries}}
                                               .dump(2));
 }

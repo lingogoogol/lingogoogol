@@ -83,6 +83,9 @@ auto storage_runtime_t::open(const storage_settings_t& settings,
     const auto address{credential.at("client_email").get<std::string>()};
     if (!expected_email.empty() && expected_email != address)
         throw std::runtime_error{"Saved task account no longer matches its credential file."};
+    // This also gates journal restoration, which can open accounts other than
+    // the one currently shown in the browser. Only explicit login clears it.
+    if (settings.signed_out_service_accounts.contains(address)) return {};
     auto session{std::make_shared<storage_session_t>()};
     session->clearing = std::filesystem::exists(clear_path(address));
     session->address = address;
