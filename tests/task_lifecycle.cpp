@@ -82,6 +82,25 @@ int main(int argc, char** argv)
             saved_settings.save();
             check(storage_settings_t::load().signed_out_service_accounts==saved_settings.signed_out_service_accounts,
                   "Service sign-out state was not saved and restored.");
+            check(!storage_settings_t::load().signed_in_accounts, "Legacy settings acquired an explicit login list.");
+            saved_settings.signed_in_accounts.emplace();
+            saved_settings.signed_in_accounts->emplace("service@example.invalid",
+                storage_account_login_t{"service@example.invalid","key/service.data","custom-roots",false});
+            saved_settings.signed_in_accounts->emplace("appdata:fixture:user@example.invalid",
+                storage_account_login_t{"user@example.invalid","client.json","user-roots",true});
+            saved_settings.selected_account = "service@example.invalid";
+            saved_settings.save();
+            const auto logins = storage_settings_t::load();
+            check(logins.signed_in_accounts && logins.signed_in_accounts->size()==2 &&
+                  logins.selected_account==saved_settings.selected_account &&
+                  logins.signed_in_accounts->at("service@example.invalid").root_directory=="custom-roots" &&
+                  logins.signed_in_accounts->at("appdata:fixture:user@example.invalid").oauth,
+                  "All logins and the independent browser selection were not saved.");
+            saved_settings.signed_in_accounts->clear();
+            saved_settings.selected_account.clear();
+            saved_settings.save();
+            check(storage_settings_t::load().signed_in_accounts && storage_settings_t::load().signed_in_accounts->empty(),
+                  "Explicit sign-out-all became legacy automatic login.");
             check(storage_service_accounts().empty() && !std::filesystem::exists("key"),
                   "A missing service account directory was created or rejected.");
             const auto credential = [](std::string email)

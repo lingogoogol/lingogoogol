@@ -65,16 +65,47 @@ auto app() -> void
     lgo::depth_tracker_t depth;
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
+    const auto login_record = [](const std::shared_ptr<storage_session_t>& account)
+    {
+        return storage_account_login_t{account->address,account->account_path,
+            std::filesystem::path{account->root_path}.parent_path().generic_string(),bool(account->oauth)};
+    };
+    const auto remember_session = [&](storage_settings_t& value, const std::shared_ptr<storage_session_t>& account)
+    {
+        if (!value.signed_in_accounts) value.signed_in_accounts.emplace();
+        if (account) (*value.signed_in_accounts)[account->storage_id] = login_record(account);
+        value.selected_account = account ? account->storage_id : std::string{};
+    };
     auto startup_control{std::make_shared<request_control_t>()};
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
     if (!std::filesystem::exists(settings.account_path) && settings.account_path == "key.json" &&
         std::filesystem::exists("client.json")) settings.account_path = "client.json";
-    try
+    if (settings.signed_in_accounts)
     {
-        if (std::filesystem::exists(settings.account_path)) session = runtime.open(settings,startup_control);
+        // Restore every explicitly signed-in identity, including accounts with
+        // no transfer journal. A failure for one must not hide the others.
+        for (const auto& [id,account] : *settings.signed_in_accounts)
+            try
+            {
+                auto saved = settings;
+                saved.account_path = account.account_path;
+                saved.root_path = account.root_directory;
+                auto restored = runtime.open(saved,startup_control,account.address,{},id);
+                if (!restored || restored->storage_id!=id || bool(restored->oauth)!=account.oauth)
+                    throw std::runtime_error{"Saved login does not match its credential file."};
+                if (id==settings.selected_account) session = std::move(restored);
+            }
+            catch (const std::exception& error) { startup_error = error.what(); }
     }
-    catch (const std::exception& error) { startup_error = error.what(); }
+    else
+    {
+        try
+        {
+            if (std::filesystem::exists(settings.account_path)) session = runtime.open(settings,startup_control);
+        }
+        catch (const std::exception& error) { startup_error = error.what(); }
+    }
     if (session) google_account_t::default_shared_set(session->account);
     load_state_t load_state;
     load_state.m_session = session;
@@ -260,25 +291,23 @@ auto app() -> void
         }
         catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入帳號"); }
     };
-    auto find_account_session = [&](const std::string& email, bool oauth)
-        -> std::shared_ptr<storage_session_t>
+    auto menu_account_id = [&](const std::string& email, bool oauth)
     {
-        auto id = email;
-        if (oauth)
-        {
-            const auto config = nlohmann::json::parse(storage_read(oauth_settings().account_path));
-            id = "appdata:"+storage_digest(config.at("installed").at("client_id").get<std::string>())+":"+email;
-        }
-        for (auto session : runtime.signed_in_sessions())
-            if (session->storage_id==id && bool(session->oauth)==oauth) return session;
-        return {};
+        if (!oauth) return email;
+        const auto config = nlohmann::json::parse(storage_read(oauth_settings().account_path));
+        return "appdata:"+storage_digest(config.at("installed").at("client_id").get<std::string>())+":"+email;
     };
     persistent.m_account_signed_in = [&](const std::string& email, bool oauth)
     {
-        try { return bool(find_account_session(email,oauth)); }
+        try
+        {
+            const auto id = menu_account_id(email,oauth);
+            return settings.signed_in_accounts && settings.signed_in_accounts->contains(id);
+        }
         catch (const std::exception&) { return false; }
     };
-    persistent.m_has_signed_in_accounts = [&] { return !runtime.signed_in_sessions().empty(); };
+    persistent.m_has_signed_in_accounts = [&]
+        { return settings.signed_in_accounts && !settings.signed_in_accounts->empty(); };
     auto suspend_account_tasks = [&](const std::string& id)
     {
         // Keep every checkpoint; this is shutdown, not user cancellation.
@@ -308,7 +337,7 @@ auto app() -> void
         }
         catch (const std::exception&) { persistent.m_directory_status->set_text("無法移除帳號"); }
     };
-    auto logout_accounts = [&](std::vector<std::shared_ptr<storage_session_t>> targets, bool all)
+    auto logout_accounts = [&](storage_account_logins_t targets, bool all)
     {
         if (targets.empty() || settings_job.valid() || clearing_session) return;
         auto candidate = settings;
@@ -330,10 +359,9 @@ auto app() -> void
         auto current = load_state.m_session;
         const auto selected = [&](const std::shared_ptr<storage_session_t>& session)
         {
-            return session && std::ranges::any_of(targets,[&](const auto& target)
-                { return target->storage_id==session->storage_id; });
+            return session && targets.contains(session->storage_id);
         };
-        for (const auto& target : targets) suspend_account_tasks(target->storage_id);
+        for (const auto& [id,account] : targets) suspend_account_tasks(id);
         for (auto& listing : persistent.m_listings)
             if (selected(listing.session)) listing.control->cancel();
         if (persistent.m_clipboard && selected(persistent.m_clipboard->session)) persistent.m_clipboard.reset();
@@ -343,18 +371,19 @@ auto app() -> void
             profile_control->cancel();
             current.reset();
         }
-        begin_settings_row(all ? "登出所有" : "登出："+targets.front()->address,false);
+        begin_settings_row(all ? "登出所有" : "登出："+targets.begin()->second.address,false);
         persistent.m_switching = account_action = true;
         persistent.m_directory_status->set_text("登出中");
         settings_job = std::async(std::launch::async,
             [&,targets=std::move(targets),candidate=std::move(candidate),current,all,oauth_path]() mutable
         {
-            for (const auto& target : targets)
+            for (const auto& [id,account] : targets)
             {
-                runtime.sign_out(target->storage_id);
-                if (target->oauth)
-                    google_oauth_user_t::sign_out(target->account_path,all ? std::string{} : target->address);
-                else candidate.signed_out_service_accounts.insert(target->address);
+                runtime.sign_out(id);
+                if (account.oauth)
+                    google_oauth_user_t::sign_out(account.account_path,all ? std::string{} : account.address);
+                else candidate.signed_out_service_accounts.insert(account.address);
+                if (candidate.signed_in_accounts) candidate.signed_in_accounts->erase(id);
             }
             if (!oauth_path.empty()) google_oauth_user_t::sign_out(oauth_path);
             return settings_result_t{std::move(candidate),current};
@@ -364,13 +393,19 @@ auto app() -> void
     {
         try
         {
-            if (auto target = find_account_session(email,oauth)) logout_accounts({std::move(target)},false);
+            const auto id = menu_account_id(email,oauth);
+            if (settings.signed_in_accounts)
+                if (const auto account = settings.signed_in_accounts->find(id); account!=settings.signed_in_accounts->end())
+                    logout_accounts({*account},false);
         }
         catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出帳號"); }
     };
     persistent.m_logout = [&]
     {
-        try { logout_accounts(runtime.signed_in_sessions(),true); }
+        try
+        {
+            if (settings.signed_in_accounts) logout_accounts(*settings.signed_in_accounts,true);
+        }
         catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出所有帳號"); }
     };
     auto update_profile = [&]
@@ -489,6 +524,31 @@ auto app() -> void
             [&](const nlohmann::json& intent) -> std::shared_ptr<storage_session_t>
             {
                 const auto space = intent.value("account_namespace", "");
+                if (settings.signed_in_accounts)
+                {
+                    auto login = settings.signed_in_accounts->find(space);
+                    if (space.empty())
+                    {
+                        const auto email = intent.at("account_email").get<std::string>();
+                        const auto path = intent.at("account_path").get<std::string>();
+                        login = std::ranges::find_if(*settings.signed_in_accounts,[&](const auto& entry)
+                            { return entry.second.address==email && entry.second.account_path==path; });
+                    }
+                    if (login==settings.signed_in_accounts->end()) return {};
+                    // Use the matching restored login, rather than requiring it
+                    // to be the account currently selected in the browser.
+                    for (const auto& active : runtime.signed_in_sessions())
+                        if (active->storage_id==login->first && !active->root.empty())
+                        {
+                            auto saved = settings;
+                            saved.account_path = login->second.account_path;
+                            saved.root_path = intent.value("root_directory",login->second.root_directory);
+                            if (active->oauth)
+                                return runtime.open_oauth(saved,active->oauth,startup_control,intent.at("root"));
+                            return runtime.open(saved,startup_control,active->address,intent.at("root"),login->first);
+                        }
+                    return {};
+                }
                 if (space.starts_with("appdata:"))
                 {
                     if (!load_state.m_session || load_state.m_session->storage_id!=space)
@@ -509,6 +569,15 @@ auto app() -> void
             });
     };
     restore_available_tasks();
+    if (!settings.signed_in_accounts)
+    {
+        // Migrate only identities actually recovered from legacy selection/tasks;
+        // saved credential history alone does not mean that a user is signed in.
+        remember_session(settings,session);
+        for (const auto& task : load_state.m_task_list)
+            if (task->m_session) (*settings.signed_in_accounts)[task->m_session->storage_id] = login_record(task->m_session);
+        load_state.m_settings = settings;
+    }
     if (session && session->clearing)
         persistent.m_clear_account();
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
@@ -521,6 +590,7 @@ auto app() -> void
                 auto result{settings_job.get()};
                 auto next_font{
                     std::make_unique<lgo::font_face_t>(result.settings.font_path, lgo::std_font_size.x)};
+                remember_session(result.settings,result.session);
                 result.settings.save();
                 lgo::init_logfile(log_path(result.settings));
                 const bool changed_location{!result.session || !load_state.m_session ||
@@ -671,6 +741,9 @@ auto app() -> void
         }
         lgo::text_line_t::pending_load();
     }
+    // Account actions save immediately; also persist a legacy login snapshot
+    // when a session was simply opened and closed without any account action.
+    settings.save();
     engine.flush();
     state.clear_state();
     if (!engine.gpu_failure_reason().empty())

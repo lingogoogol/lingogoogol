@@ -686,6 +686,15 @@ try:
         (Path('blob_queue')/digest).write_text(json.dumps(['service-placeholder']*21000))
     Path('key/broken.json').write_text('{')
     original_keys={p.name:p.read_bytes() for p in Path('key').iterdir()}
+    def restart():
+        global app,window
+        command('key','alt+F4');app.wait(timeout=10)
+        assert app.returncode==0
+        Path('oauth-ui.json').unlink()
+        app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
+        wait(lambda:Path('oauth-ui.json').exists(),'Service restart failed.')
+        window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+        command('windowfocus','--sync',window)
     menu=open_menu()
     assert [r['email'] for r in menu['account_rows']]==[s[1] for s in services]+['oauth@example.invalid']
     assert [a['text'] for a in menu['actions']]==['登入','登出','登入','登出','登入','登出','移除']
@@ -704,10 +713,23 @@ try:
         wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and
                     snapshot()['account_path']=='key/'+filename and snapshot()['root_id']==root_id,
              'Service selection did not open its own credential and root.')
-        assert snapshot()['tasks']==i,'Switching stopped another service transfer or resumed the OAuth transfer.'
+        assert snapshot()['tasks']==0,'A no-task login resumed a signed-out transfer.'
         command('mousemove',1500,1100)
         wait(lambda:green_at([(snapshot()['x']+8,snapshot()['y']+16),(snapshot()['x']+24,snapshot()['y']+16)]),
              'Service toolbar portrait was not a green block.')
+        acknowledge('切換帳戶：'+email)
+    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['tasks']==0
+    saved_logins=json.loads(Path('settings.json').read_text())
+    assert set(saved_logins['signed_in_accounts'])=={s[1] for s in services}
+    assert saved_logins['selected_account']=='oauth@example.invalid'
+    restart()
+    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['service_account'] and snapshot()['tasks']==0, \
+        'Restart lost a signed-in account that has no transfer journal.'
+    assert snapshot()['root_id']=='service-root-B','Restart changed the selected browser account.'
+    for i,(filename,email,root_id) in enumerate(services):
+        menu=open_menu();assert all(menu['actions'][j]['enabled'] for j in (1,3))
+        click(menu['actions'][2*i])
+        wait(lambda:not snapshot()['switching'] and snapshot()['root_id']==root_id,'Service reselection failed.')
         acknowledge('切換帳戶：'+email)
         Path('prepare-paused-task').touch()
         wait(lambda:snapshot()['tasks']==i+1 and snapshot()['paused'],'Service paused task was not created.')
@@ -734,15 +756,6 @@ try:
     acknowledge('登出：oauth@example.invalid')
     assert Path('task').read_text()==service_index,'Service logout modified transfer checkpoints.'
     assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==[s[1] for s in services]
-    def restart():
-        global app,window
-        command('key','alt+F4');app.wait(timeout=10)
-        assert app.returncode==0
-        Path('oauth-ui.json').unlink()
-        app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
-        wait(lambda:Path('oauth-ui.json').exists(),'Service restart failed.')
-        window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
-        command('windowfocus','--sync',window)
     queue=Path('blob_queue')/hashlib.sha256(b'oauth@example.invalid').hexdigest()
     queue_before=queue.read_bytes()
     restart()
@@ -767,6 +780,10 @@ try:
     wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==1,
          'Current service sign-out stopped the background service.')
     acknowledge('登出：aaa-service@example.invalid')
+    restart()
+    assert not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1 and snapshot()['tasks']==1, \
+        'Restart selected or lost an account that was only running in the background.'
+    assert json.loads(Path('settings.json').read_text())['selected_account']==''
     menu=open_menu()
     assert len(menu['footer'])==2 and menu['actions'][3]['enabled'] and not menu['actions'][1]['enabled']
     click(menu['actions'][0])
@@ -777,6 +794,14 @@ try:
          'OAuth login did not preserve both service transfers.')
     acknowledge('切換帳戶：oauth@example.invalid')
     assert len(snapshot()['signed_in_accounts'])==3,'Switching duplicated or discarded live accounts.'
+    # The OAuth account must also restore in the background, with its paused task.
+    menu=open_menu();click(menu['actions'][2])
+    wait(lambda:not snapshot()['switching'] and snapshot()['root_id']=='service-root-B','Background OAuth setup failed.')
+    acknowledge('切換帳戶：oauth@example.invalid')
+    restart()
+    assert len(snapshot()['signed_in_accounts'])==3 and snapshot()['tasks']==3 and snapshot()['service_account'], \
+        'Restart failed to restore mixed logins and the background OAuth transfer.'
+    assert snapshot()['root_id']=='service-root-B' and snapshot()['paused']
     menu=open_menu()
     assert all(menu['actions'][i]['enabled'] for i in (1,3,5)) and not menu['actions'][6]['enabled']
     click(menu['footer'][1])
@@ -806,7 +831,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; per-row sign-out and disabled states, background account isolation, sign out all three identities, durable sign-out/restart, explicit relogin and paused task restoration; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; all signed-in accounts restored without tasks, independent browser selection, background OAuth task restoration, per-row sign-out and disabled states, background account isolation, sign out all three identities, durable sign-out/restart, explicit relogin and paused task restoration; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -836,6 +861,86 @@ finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+        # Two OAuth users without tasks exercise restoration by each saved email,
+        # rather than the vault's single legacy "active" pointer.
+        multi_accounts = {}
+        for i,email in enumerate(('first-multi@example.invalid','second-multi@example.invalid')):
+            server.email = email
+            run('seed-login',authorize=True)
+            identity = 'appdata:' + hashlib.sha256(b'fixture.apps.googleusercontent.com').hexdigest() + ':' + email
+            multi_accounts[identity] = {'address':email,'account_path':'client.json','root_directory':'root','oauth':True}
+            digest = hashlib.sha256(identity.encode()).hexdigest()
+            (test/'root'/digest).write_text('multi-root-'+str(i))
+            (test/'blob_queue'/digest).write_text(json.dumps(['multi-placeholder']*21000))
+        server.email = 'oauth@example.invalid'
+        multi_settings = json.loads((test/'settings.json').read_text())
+        multi_settings['account_path'] = 'client.json'
+        multi_settings['signed_in_accounts'] = multi_accounts
+        multi_settings['selected_account'] = next(iter(multi_accounts))
+        (test/'settings.json').write_text(json.dumps(multi_settings))
+        (test/'oauth-ui.json').unlink()
+        multi_interaction = r'''
+import json,subprocess,sys,time
+from pathlib import Path
+app=None
+window=None
+def command(*args):return subprocess.check_output(['xdotool',*map(str,args)],text=True)
+def snapshot():return json.loads(Path('oauth-ui.json').read_text())
+def wait(predicate,message):
+    deadline=time.monotonic()+25
+    while time.monotonic()<deadline:
+        try:
+            value=predicate()
+            if value:return value
+        except (OSError,json.JSONDecodeError):pass
+        assert app.poll() is None,'Multi-user GUI exited early.'
+        time.sleep(.05)
+    raise AssertionError(message+'; last UI: '+Path('oauth-ui.json').read_text())
+def launch():
+    global app,window
+    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
+    wait(lambda:Path('oauth-ui.json').exists(),'Multi-user startup failed.')
+    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+    command('windowfocus','--sync',window)
+def click(at):command('mousemove','--window',window,at['x'],at['y'],'click','1')
+def menu():
+    at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
+    return wait(lambda:snapshot() if snapshot()['menu'] else None,'Multi-user menu did not open.')
+def restart():
+    command('key','alt+F4');assert app.wait(timeout=10)==0
+    Path('oauth-ui.json').unlink();launch()
+try:
+    launch()
+    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['tasks']==0 and snapshot()['root_id']=='multi-root-0'
+    current=menu()
+    assert [r['email'] for r in current['account_rows']]==['first-multi@example.invalid','second-multi@example.invalid']
+    assert all(current['actions'][i]['enabled'] for i in (1,4))
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Multi-user menu did not close.')
+    restart()
+    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['root_id']=='multi-root-0' and snapshot()['tasks']==0
+    current=menu();click(current['actions'][1])
+    wait(lambda:not snapshot()['switching'] and not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1,
+         'One OAuth sign-out affected another user.')
+    restart()
+    assert not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1 and snapshot()['tasks']==0
+    current=menu()
+    assert not current['actions'][1]['enabled'] and current['actions'][4]['enabled'] and len(current['footer'])==2
+    click(current['footer'][1])
+    wait(lambda:not snapshot()['switching'] and not snapshot()['signed_in_accounts'],'Multi-user sign out all failed.')
+    restart()
+    assert not snapshot()['has_session'] and not snapshot()['signed_in_accounts'] and snapshot()['tasks']==0
+    current=menu()
+    assert not current['actions'][1]['enabled'] and not current['actions'][4]['enabled'] and len(current['footer'])==1
+    command('key','alt+F4');assert app.wait(timeout=10)==0
+    print('PASS: two OAuth users without tasks restore independently of the legacy active pointer; browser selection, single-user sign-out, background-only login and sign out all persist across restarts.')
+finally:
+    if app is not None and app.poll() is None:app.kill();app.wait()
+'''
+        result = subprocess.run(['xvfb-run','-a','-s','-screen 0 1600x1200x24','python3','-c',multi_interaction,str(test/'bin/gui.exe')],
+                                cwd=test,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=100)
+        assert result.returncode==0,result.stdout+result.stderr
+        assert not server.errors,server.errors
+        print(result.stdout.strip())
         # Unmodified native implementation: synthetic config; Wine fails before
         # opening the browser or sending any network traffic. No secret fallback.
         native_config = json.loads(json.dumps(config))

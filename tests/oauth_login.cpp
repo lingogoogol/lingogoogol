@@ -14,6 +14,12 @@ int main(int argc,char** argv)
         check(argc==2,"Missing test mode.");
         const std::string mode{argv[1]};
         auto control=std::make_shared<request_control_t>();
+        if (mode=="seed-login")
+        {
+            check(bool(google_oauth_user_t::login("client.json",control)),"Fixture login did not succeed.");
+            std::println("PASS: additional OAuth fixture account saved.");
+            return 0;
+        }
         if (mode=="cancel")
         {
             auto job=std::async(std::launch::async,[&]{return google_oauth_user_t::login("client.json",control);});

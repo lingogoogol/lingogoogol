@@ -10,6 +10,14 @@ export {
     auto storage_read(const std::filesystem::path& path) -> std::string;
     auto storage_digest(std::string_view content) -> std::string;
 
+    struct storage_account_login_t
+    {
+        // Credentials stay in their original files/vault; this is only identity and location.
+        std::string address, account_path, root_directory;
+        bool oauth{};
+    };
+    using storage_account_logins_t = std::map<std::string,storage_account_login_t>;
+
     struct storage_settings_t
     {
         std::string logfile_path{"logfile"};
@@ -19,6 +27,9 @@ export {
         std::string root_path{"root"};
         // Keep sign-out per service identity so another login cannot resume it.
         std::set<std::string> signed_out_service_accounts;
+        // Absence means legacy settings. An empty map explicitly means all signed out.
+        std::optional<storage_account_logins_t> signed_in_accounts;
+        std::string selected_account;
         int network_retries{-1};
         static auto load() -> storage_settings_t;
         auto save() const -> void;

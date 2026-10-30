@@ -91,6 +91,17 @@ auto storage_settings_t::load() -> storage_settings_t
     result.account_path = data.value("account_path", result.account_path);
     result.root_path = data.value("root_path", result.root_path);
     result.signed_out_service_accounts = data.value("signed_out_service_accounts", result.signed_out_service_accounts);
+    if (data.contains("signed_in_accounts"))
+    {
+        result.signed_in_accounts.emplace();
+        const auto& accounts = data.at("signed_in_accounts");
+        if (!accounts.is_object()) throw std::runtime_error{"Invalid saved account login list."};
+        for (const auto& [id,account] : accounts.items())
+            result.signed_in_accounts->emplace(id,storage_account_login_t{
+                account.at("address").get<std::string>(),account.at("account_path").get<std::string>(),
+                account.at("root_directory").get<std::string>(),account.at("oauth").get<bool>()});
+        result.selected_account = data.value("selected_account",std::string{});
+    }
     // An intermediate layout saved the old default filename as root/root.
     // root_path now names a directory; keep that default from nesting again.
     if (std::filesystem::path{result.root_path}.lexically_normal()==std::filesystem::path{"root/root"})
@@ -102,13 +113,22 @@ auto storage_settings_t::load() -> storage_settings_t
 }
 auto storage_settings_t::save() const -> void
 {
-    storage_atomic_write("settings.json", nlohmann::json{{"logfile_path", logfile_path},
+    auto data = nlohmann::json{{"logfile_path", logfile_path},
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},
                                                          {"signed_out_service_accounts", signed_out_service_accounts},
-                                                         {"network_retries", network_retries}}
-                                              .dump(2));
+                                                         {"network_retries", network_retries}};
+    if (signed_in_accounts)
+    {
+        auto accounts = nlohmann::json::object();
+        for (const auto& [id,account] : *signed_in_accounts)
+            accounts[id] = {{"address",account.address},{"account_path",account.account_path},
+                            {"root_directory",account.root_directory},{"oauth",account.oauth}};
+        data["signed_in_accounts"] = std::move(accounts);
+        data["selected_account"] = selected_account;
+    }
+    storage_atomic_write("settings.json",data.dump(2));
 }
 auto request_control_t::fail(std::string reason) -> void
 {
