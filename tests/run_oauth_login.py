@@ -375,6 +375,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 load_state.m_task_list.back()->pause(true);
             }
             auto actions = nlohmann::json::array(), footer = nlohmann::json::array();
+            auto account_scroll = nlohmann::json{};
             std::function<void(lgo::GUI_object_t&)> inspect = [&](auto& object)
             {
                 const auto p=object.get_pos(); const auto z=object.get_size();
@@ -385,6 +386,14 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                     actions.push_back(location);
                 }
                 if (dynamic_cast<lgo::button_classic_std_t*>(&object)) footer.push_back(location);
+                if (auto scroll=dynamic_cast<lgo::scroll_t*>(&object))
+                {
+                    const auto thumb=scroll->scrollbar_pos(false); const auto extent=scroll->scrollbar_size(false);
+                    account_scroll={{"x",p.x},{"y",p.y},{"w",z.x},{"h",z.y},
+                        {"view_h",scroll->view_size().y},{"content_h",scroll->content()->get_size().y},
+                        {"max",scroll->max_scroll().y},{"offset",scroll->scroll_offset().y},
+                        {"thumb_x",thumb.x},{"thumb_y",thumb.y},{"thumb_w",extent.x},{"thumb_h",extent.y}};
+                }
                 object.visit_children(inspect);
             };
             if (persistent.m_account_menu)
@@ -413,11 +422,13 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 {"w",size.x},{"h",size.y},{"window_w",window.x},{"window_h",window.y},
                 {"signed_in",load_state.m_session && load_state.m_session->oauth},
                 {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},
-                {"actions",actions},{"footer",footer},{"account_rows_settled",!progress_column->children_moving()},{"account_tasks",account_tasks},{"tasks",load_state.m_task_list.size()},
+                {"actions",actions},{"footer",footer},{"account_scroll",account_scroll},{"account_rows_settled",!progress_column->children_moving()},{"account_tasks",account_tasks},{"tasks",load_state.m_task_list.size()},
                 {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
         }
 '''
         entry = entry.replace('return google_oauth_user_t::saved_accounts(candidate.account_path);', r'''auto accounts = google_oauth_user_t::saved_accounts(candidate.account_path);
+        if (std::filesystem::exists("few-accounts") && !accounts.empty())
+            accounts.push_back({"few@example.invalid",accounts.front().portrait});
         if (std::filesystem::exists("many-accounts") && !accounts.empty())
             for (int i{};i<30;++i) accounts.push_back({"fixture-"+std::to_string(i)+"@example.invalid",accounts.front().portrait});
         return accounts;''')
@@ -537,18 +548,68 @@ try:
     wait(lambda:not snapshot()['menu'],'Escape did not dismiss dropdown.')
     menu=open_menu();click({'x':700,'y':400})
     wait(lambda:not snapshot()['menu'],'Outside click did not dismiss dropdown.')
+    Path('few-accounts').touch()
+    menu=open_menu();bar=menu['account_scroll']
+    assert bar['max']==0 and bar['view_h']==bar['content_h'], 'Short account list has an unnecessary scrollbar: '+str(bar)
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Short dropdown did not close.')
+    Path('few-accounts').unlink()
+    def check_account_bar(menu):
+        bar=menu['account_scroll']
+        assert bar['view_h']==min(bar['content_h'],max(0,menu['window_h']-menu['y']-112)), bar
+        assert bar['max']==max(0,bar['content_h']-bar['view_h']), bar
+        length=bar['view_h']
+        expected=max(min(24,length),min(length,length*length//bar['content_h']))
+        assert bar['thumb_h']==expected and bar['thumb_w']==2, bar
+        assert bar['thumb_x']==bar['x']+bar['w']-2, bar
+        assert bar['thumb_y']==bar['y']+bar['offset']*(length-expected)//bar['max'], bar
+        return bar
     Path('many-accounts').touch()
     menu=open_menu();assert len(menu['actions'])==62
+    bar=check_account_bar(menu)
     last_y=menu['actions'][-1]['y']
     click_at={'x':menu['actions'][0]['x']-150,'y':menu['actions'][0]['y']}
     command('mousemove','--window',window,click_at['x'],click_at['y'],'click','--repeat','8','--delay','50','5')
     wait(lambda:snapshot()['actions'][-1]['y']<last_y-100,'Account list did not scroll.')
+    bar=check_account_bar(snapshot())
+    # The track and thumb must follow pointer input as well as wheel scrolling.
+    click({'x':bar['thumb_x']+1,'y':bar['y']+bar['view_h']-1})
+    wait(lambda:snapshot()['account_scroll']['offset']==snapshot()['account_scroll']['max'],
+         'Account scrollbar track did not reach the bottom.')
+    bar=check_account_bar(snapshot())
+    command('mousemove','--window',window,bar['thumb_x']+1,bar['thumb_y']+bar['thumb_h']//2,'mousedown','1')
+    command('mousemove','--sync','--window',window,bar['thumb_x']+1,bar['y'],'mouseup','1')
+    wait(lambda:snapshot()['account_scroll']['offset']==0,'Account scrollbar drag did not reach the top.')
+    bar=check_account_bar(snapshot())
+    command('mousemove',1500,1100)
+    def scrollbar_pixels():
+        current=snapshot()['account_scroll']
+        geometry=dict(line.split('=',1) for line in command('getwindowgeometry','--shell',window).splitlines())
+        image=ImageGrab.grab()
+        for y,rgb in ((current['thumb_y']+current['thumb_h']//2,(0,0,0)),
+                      (current['y']+current['view_h']-1,(211,211,211))):
+            pixel=image.getpixel((int(geometry['X'])+current['thumb_x']+1,int(geometry['Y'])+y))
+            if any(abs(a-b)>8 for a,b in zip(pixel[:3],rgb)):return None
+        return image
+    wait(scrollbar_pixels,'Account scrollbar pixels did not match its geometry.').save('/tmp/storage-account-scrollbar.png')
     Path('resize-menu-sequence').touch()
     wait(lambda:Path('resize-menu-sequence.done').exists(),'Dropdown did not follow continuous resizing.')
     Path('resize-small').touch()
     wait(lambda:snapshot()['window_w']==800 and all(0<a['x']<800 and 0<a['y']<600
          for a in snapshot()['footer']),'Open dropdown did not resize within the window.')
+    small=check_account_bar(snapshot())
+    Path('resize-wide').touch()
+    wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Open dropdown did not expand with the window.')
+    expanded=check_account_bar(wide)
+    assert expanded['view_h']>small['view_h'] and expanded['thumb_h']>small['thumb_h']
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Large dropdown did not close.')
+    # Opening at a small size must not permanently cap the list after expansion.
+    Path('resize-small').touch()
+    wait(lambda:snapshot()['window_w']==800,'Small layout did not return.')
+    small=check_account_bar(open_menu())
+    Path('resize-wide').touch()
+    wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Initially small dropdown did not expand.')
+    assert check_account_bar(wide)['view_h']>small['view_h']
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Expanded dropdown did not close.')
     Path('many-accounts').unlink()
     Path('resize-wide').touch()
     wait(lambda:snapshot()['window_w']==1536,'Wide layout did not return after dropdown resize.')
@@ -595,7 +656,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    print('PASS: account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''

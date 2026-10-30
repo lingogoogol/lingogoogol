@@ -1365,10 +1365,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         auto block = panel->add_object_ghost_shared<lgo::click_area_t>(
             lgo::depth_range_t{.157f,.157f},lgo::size_2D{width,0},
             []{},[](auto){},[](auto){},[](auto){},[]{});
-        const auto list_height = std::min<std::int64_t>(accounts.size()*48,
-            std::max<std::int64_t>(48,engine->get_window_size().y-144));
         auto viewport = panel->add_object_shared<lgo::scroll_t>(content,
-            lgo::size_2D{width-16,list_height},lgo::scroll_axes_t::y,lgo::size_1D{0});
+            lgo::size_2D{width-16,0},lgo::scroll_axes_t::y,lgo::size_1D{0});
         const auto row_width = viewport->view_size().x-lgo::std_margin.x;
         auto rows = std::make_shared<lgo::divy_flex_soft_t>(engine,state->get_depth_tracker(),
             content,lgo::pos_2D{},lgo::size_1D{row_width},lgo::size_1D{0},
@@ -1401,6 +1399,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             remove->set_enabled(!load_state->m_session || !load_state->m_session->oauth ||
                 load_state->m_session->address!=account.address);
         }
+        // Include the soft div's gaps between rows in the viewport height.
+        // Counting only row heights adds a scrollbar even when all rows fit.
+        const auto list_height = rows->get_size().y;
         // Soft div margins separate siblings; they do not inset the first photo.
         viewport->set_content(std::move(rows),lgo::pos_2D{lgo::std_margin.x,0});
         auto footer = panel->add_object_shared<lgo::divx_soft_t>(content,
