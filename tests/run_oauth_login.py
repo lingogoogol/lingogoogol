@@ -311,6 +311,24 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         (test / 'client.json').write_text(json.dumps(config))
         entry = (source / 'storage/storage.cpp').read_text(encoding='utf-8-sig')
         entry = entry.replace('import external.Vulkan;', 'import external.Vulkan;\nimport external.GLFW;')
+        entry = entry.replace('progress_button_t','observed_t<progress_button_t>')
+        entry = entry.replace('std::atomic_bool close_app', r'''template<class Base> struct observed_t : Base
+        {
+            using Base::Base;
+            auto is_shown() const -> bool { return this->status()==this->shown; }
+        };
+        std::atomic_bool close_app''')
+        entry = entry.replace('                auto target = interactive ?', r'''                if (!email.empty() && std::filesystem::exists("hold-account-switch"))
+                {
+                    storage_atomic_write("account-switch-started","ok");
+                    while (std::filesystem::exists("hold-account-switch") && !settings_control->cancelled)
+                        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+                    if (settings_control->cancelled) throw std::runtime_error{"Fixture switch cancelled."};
+                }
+                if (!email.empty() && std::filesystem::exists("fail-account-switch"))
+                    throw std::runtime_error{"Fixture switch failed."};
+                auto target = interactive ?''')
+
         observation = r'''        {
             // Under Wine, resizing the X11 wrapper does not reliably send
             // WM_SIZE. Use the production GLFW/Win32 resize path instead.
@@ -371,6 +389,23 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
             };
             if (persistent.m_account_menu)
                 inspect(*persistent.m_account_menu->get_object_shared<lgo::divy_soft_t>(1));
+            auto account_tasks = nlohmann::json::array();
+            for (const auto& [id,dismissed] : settings_rows)
+            {
+                const auto row = progress_column->get_object_shared<lgo::divy_flex_soft_t>(id);
+                auto task = nlohmann::json{{"text",row->get_object_shared<lgo::text_line_scroll_std_t>(0)->get_text()}};
+                std::function<void(lgo::GUI_object_t&)> buttons = [&](auto& object)
+                {
+                    if (auto button=dynamic_cast<observed_t<progress_button_t>*>(&object))
+                    {
+                        const auto p=button->get_pos(); const auto z=button->get_size();
+                        task[button->get_text()]={{"shown",button->is_shown()},{"x",p.x+z.x/2},{"y",p.y+z.y/2}};
+                    }
+                    object.visit_children(buttons);
+                };
+                buttons(*row);
+                account_tasks.push_back(task);
+            }
             const auto at=persistent.m_login_button->get_pos();
             const auto size=persistent.m_login_button->get_size();
             const auto window=engine.get_window_size();
@@ -378,7 +413,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 {"w",size.x},{"h",size.y},{"window_w",window.x},{"window_h",window.y},
                 {"signed_in",load_state.m_session && load_state.m_session->oauth},
                 {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},
-                {"actions",actions},{"footer",footer},{"tasks",load_state.m_task_list.size()},
+                {"actions",actions},{"footer",footer},{"account_rows_settled",!progress_column->children_moving()},{"account_tasks",account_tasks},{"tasks",load_state.m_task_list.size()},
                 {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
         }
 '''
@@ -458,6 +493,16 @@ try:
     Path('resize-wide').touch()
     wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Wide layout did not return.')
     assert wide['w']==wide['h']==32 and wide['x']+32<=1536
+    def finished_account_task(name,prefix='已完成：'):
+        value=snapshot()
+        if not value['account_rows_settled']:return None
+        return next((t for t in value['account_tasks'] if t['text'].startswith(prefix+name) and t['確定']['shown']),None)
+    def acknowledge(name,prefix='已完成：'):
+        task=wait(lambda:finished_account_task(name,prefix),'Named account task did not finish: '+name)
+        assert not task['取消']['shown'] and not task['重試']['shown']
+        count=len(snapshot()['account_tasks'])
+        click(task['確定'])
+        wait(lambda:len(snapshot()['account_tasks'])==count-1 and snapshot()['account_rows_settled'],'Confirmation did not remove the account task.')
     def open_menu():
         at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
         return wait(lambda:snapshot() if snapshot()['menu'] else None,'Account dropdown missing.')
@@ -466,6 +511,26 @@ try:
     assert menu['actions'][0]['enabled'] and not menu['actions'][1]['enabled']
     click(menu['actions'][1]);time.sleep(.2)
     assert snapshot()['menu'] and snapshot()['signed_in'],'Disabled removal handled a click.'
+    click(menu['actions'][0])
+    switch_name='切換帳戶：oauth@example.invalid'
+    wait(lambda:finished_account_task(switch_name),'Switch did not retain its task name.')
+    acknowledge('新增帳戶：oauth@example.invalid')
+    Path('hold-account-switch').touch()
+    menu=open_menu();click(menu['actions'][0])
+    wait(lambda:Path('account-switch-started').exists(),'Held switch did not start.')
+    running=snapshot()['account_tasks'][-1]
+    assert running['text']==switch_name+'（處理中）' and running['取消']['shown'] and not running['確定']['shown']
+    acknowledge(switch_name)  # Acknowledging the previous row must not cancel this switch.
+    assert snapshot()['switching']
+    running=snapshot()['account_tasks'][-1];click(running['取消'])
+    acknowledge(switch_name,'已取消：')
+    assert snapshot()['signed_in'] and not snapshot()['switching']
+    Path('hold-account-switch').unlink()
+    Path('fail-account-switch').touch()
+    menu=open_menu();click(menu['actions'][0])
+    acknowledge(switch_name,'失敗：')
+    Path('fail-account-switch').unlink()
+    menu=open_menu()
     command('mousemove',1500,1100)
     ImageGrab.grab().save('/tmp/storage-account-dropdown.png')
     command('key','Escape')
@@ -493,6 +558,7 @@ try:
     menu=open_menu();assert len(menu['footer'])==2
     click(menu['footer'][1])
     wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Logout failed.')
+    acknowledge('登出：oauth@example.invalid')
     assert Path('task').read_text()==index,'Logout deleted the transfer checkpoint.'
     command('key','alt+F4');app.wait(timeout=10)
     assert app.returncode==0
@@ -514,8 +580,11 @@ try:
     assert snapshot()['paused'],'Login lost explicit pause state.'
     menu=open_menu();click(menu['footer'][1])
     wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Second logout failed.')
+    acknowledge(switch_name)
+    acknowledge('登出：oauth@example.invalid')
     menu=open_menu();click(menu['actions'][1])
     wait(lambda:not snapshot()['switching'] and not snapshot()['menu'],'Removal did not finish.')
+    acknowledge('移除帳戶：oauth@example.invalid')
     menu=open_menu();assert not menu['actions'] and len(menu['footer'])==1,'Removed account remains in history.'
     assert Path('task').read_text()==index,'Removal deleted the transfer checkpoint.'
     command('key','alt+F4')
@@ -526,7 +595,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    print('PASS: named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -544,7 +613,7 @@ finally:
                     process.kill()
                     stdout, stderr = process.communicate()
                 raise AssertionError('GUI did not launch browser: ' + stdout + stderr)
-            stdout, stderr = process.communicate(timeout=45)
+            stdout, stderr = process.communicate(timeout=60)
             assert process.returncode == 0, stdout + stderr
             assert not server.errors, server.errors
             logs = ''.join(p.read_text(errors='replace') for p in (test / 'logfile').glob('*.txt'))

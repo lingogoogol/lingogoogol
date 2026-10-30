@@ -98,7 +98,7 @@ auto app() -> void
     auto profile_control = std::make_shared<request_control_t>();
     auto settings_control{std::make_shared<request_control_t>()};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
-    std::shared_ptr<progress_button_t> settings_retry, settings_cancel;
+    std::shared_ptr<progress_button_t> settings_retry, settings_cancel, settings_confirm;
     std::shared_ptr<lgo::std_liney_t> settings_separator, clear_separator;
     std::future<std::string> clear_job;
     auto clear_control{std::make_shared<request_control_t>()};
@@ -139,8 +139,47 @@ auto app() -> void
         }
     } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control, profile_control};
     home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
-    std::string selected_email;
+    std::string selected_email, settings_task_name;
+    std::vector<std::pair<std::uint64_t,std::shared_ptr<bool>>> settings_rows;
     bool account_action{}, restore_after_login{};
+    auto begin_settings_row = [&](std::string name, bool cancellable)
+    {
+        settings_task_name = std::move(name);
+        const auto row_id = progress_column->add_object<lgo::divy_flex_soft_t>(
+            storage_content_depth,progress_column->space_x(lgo::std_margin),lgo::std_margin,
+            lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top});
+        auto row = progress_column->get_object_shared<lgo::divy_flex_soft_t>(row_id);
+        auto dismissed = std::make_shared<bool>(false);
+        settings_rows.emplace_back(row_id,dismissed);
+        settings_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
+            storage_content_depth, settings_task_name+"（處理中）", lgo::std_red_light, lgo::size_1D{256}, false);
+        auto settings_actions{row->add_object_shared<lgo::divx_soft_t>(
+            storage_content_depth, lgo::div_create_from_member{},
+            lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
+            row->space_x(lgo::std_margin),
+            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
+        settings_retry = settings_actions->add_object_shared<progress_button_t>(
+            storage_content_depth,
+            [&]
+            {
+                runtime.retry_accounts();
+                settings_control->retry();
+            },
+            "重試", lgo::std_white, lgo::size_1D{32});
+        settings_retry->hide();
+        settings_separator = settings_actions->add_object_shared<lgo::std_liney_t>(
+            storage_content_depth, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
+        settings_separator->hide();
+        settings_cancel = settings_actions->add_object_shared<progress_button_t>(
+            storage_content_depth, [&] { settings_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
+        settings_confirm = settings_actions->add_object_ghost_shared<progress_button_t>(
+            storage_content_depth, [dismissed] { *dismissed = true; }, "確定", lgo::std_white, lgo::size_1D{32});
+        settings_confirm->hide();
+        // Hidden children retain slots; terminal confirmation replaces retry/cancel.
+        settings_cancel->set_pos(settings_retry->get_pos());
+        settings_confirm->set_pos(settings_retry->get_pos());
+        if (!cancellable) settings_cancel->hide();
+    };
     auto apply_settings = [&](storage_settings_t candidate, bool interactive)
     {
         if (settings_job.valid())
@@ -161,30 +200,10 @@ auto app() -> void
         settings_control->retry();
         settings_control->cancelled = false;
         settings_control->retry_limit = candidate.network_retries;
-        settings_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, interactive ? "等待 Google 登入" : "設定更新中", lgo::std_red_light, lgo::size_1D{256}, false);
-        auto settings_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
-            storage_content_depth, lgo::div_create_from_member{},
-            lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
-            progress_column->space_x(lgo::std_margin),
-            lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
-        settings_retry = settings_actions->add_object_shared<progress_button_t>(
-            storage_content_depth,
-            [&]
-            {
-                runtime.retry_accounts();
-                settings_control->retry();
-            },
-            "重試", lgo::std_white, lgo::size_1D{32});
-        settings_retry->hide();
-        settings_separator = settings_actions->add_object_shared<lgo::std_liney_t>(
-            storage_content_depth, lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_white);
-        settings_separator->hide();
-        settings_cancel = settings_actions->add_object_shared<progress_button_t>(
-            storage_content_depth, [&] { settings_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
+        const auto email = std::exchange(selected_email,{});
+        begin_settings_row(interactive ? "新增帳戶" : email.empty() ? "更新設定" : "切換帳戶："+email,true);
         persistent.m_switching = true;
         persistent.m_directory_status->set_text(interactive ? "登入中" : "目錄更新中");
-        const auto email = std::exchange(selected_email,{});
         settings_job =
             std::async(std::launch::async, [&, candidate, interactive, email]
             {
@@ -246,6 +265,7 @@ auto app() -> void
             const auto candidate = oauth_settings();
             const auto user = google_oauth_user_t::restore(candidate.account_path,email);
             suspend_account_tasks(user->storage_id());
+            begin_settings_row("移除帳戶："+email,false);
             persistent.m_switching = account_action = true;
             persistent.m_directory_status->set_text("移除帳號中");
             settings_job = std::async(std::launch::async,[&,candidate,email,id=user->storage_id(),current=load_state.m_session]
@@ -265,6 +285,7 @@ auto app() -> void
         persistent.m_reset_view();
         persistent.m_clipboard.reset();
         profile_control->cancel();
+        begin_settings_row("登出："+target->address,false);
         persistent.m_switching = account_action = true;
         persistent.m_directory_status->set_text("登出中");
         settings_job = std::async(std::launch::async,[&,target]
@@ -442,21 +463,23 @@ auto app() -> void
                 lgo::font_preference_t::default_get().assign(1, fonts.back().get());
                 persistent.set_directory_header_font(settings.font_path);
                 lgo::text_line_t::reload_fonts();
-                if (!account_action) settings_text->set_text("設定已套用", false);
+                if (settings_task_name=="新增帳戶" && result.session)
+                    settings_task_name += "："+result.session->address;
+                settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_refresh();
             }
             catch (const std::exception& error)
             {
                 persistent.m_directory_status->set_text(account_action ? "帳號操作失敗" : "設定套用失敗");
-                if (!account_action) settings_text->set_text(std::string{"設定失敗："} + error.what(), false);
+                settings_text->set_text(!account_action && settings_control->cancelled ?
+                    "已取消："+settings_task_name : "失敗："+settings_task_name+"（"+error.what()+"）",false);
                 lgo::log_file(std::string{account_action ? "Account action failed: " : "Settings failed: "} + error.what() + "\n");
             }
-            if (!account_action)
-            {
-                settings_retry->hide();
-                settings_cancel->hide();
-                settings_separator->hide();
-            }
+            settings_retry->hide();
+            settings_cancel->hide();
+            settings_separator->hide();
+            settings_confirm->set_pos(settings_retry->get_pos());
+            settings_confirm->show();
             persistent.m_switching = false;
             account_action = false;
         }
@@ -478,16 +501,26 @@ auto app() -> void
             if (settings_control->paused)
             {
                 persistent.m_directory_status->set_text("設定更新失敗");
-                settings_text->set_text("設定失敗：" + settings_control->reason(), false);
+                settings_text->set_text("網路失敗："+settings_task_name+"（"+settings_control->reason()+"）",false);
+                settings_cancel->set_pos(settings_separator->get_pos()+
+                    lgo::size_2D{settings_separator->get_size().x+lgo::std_margin.x,0});
                 settings_retry->show();
                 settings_separator->show();
             }
             else
             {
+                settings_text->set_text(settings_task_name+"（處理中）",false);
                 settings_retry->hide();
                 settings_separator->hide();
+                settings_cancel->set_pos(settings_retry->get_pos());
             }
         }
+        std::erase_if(settings_rows,[&](const auto& row)
+        {
+            if (!*row.second) return false;
+            progress_column->remove_object(row.first);
+            return true;
+        });
         if (clear_restart)
         {
             clear_restart = false;
