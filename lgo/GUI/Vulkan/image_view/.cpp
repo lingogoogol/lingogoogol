@@ -28,6 +28,11 @@ namespace lgo
                 .layerCount{ 1 }
             }
         };
+        // Glyphs store coverage in R8; swizzle them to white RGBA so the same
+        // texture shader can render both colored photographs and tinted text.
+        if (ctor.format == vk::Format::eR8Unorm)
+            info.components = {vk::ComponentSwizzle::eOne,vk::ComponentSwizzle::eOne,
+                               vk::ComponentSwizzle::eOne,vk::ComponentSwizzle::eR};
         m_interface = vk::raii::ImageView{ *ctor.device, info };
         vulkan_name(*ctor.device, *m_interface, [&] { return std::string{ ctor.name } + ".image-view"; });
         return;

@@ -54,13 +54,21 @@ auto app() -> void
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
     auto startup_control{std::make_shared<request_control_t>()};
-    auto session{runtime.open(settings, startup_control)};
-    google_account_t::default_shared_set(session->account);
+    std::shared_ptr<storage_session_t> session;
+    std::string startup_error;
+    if (!std::filesystem::exists(settings.account_path) && settings.account_path == "key.json" &&
+        std::filesystem::exists("client.json")) settings.account_path = "client.json";
+    try
+    {
+        if (std::filesystem::exists(settings.account_path)) session = runtime.open(settings,startup_control);
+    }
+    catch (const std::exception& error) { startup_error = error.what(); }
+    if (session) google_account_t::default_shared_set(session->account);
     load_state_t load_state;
     load_state.m_session = session;
     load_state.m_settings = settings;
     curl_multi_worker_t multi;
-    std::string pos{session->root};
+    std::string pos{session ? session->root : ""};
     std::shared_ptr<lgo::divy_soft_t> progress_column;
     GUI_persistent_t persistent;
     struct settings_result_t
@@ -69,6 +77,13 @@ auto app() -> void
         std::shared_ptr<storage_session_t> session;
     };
     std::future<settings_result_t> settings_job;
+    struct profile_job_t
+    {
+        std::shared_ptr<storage_session_t> session;
+        std::future<std::string> future;
+    };
+    std::list<profile_job_t> profile_jobs;
+    auto profile_control = std::make_shared<request_control_t>();
     auto settings_control{std::make_shared<request_control_t>()};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
     std::shared_ptr<progress_button_t> settings_retry, settings_cancel;
@@ -92,10 +107,12 @@ auto app() -> void
         curl_multi_worker_t& multi;
         GUI_persistent_t& gui;
         std::shared_ptr<request_control_t> settings, clear;
+        std::shared_ptr<request_control_t>& profile;
         ~shutdown_t()
         {
             close_app = true;
             settings->cancel();
+            profile->cancel();
             clear->cancel();
             for (auto& listing : gui.m_listings)
                 listing.control->cancel();
@@ -108,13 +125,13 @@ auto app() -> void
             runtime.stop();
             multi.stop();
         }
-    } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control};
-    home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session->queue.get(), &pos);
-    persistent.m_apply_settings = [&](storage_settings_t candidate)
+    } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control, profile_control};
+    home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
+    auto apply_settings = [&](storage_settings_t candidate, bool interactive)
     {
         if (settings_job.valid())
             throw std::runtime_error{"設定正在套用，請稍候"};
-        if (clearing_session || load_state.m_session->clearing)
+        if (clearing_session || (load_state.m_session && load_state.m_session->clearing))
             throw std::runtime_error{"清除期間請稍後再切換設定"};
         // Validate font and output paths before accepting the form.
         auto next_font{std::make_unique<lgo::font_face_t>(candidate.font_path, lgo::std_font_size.x)};
@@ -131,7 +148,7 @@ auto app() -> void
         settings_control->cancelled = false;
         settings_control->retry_limit = candidate.network_retries;
         settings_text = progress_column->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, "設定更新中", lgo::std_red_light, lgo::size_1D{256}, false);
+            storage_content_depth, interactive ? "等待 Google 登入" : "設定更新中", lgo::std_red_light, lgo::size_1D{256}, false);
         auto settings_actions{progress_column->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -152,14 +169,51 @@ auto app() -> void
         settings_cancel = settings_actions->add_object_shared<progress_button_t>(
             storage_content_depth, [&] { settings_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
         persistent.m_switching = true;
-        persistent.m_directory_status->set_text("目錄更新中");
+        persistent.m_directory_status->set_text(interactive ? "登入中" : "目錄更新中");
         settings_job =
-            std::async(std::launch::async, [&, candidate]
-                       { return settings_result_t{candidate, runtime.open(candidate, settings_control)}; });
+            std::async(std::launch::async, [&, candidate, interactive]
+            {
+                auto target = interactive ? runtime.open_oauth(candidate,
+                    google_oauth_user_t::login(candidate.account_path,settings_control),settings_control) :
+                    runtime.open(candidate,settings_control);
+                return settings_result_t{candidate,std::move(target)};
+            });
     };
+    persistent.m_apply_settings = [&](storage_settings_t candidate) { apply_settings(std::move(candidate),false); };
+    persistent.m_login = [&]
+    {
+        try
+        {
+            auto candidate = settings;
+            candidate.account_path = "client.json";
+            if (std::filesystem::exists(settings.account_path))
+            {
+                const auto config = nlohmann::json::parse(storage_read(settings.account_path));
+                if (config.contains("installed")) candidate.account_path = settings.account_path;
+            }
+            apply_settings(std::move(candidate),true);
+        }
+        catch (const std::exception&) { persistent.m_directory_status->set_text("無法開始登入"); }
+    };
+    auto update_profile = [&]
+    {
+        profile_control->cancel();
+        profile_control = std::make_shared<request_control_t>();
+        const auto target = load_state.m_session;
+        persistent.m_profile(target && target->oauth,{});
+        if (target && target->oauth)
+            profile_jobs.push_back({target,std::async(std::launch::async,[user=target->oauth,control=profile_control]
+                { return user->download_picture(control); })});
+    };
+    update_profile();
+    if (!startup_error.empty())
+    {
+        persistent.m_directory_status->set_text("請重新登入");
+        lgo::log_file("Startup account unavailable; sign in or update account settings.\n");
+    }
     persistent.m_clear_account = [&]
     {
-        if (clear_job.valid() || settings_job.valid())
+        if (!load_state.m_session || clear_job.valid() || settings_job.valid())
             return;
         if (clear_retry) clear_retry->hide();
         if (clear_separator) clear_separator->hide();
@@ -179,7 +233,7 @@ auto app() -> void
         auto account_tasks{load_state.m_task_list};
         account_tasks.insert(account_tasks.end(), load_state.m_finished_tasks.begin(), load_state.m_finished_tasks.end());
         for (auto& task : account_tasks)
-            if (task->m_session && task->m_session->address == clearing_session->address)
+            if (task->m_session && task->m_session->storage_id == clearing_session->storage_id)
             {
                 task->m_control->cancel();
                 cancelled.push_back(task);
@@ -192,7 +246,7 @@ auto app() -> void
         clear_dismissed = std::make_shared<bool>(false);
         clear_rows.emplace_back(row_id, clear_dismissed);
         clear_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, "清除：列出全部 Drive 檔案", lgo::std_red_light, lgo::size_1D{256}, false);
+            storage_content_depth, clearing_session->oauth ? "清除：列出應用程式資料" : "清除：列出全部 Drive 檔案", lgo::std_red_light, lgo::size_1D{256}, false);
         auto clear_actions{row->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -257,11 +311,11 @@ auto app() -> void
                       saved.account_path = intent.at("account_path");
                       saved.root_path = intent.at("root_path");
                       return runtime.open(saved, startup_control, intent.at("account_email"),
-                                          intent.at("root"));
+                                          intent.at("root"), intent.value("account_namespace", ""));
                   });
-    if (session->clearing)
+    if (session && session->clearing)
         persistent.m_clear_account();
-    while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session->queue.get()))
+    while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
         using namespace std::chrono_literals;
         if (settings_job.valid() && settings_job.wait_for(0s) == std::future_status::ready)
@@ -273,18 +327,20 @@ auto app() -> void
                     std::make_unique<lgo::font_face_t>(result.settings.font_path, lgo::std_font_size.x)};
                 result.settings.save();
                 lgo::init_logfile(log_path(result.settings));
-                const bool changed_location{result.session->account != load_state.m_session->account ||
-                                            result.settings.root_path != settings.root_path ||
-                                            result.session->root != load_state.m_session->root};
+                const bool changed_location{!result.session || !load_state.m_session ||
+                    result.session->account != load_state.m_session->account ||
+                    result.settings.root_path != settings.root_path ||
+                    result.session->root != load_state.m_session->root};
                 if (changed_location)
                 {
                     persistent.m_reset_view();
-                    pos = result.session->root;
+                    pos = result.session ? result.session->root : "";
                 }
                 settings = result.settings;
                 load_state.m_settings = settings;
                 load_state.m_session = result.session;
-                google_account_t::default_shared_set(result.session->account);
+                google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
+                update_profile();
                 fonts.push_back(std::move(next_font));
                 lgo::font_preference_t::default_get().assign(1, fonts.back().get());
                 persistent.set_directory_header_font(settings.font_path);
@@ -302,6 +358,13 @@ auto app() -> void
             settings_cancel->hide();
             settings_separator->hide();
             persistent.m_switching = false;
+        }
+        for (auto it=profile_jobs.begin();it!=profile_jobs.end();)
+        {
+            if (it->future.wait_for(0s)!=std::future_status::ready) { ++it; continue; }
+            auto image = it->future.get();
+            if (it->session==load_state.m_session) persistent.m_profile(true,image);
+            it = profile_jobs.erase(it);
         }
         if (settings_job.valid())
         {

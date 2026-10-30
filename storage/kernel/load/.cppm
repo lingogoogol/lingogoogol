@@ -78,9 +78,12 @@ export
 
     struct storage_session_t {
         std::shared_ptr<google_account_t> account;
+        std::shared_ptr<google_oauth_user_t> oauth;
         std::shared_ptr<blob_queue_t> queue;
         std::string account_path;
         std::string address;
+        // Scope/client-specific storage identity; address remains the user's email.
+        std::string storage_id;
         std::string root_path;
         std::string root;
         bool clearing{};

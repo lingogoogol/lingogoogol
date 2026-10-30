@@ -36,6 +36,10 @@ export {
         std::function<void()> m_reset_view;
         std::function<void(storage_settings_t)> m_apply_settings;
         std::function<void()> m_clear_account;
+        std::function<void()> m_login;
+        std::function<void(bool,const std::string&)> m_profile;
+        std::shared_ptr<lgo::button_text_t<lgo::text_line_std_t>> m_login_button;
+        std::vector<std::shared_ptr<lgo::button_classic_std_t>> m_account_buttons;
         std::unique_ptr<lgo::modal_dialog_t> m_dialog;
         std::function<bool(bool, const std::vector<std::string>&)> m_dialog_done;
         std::deque<std::function<void()>> m_dialog_queue;

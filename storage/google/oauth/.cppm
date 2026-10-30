@@ -1,0 +1,35 @@
+export module storage.google.oauth;
+import std;
+import storage.state;
+
+export {
+    struct oauth_tokens_t
+    {
+        std::string access, refresh, nonce;
+        std::int64_t expires{};
+    };
+
+    // One authorized user and its device-bound DPoP key. Token endpoint work
+    // belongs on a background thread; the GUI only polls its account cache.
+    class google_oauth_user_t
+    {
+        struct implementation_t;
+        std::unique_ptr<implementation_t> m_impl;
+        explicit google_oauth_user_t(std::unique_ptr<implementation_t> impl);
+      public:
+        ~google_oauth_user_t();
+        static auto restore(const std::string& client_path, std::string expected_email = {})
+            -> std::shared_ptr<google_oauth_user_t>;
+        static auto login(const std::string& client_path,
+                          const std::shared_ptr<request_control_t>& control)
+            -> std::shared_ptr<google_oauth_user_t>;
+        auto refresh(const std::shared_ptr<request_control_t>& control) -> oauth_tokens_t;
+        auto tokens() const -> oauth_tokens_t;
+        auto address() const -> std::string;
+        auto credential_id() const -> std::string;
+        auto storage_id() const -> std::string;
+        auto picture() const -> std::string;
+        // Bounded HTTPS download; a missing or unavailable portrait is optional.
+        auto download_picture(const std::shared_ptr<request_control_t>& control) const -> std::string;
+    };
+}

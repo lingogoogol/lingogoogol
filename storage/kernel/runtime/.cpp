@@ -25,26 +25,39 @@ namespace
 auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
     -> std::shared_ptr<blob_queue_t>
 {
-    auto& queue{m_queues[session->address]};
+    auto& queue{m_queues[session->storage_id]};
     if (!queue)
     {
-        queue = std::make_shared<blob_queue_t>(queue_path(session->address), session->account.get(), m_close);
-        if (std::filesystem::exists(clear_path(session->address)))
+        queue = std::make_shared<blob_queue_t>(queue_path(session->storage_id), session->account.get(), m_close);
+        if (std::filesystem::exists(clear_path(session->storage_id)))
             queue->clear_begin();
     }
     return queue;
 }
 auto storage_runtime_t::open(const storage_settings_t& settings,
                              const std::shared_ptr<request_control_t>& control, std::string expected_email,
-                             std::string saved_root) -> std::shared_ptr<storage_session_t>
+                             std::string saved_root, std::string expected_storage) -> std::shared_ptr<storage_session_t>
 {
     const auto credential = nlohmann::json::parse(storage_read(settings.account_path));
+    if (credential.contains("installed"))
+    {
+        auto user = google_oauth_user_t::restore(settings.account_path,expected_email);
+        if (!user)
+        {
+            if (!expected_email.empty()) throw std::runtime_error{"Sign in to restore this Google account task."};
+            return {};
+        }
+        if (!expected_storage.empty() && expected_storage!=user->storage_id())
+            throw std::runtime_error{"Saved task belongs to a different OAuth application data space."};
+        return open_oauth(settings,std::move(user),control,std::move(saved_root));
+    }
     const auto address{credential.at("client_email").get<std::string>()};
     if (!expected_email.empty() && expected_email != address)
         throw std::runtime_error{"Saved task account no longer matches its credential file."};
     auto session{std::make_shared<storage_session_t>()};
     session->clearing = std::filesystem::exists(clear_path(address));
     session->address = address;
+    session->storage_id = address;
     session->account_path = settings.account_path;
     session->root_path = settings.root_path;
     {
@@ -76,6 +89,52 @@ auto storage_runtime_t::open(const storage_settings_t& settings,
         throw std::runtime_error{"Root file is empty."};
     return session;
 }
+auto storage_runtime_t::open_oauth(const storage_settings_t& settings,
+    std::shared_ptr<google_oauth_user_t> user, const std::shared_ptr<request_control_t>& control,
+    std::string saved_root) -> std::shared_ptr<storage_session_t>
+{
+    auto session = std::make_shared<storage_session_t>();
+    session->oauth = user;
+    session->address = user->address();
+    session->storage_id = user->storage_id();
+    session->account_path = settings.account_path;
+    // appDataFolder belongs to an OAuth application AND user. Keep roots and
+    // reserves separate even when two client.json files authorize the same email.
+    // Journals store the suffixed path, so restoration must not append it twice.
+    const auto suffix = ".appdata."+storage_digest(session->storage_id);
+    session->root_path = settings.root_path.ends_with(suffix) ? settings.root_path : settings.root_path+suffix;
+    session->clearing = std::filesystem::exists(clear_path(session->storage_id));
+    {
+        std::lock_guard lock{m_mutex};
+        if (*m_close) throw std::runtime_error{"Application is closing."};
+        auto& account = m_accounts[session->storage_id];
+        if (!account)
+        {
+            account = std::make_shared<google_account_t>();
+            account->init_oauth(user);
+        }
+        else account->update_oauth(user);
+        // Same-user queues and restored tasks retain this stable account object
+        // and immediately gain new credentials after re-login. Other identities
+        // remain isolated in their original account objects and queues.
+        session->account = account;
+        session->queue = queue(session);
+        m_sessions.push_back(session);
+    }
+    if (!saved_root.empty()) session->root = std::move(saved_root);
+    else if (std::filesystem::exists(session->root_path)) session->root = storage_read(session->root_path);
+    else
+    {
+        google_easy_t request;
+        request.m_account_context = session->account;
+        request.control_set(control);
+        session->root = folder_root_create(request);
+        storage_atomic_write(session->root_path,session->root);
+    }
+    if (session->root.empty()) throw std::runtime_error{"Root file is empty."};
+    return session;
+}
+
 auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
                               const std::shared_ptr<request_control_t>& control,
                               std::atomic_uint64_t& progress, std::atomic_uint64_t& total) -> std::string
@@ -86,7 +145,7 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
     google_easy_t request;
     request.m_account_context = session->account;
     request.control_set(control);
-    const auto marker{clear_path(session->address)};
+    const auto marker{clear_path(session->storage_id)};
     std::vector<std::string> ids;
     if (std::filesystem::exists(marker))
     {
@@ -103,6 +162,7 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
             request.clear();
             request.path_set("/drive/v3/files");
             request.query_set("pageSize", "1000");
+            if (session->oauth) request.query_set("spaces","appDataFolder");
             request.query_set("fields", "nextPageToken,files(id)");
             if (!page.empty())
                 request.query_set("pageToken", page);
@@ -153,10 +213,10 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
 auto storage_runtime_t::cleared(const std::shared_ptr<storage_session_t>& session, std::string root) -> void
 {
     std::lock_guard lock{m_mutex};
-    m_queues.erase(session->address);
+    m_queues.erase(session->storage_id);
     auto replacement{queue(session)};
     for (auto& context : m_sessions)
-        if (context->address == session->address)
+        if (context->storage_id == session->storage_id)
         {
             context->queue = replacement;
             context->clearing = false;

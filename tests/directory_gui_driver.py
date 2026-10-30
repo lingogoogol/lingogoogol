@@ -116,18 +116,19 @@ try:
     run('windowfocus', '--sync', window)
     time.sleep(1)
     initial = screenshot('initial')
-    # All toolbar buttons have the same 96x32 geometry. Empty paste remains
+    # Action toolbar buttons retain 96x32 geometry beside the 32px account slot.
+    # Empty paste remains
     # gray through hover/press and must not open even an informational dialog.
     for state in ('idle', 'hover', 'press'):
         if state == 'hover':
-            run('mousemove', '--window', window, 856,24)
+            run('mousemove', '--window', window, 816,24)
         elif state == 'press':
             run('mousedown','1')
         time.sleep(.25)
         image = screenshot('paste-disabled-' + state)
-        for x in (808, 809, 902, 903):
+        for x in (768, 769, 862, 863):
             assert 80 < image.getpixel((x,16))[0] < 200, 'Disabled paste border is not gray or has the wrong width.'
-        ink = [pixel for pixel in image.crop((830,12,883,36)).getdata() if max(pixel) > 80]
+        ink = [pixel for pixel in image.crop((790,12,843,36)).getdata() if max(pixel) > 80]
         assert ink and all(max(pixel) < 210 and max(pixel)-min(pixel) < 3 for pixel in ink), 'Disabled paste text changed color.'
     run('mouseup','1')
     time.sleep(.3)
@@ -189,12 +190,12 @@ try:
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
         print('PASS: production directory wheel axes, horizontal names, thin thumb drag, last-row actions and normal close')
         sys.exit(0)
-    click(1168, 24)
+    click(1128, 24)
     screenshot('create')
     type_name('declined')
     click(936, 590)
     assert len(status()) == 3, 'Cancelled creation changed Drive.'
-    click(1168, 24)
+    click(1128, 24)
     type_name('a/b')
     click(1056, 590)
     assert len(status()) == 3, 'Invalid name changed Drive.'
@@ -211,22 +212,22 @@ try:
                    for r,g,b in (image.getpixel((x,y)) for y in range(122,145))) >= 18, 'Missing light-blue action separator.'
     click(1404, 134)  # Cut records a selection; it must not mutate Drive.
     image = screenshot('paste-enabled')
-    assert image.getpixel((808,16))[0] > 240, 'Cut did not enable the standard-size paste button.'
+    assert image.getpixel((768,16))[0] > 240, 'Cut did not enable the standard-size paste button.'
     assert json.loads(status()['file']['name'])['parent'] == 'root'
     click(450, 177)  # Browse the destination folder.
     time.sleep(.6)
-    click(880, 24)  # Paste opens a confirmation for the visible folder.
+    click(840, 24)  # Paste opens a confirmation for the visible folder.
     screenshot('paste-cut')
     click(936, 584)
     assert json.loads(status()['file']['name'])['parent'] == 'root', 'Cancelled paste moved the file.'
-    click(880, 24)
+    click(840, 24)
     click(1056, 584)
     wait_for(lambda: json.loads(status()['file']['name'])['parent'] == 'destination', 'Cut/paste did not use the visible folder.')
     time.sleep(.6)
     image = screenshot('paste-empty-after-cut')
-    assert 80 < image.getpixel((808,16))[0] < 200, 'Cut paste did not disable the empty clipboard.'
+    assert 80 < image.getpixel((768,16))[0] < 200, 'Cut paste did not disable the empty clipboard.'
     click(1454, 134)  # Copy the file to the same visible folder.
-    click(880, 24)
+    click(840, 24)
     screenshot('paste-copy')
     click(1056, 584)
     wait_for(lambda: len(json.loads(status()['destination']['description'])) == 2, 'Copy/paste did not retain both same-named files.')

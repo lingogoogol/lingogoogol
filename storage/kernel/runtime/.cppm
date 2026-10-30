@@ -23,8 +23,13 @@ export {
             stop();
         }
         auto open(const storage_settings_t& settings, const std::shared_ptr<request_control_t>& control,
-                  std::string expected_email = {}, std::string saved_root = {})
+                  std::string expected_email = {}, std::string saved_root = {},
+                  std::string expected_storage = {})
             -> std::shared_ptr<storage_session_t>;
+        auto open_oauth(const storage_settings_t& settings,
+                        std::shared_ptr<google_oauth_user_t> user,
+                        const std::shared_ptr<request_control_t>& control,
+                        std::string saved_root = {}) -> std::shared_ptr<storage_session_t>;
         auto clear(const std::shared_ptr<storage_session_t>& session,
                    const std::shared_ptr<request_control_t>& control, std::atomic_uint64_t& progress,
                    std::atomic_uint64_t& total) -> std::string;

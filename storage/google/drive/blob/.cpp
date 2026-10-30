@@ -8,6 +8,22 @@ import std;
 
 import storage.http;
 import storage.google.batch;
+import storage.google.account;
+
+namespace
+{
+    auto upload_metadata(const google_easy_t& easy, const std::string& name,
+                         const std::string& content) -> nlohmann::json
+    {
+        auto account = easy.m_account_context ? std::static_pointer_cast<google_account_t>(easy.m_account_context) :
+                                               google_account_t::default_shared();
+        auto data = nlohmann::json{{"name",name},{"description",content}};
+        // Each metadata blob, including the logical root and reserve blobs,
+        // must be created in the hidden space when using drive.appdata.
+        if (account->appdata()) data["parents"] = {"appDataFolder"};
+        return data;
+    }
+}
 
 auto blob_upload(google_easy_t& easy, std::string name, std::string content) -> void
 {
@@ -17,12 +33,7 @@ auto blob_upload(google_easy_t& easy, std::string name, std::string content) -> 
 	easy.header_set("Content-Type", "application/json; charset=UTF-8");
     easy.method_post
     (
-        nlohmann::json
-        {
-            { "name", name },
-            { "description", content }
-        }
-        .dump()
+        upload_metadata(easy,name,content).dump()
     );
     return;
 }
@@ -36,12 +47,7 @@ auto blob_upload(google_batch_t& batch, std::string name, std::string content) -
     request.header_set("Content-Type", "application/json; charset=UTF-8");
     request.body_set
     (
-        nlohmann::json
-        {
-            { "name", name },
-            { "description", content }
-        }
-        .dump()
+        upload_metadata(batch,name,content).dump()
     );
     return;
 }
@@ -54,12 +60,7 @@ auto blob_upload_run(google_easy_t& easy, std::string name, std::string content)
 	easy.header_set("Content-Type", "application/json; charset=UTF-8");
     easy.method_post
     (
-        nlohmann::json
-        {
-            { "name", name },
-            { "description", content }
-        }
-        .dump()
+        upload_metadata(easy,name,content).dump()
     );
     easy.run();
 	std::string response{ easy.payload() };

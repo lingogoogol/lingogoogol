@@ -15,6 +15,7 @@ target_link_libraries(
     PRIVATE
         common
         external.curl
+        storage.google.oauth
         storage.encode
         storage.crypto
         storage.http.curl

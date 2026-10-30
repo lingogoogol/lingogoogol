@@ -8,6 +8,7 @@ target_sources(
             .cppm
 )
 
+add_subdirectory(oauth)
 add_subdirectory(account)
 add_subdirectory(easy)
 add_subdirectory(batch)
@@ -18,6 +19,7 @@ target_link_libraries(
     PRIVATE
         common
     PUBLIC
+        storage.google.oauth
         storage.google.account
         storage.google.easy
         storage.google.batch

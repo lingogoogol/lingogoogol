@@ -1,6 +1,7 @@
 export module storage.google.account;
 
 import std;
+import storage.google.oauth;
 
 export
 {
@@ -22,6 +23,10 @@ export
         // Configure before starting requests; replacing an account stops its old worker.
         auto init(std::string address, std::string_view key) -> void;
 
+        auto init_oauth(std::shared_ptr<google_oauth_user_t> user) -> void;
+        // Re-login for the same identity also updates existing queue requests.
+        auto update_oauth(std::shared_ptr<google_oauth_user_t> user) -> void;
+
         // Poll cached credentials. Starts a shared background refresh when needed;
         // nullopt means callers should keep pumping their event/transfer loop.
         auto try_token() -> std::optional<std::string>;
@@ -33,5 +38,6 @@ export
         auto stop() -> void;
         auto retry() -> void;
         auto address() const -> std::string;
+        auto appdata() const -> bool;
     };
 }

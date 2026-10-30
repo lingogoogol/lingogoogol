@@ -654,6 +654,18 @@ namespace lgo {
         m_restore_textures = std::move(restore);
     }
 
+    auto engine_t::texture_observer_set(const void* owner, std::function<void()> release,
+                                        std::function<void()> restore) -> void
+    {
+        auto guard{gpu_lock()};
+        m_texture_observers[owner] = {std::move(release),std::move(restore)};
+    }
+    auto engine_t::texture_observer_remove(const void* owner) -> void
+    {
+        auto guard{gpu_lock()};
+        m_texture_observers.erase(owner);
+    }
+
     auto engine_t::recover_device() -> void
     {
         auto gpu_guard{ gpu_lock() };
@@ -693,6 +705,7 @@ namespace lgo {
                 rect->release_gpu();
             }
             if (m_release_textures) m_release_textures();
+            for (auto& [owner, callbacks] : m_texture_observers) callbacks.first();
             rect_primitive_t::uninit();
             release_device();
             if (m_surface_lost)
@@ -705,6 +718,7 @@ namespace lgo {
             m_device_lost = false;
             rect_primitive_t::init(this);
             if (m_restore_textures) m_restore_textures();
+            for (auto& [owner, callbacks] : m_texture_observers) callbacks.second();
             for (auto* rect : m_rect_primitive)
             {
                 rect->create_gpu();

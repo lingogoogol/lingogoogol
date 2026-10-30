@@ -1,12 +1,14 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "profile.hpp"
 
 module storage.kernel.GUI;
 
 import std;
 
 import external.curl;
+import external.Vulkan;
 import external.GLFW;
 
 import lgo.dev;
@@ -21,6 +23,117 @@ import storage.kernel.load;
 
 namespace
 {
+    class profile_image_t : public lgo::rect_t
+    {
+        lgo::engine_t* m_engine;
+        lgo::pixmap_t m_pixels{128,32}; // 32 RGBA pixels per row.
+        lgo::image_t m_image;
+        lgo::image_view_t m_view;
+        auto release() -> void { m_view = {}; m_image.clear(); }
+        auto upload() -> void
+        {
+            auto guard{m_engine->gpu_lock()};
+            auto commands{m_engine->command_buffer_create("profile.upload")};
+            lgo::buffer_t staging{{.name="profile.staging",
+                .device_physical=&m_engine->device_physical_get(),.device=&m_engine->device_get(),
+                .pixmap=&m_pixels}};
+            // Photos are encoded as sRGB. Decode on sampling only when the
+            // framebuffer will encode linear output back to sRGB; UNORM
+            // surface fallbacks instead preserve the original encoded bytes.
+            const auto surface = m_engine->format_get();
+            const auto format = surface==vk::Format::eB8G8R8A8Srgb || surface==vk::Format::eR8G8B8A8Srgb ?
+                vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+            m_image.init({.name="profile",.device_physical=&m_engine->device_physical_get(),
+                .device=&m_engine->device_get(),.command_buffer=&commands,.buffer=&staging,
+                .width=32,.height=32,.format=format,
+                .usage=vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled,
+                .property=vk::MemoryPropertyFlagBits::eDeviceLocal});
+            m_view.init({.name="profile",.device=&m_engine->device_get(),
+                .image=&m_image.interface_get(),.format=format,
+                .aspect=vk::ImageAspectFlagBits::eColor});
+            commands.end();
+            const vk::SubmitInfo info{.commandBufferCount=1,.pCommandBuffers=&*commands};
+            m_engine->command_queue_get().submit(info,nullptr);
+            m_engine->command_queue_get().waitIdle();
+        }
+        auto fallback() -> void
+        {
+            for (std::int64_t y{};y<32;++y) for (std::int64_t x{};x<32;++x)
+            {
+                const bool head = (x-16)*(x-16)+(y-11)*(y-11)<30;
+                const bool body = y>19 && (x-16)*(x-16)+(y-31)*(y-31)<120;
+                for (int c{};c<3;++c) m_pixels[x*4+c,y]=std::byte{static_cast<unsigned char>(head||body?210:65)};
+                m_pixels[x*4+3,y]=std::byte{255};
+            }
+        }
+        auto decode(const std::string& data) -> bool
+        {
+            if (data.empty() || data.size()>1024*1024) return false;
+            const auto initialized = CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+            struct uninit_t { bool enabled; ~uninit_t(){if(enabled)CoUninitialize();} } uninit{SUCCEEDED(initialized)};
+            IWICImagingFactory* factory_ptr{};
+            if (FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,
+                IID_IWICImagingFactory,reinterpret_cast<void**>(&factory_ptr)))) return false;
+            std::unique_ptr<IWICImagingFactory,storage_com_release_t<IWICImagingFactory>> factory{factory_ptr};
+            IWICStream* stream_ptr{};
+            if (FAILED(factory->CreateStream(&stream_ptr))) return false;
+            std::unique_ptr<IWICStream,storage_com_release_t<IWICStream>> stream{stream_ptr};
+            if (FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(const_cast<char*>(data.data())),
+                static_cast<DWORD>(data.size())))) return false;
+            IWICBitmapDecoder* decoder_ptr{};
+            if (FAILED(factory->CreateDecoderFromStream(stream.get(),nullptr,WICDecodeMetadataCacheOnDemand,&decoder_ptr))) return false;
+            std::unique_ptr<IWICBitmapDecoder,storage_com_release_t<IWICBitmapDecoder>> decoder{decoder_ptr};
+            IWICBitmapFrameDecode* frame_ptr{};
+            if (FAILED(decoder->GetFrame(0,&frame_ptr))) return false;
+            std::unique_ptr<IWICBitmapFrameDecode,storage_com_release_t<IWICBitmapFrameDecode>> frame{frame_ptr};
+            UINT width{},height{};
+            if (FAILED(frame->GetSize(&width,&height)) || !width || !height || width>4096 || height>4096) return false;
+            IWICBitmapScaler* scaler_ptr{};
+            if (FAILED(factory->CreateBitmapScaler(&scaler_ptr))) return false;
+            std::unique_ptr<IWICBitmapScaler,storage_com_release_t<IWICBitmapScaler>> scaler{scaler_ptr};
+            if (FAILED(scaler->Initialize(frame.get(),32,32,WICBitmapInterpolationModeFant))) return false;
+            IWICFormatConverter* converter_ptr{};
+            if (FAILED(factory->CreateFormatConverter(&converter_ptr))) return false;
+            std::unique_ptr<IWICFormatConverter,storage_com_release_t<IWICFormatConverter>> converter{converter_ptr};
+            if (FAILED(converter->Initialize(scaler.get(),GUID_WICPixelFormat32bppRGBA,
+                WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))) return false;
+            return SUCCEEDED(converter->CopyPixels(nullptr,128,4096,reinterpret_cast<BYTE*>(&m_pixels[0])));
+        }
+      public:
+        profile_image_t(lgo::engine_t* engine,lgo::depth_tracker_t* tracker,lgo::depth_range_t depth,
+                        lgo::pos_2D pos,lgo::size_2D size)
+            :lgo::rect_t{engine,tracker,depth,pos,size,&m_view},m_engine{engine}
+        {
+            fallback();
+            if (engine->gpu_available())
+                try { upload(); }
+                catch (const vk::DeviceLostError&) { engine->device_lost(); }
+            engine->texture_observer_set(this,[this]{release();},[this]{upload();});
+        }
+        ~profile_image_t() override
+        {
+            hide();
+            m_engine->texture_observer_remove(this);
+            auto guard{m_engine->gpu_lock()};
+            try { m_engine->flush(); } catch (...) { }
+            release();
+        }
+        auto picture(const std::string& data) -> void
+        {
+            // Hide the primitive before replacing the image it references.
+            const bool visible = status()==shown;
+            hide();
+            auto guard{m_engine->gpu_lock()};
+            m_engine->flush();
+            if (!decode(data)) fallback();
+            release();
+            if (m_engine->gpu_available())
+                try { upload(); }
+                catch (const vk::DeviceLostError&) { m_engine->device_lost(); }
+            if (visible) show();
+        }
+    };
+
     auto file_size_text(std::uint64_t size) -> std::string
     {
         constexpr std::array<std::string_view,4> units{"B","kB","MB","GB"};
@@ -158,6 +271,9 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             persistent->m_directory_status->set_text("目錄更新失敗");
         entry = persistent->m_listings.erase(entry);
     }
+    for (const auto& button : persistent->m_account_buttons)
+        button->set_enabled(load_state->m_session && !persistent->m_switching);
+    if (persistent->m_login_button) persistent->m_login_button->set_enabled(!persistent->m_switching);
     if (persistent->m_paste_button)
         persistent->m_paste_button->set_enabled(persistent->m_clipboard &&
             persistent->m_clipboard->session == load_state->m_session &&
@@ -211,11 +327,11 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
 
     if (load_state->m_session)
         blob_queue = load_state->m_session->queue.get();
-    blob_queue->control()->retry_limit = load_state->m_settings.network_retries;
+    if (blob_queue) blob_queue->control()->retry_limit = load_state->m_settings.network_retries;
     std::string queue_error;
     try
     {
-        blob_queue->check_error();
+        if (blob_queue) blob_queue->check_error();
     }
     catch (const std::exception& error)
     {
@@ -232,9 +348,9 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     }
 
     persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " +
-                                                  std::to_string(blob_queue->cycle_rate()));
+                                                  std::to_string(blob_queue ? blob_queue->cycle_rate() : 0));
     persistent->m_blob_queue_count->set_text(queue_error.empty()
-                                                 ? "blob_queue_count: " + std::to_string(blob_queue->count())
+                                                 ? "blob_queue_count: " + std::to_string(blob_queue ? blob_queue->count() : 0)
                                                  : "預備佇列失敗：" + queue_error);
     persistent->show_diagnostics(glfwGetKey(engine->window_get(), GLFW_KEY_F3));
     for (auto& load_easy_status : load_easy_status_map)
@@ -295,6 +411,7 @@ auto folder_create_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
                             load_state_t* state, std::string* pos) -> void
 {
     const auto session{state->m_session};
+    if (!session) return;
     const auto source{*pos};
     persistent->m_dialog_queue.push_back([=]
     {
@@ -431,7 +548,7 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     if (!journal)
         journal = task_journal_t::create(nlohmann::json{{"kind", kind}, {"path", name}, {"pos", source},
             {"entity", entity}, {"destination", destination}, {"account_path", session->account_path},
-            {"account_email", session->address}, {"root_path", session->root_path}, {"root", session->root}});
+            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_path", session->root_path}, {"root", session->root}});
     auto task{std::make_shared<directory_task_t>()};
     task->m_session = session; task->m_journal = journal; task->m_type = "directory";
     task->m_kind = kind; task->m_name = name; task->m_source = source;
@@ -472,7 +589,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                         {"path", path},
                                                         {"pos", pos},
                                                         {"account_path", session->account_path},
-                                                        {"account_email", session->address},
+                                                        {"account_email", session->address}, {"account_namespace", session->storage_id},
                                                         {"root_path", session->root_path},
                                                         {"root", session->root}});
     if (upload)
@@ -587,11 +704,13 @@ auto restore_tasks(load_state_t* state,
 
 auto file_upload_callback(load_state_t* state, blob_queue_t*, std::string pos) -> void
 {
+    if (!state->m_session) return;
     for (auto& file : dialog_file(false))
         begin_task(state, state->m_session, "upload-file", file, pos);
 }
 auto folder_upload_callback(load_state_t* state, blob_queue_t*, std::string pos) -> void
 {
+    if (!state->m_session) return;
     for (auto& folder : dialog_file(true))
         begin_task(state, state->m_session, "upload-folder", folder, pos);
 }
@@ -718,7 +837,13 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
     for (auto& pending : persistent->m_listings)
         pending.control->cancel();
     auto session{load_state->m_session};
-    if (session && session->clearing)
+    if (!session)
+    {
+        persistent->m_reset_view();
+        persistent->m_directory_status->set_text("請先登入");
+        return;
+    }
+    if (session->clearing)
     {
         auto contents{std::static_pointer_cast<lgo::divy_flex_soft_t>(viewer_div->content())};
         contents->clear_state();
@@ -861,6 +986,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
           std::shared_ptr<lgo::divy_soft_t>* progress_column, load_state_t* load_state,
           curl_multi_worker_t* multi, blob_queue_t* blob_queue, std::string* pos) -> void
 {
+    persistent->m_account_buttons.clear();
     state->clear_state();
     engine->cursor_highlight_set(true);
     auto main_div{state->add_object_shared<lgo::divy_hard_t>(
@@ -1118,10 +1244,12 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         persistent->m_dialog_queue.push_back(
             [=]
             {
+                const bool appdata = session->account->appdata();
                 persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
-                    engine, state->get_depth_tracker(), "清除全部 Drive 檔案",
+                    engine, state->get_depth_tracker(), appdata ? "清除應用程式資料" : "清除全部 Drive 檔案",
                     std::vector<std::string>{"帳戶：" + session->address,
-                                             "將永久刪除此帳戶的全部 Drive 檔案，並取消此帳戶的傳輸。",
+                        appdata ? "將永久刪除此應用程式的全部雲端資料，並取消此資料空間的傳輸。" :
+                                  "將永久刪除此帳戶的全部 Drive 檔案，並取消此帳戶的傳輸。",
                                              "此操作無法復原。請輸入「清除」以確認。"},
                     std::vector<std::pair<std::string, std::string>>{{"確認文字", ""}}, "清除全部");
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
@@ -1152,7 +1280,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     persistent->m_paste_button = menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth, [=] { paste_dialog(engine, persistent, load_state, *pos); }, "貼上");
     persistent->m_paste_button->set_enabled(false);
-    menu_right->add_object<lgo::button_classic_std_t>(
+    persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth,
         [=]
         {
@@ -1163,20 +1291,42 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             }
             persistent->m_refresh();
         },
-        "重新整理");
+        "重新整理"));
     menu_right->add_object<lgo::button_classic_std_t>(storage_content_depth, load_state->m_settings_page,
                                                       "設定");
-    menu_right->add_object<lgo::button_classic_std_t>(
-        storage_content_depth, std::bind(&folder_create_callback, engine, persistent, load_state, pos), "新增資料夾");
-    menu_right->add_object<lgo::button_classic_std_t>(
+    persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
+        storage_content_depth, std::bind(&folder_create_callback, engine, persistent, load_state, pos), "新增資料夾"));
+    persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth, [load_state, blob_queue, pos]
-        { folder_upload_callback(load_state, blob_queue, *pos); }, "上傳資料夾");
-    menu_right->add_object<lgo::button_classic_std_t>(
+        { folder_upload_callback(load_state, blob_queue, *pos); }, "上傳資料夾"));
+    persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth,
-        [load_state, blob_queue, pos] { file_upload_callback(load_state, blob_queue, *pos); }, "上傳檔案");
-    menu_right->add_object<lgo::button_classic_std_t>(
+        [load_state, blob_queue, pos] { file_upload_callback(load_state, blob_queue, *pos); }, "上傳檔案"));
+    persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth,
-        std::bind(&delete_all_callback, center_div, *progress_column, load_state), "清除");
+        std::bind(&delete_all_callback, center_div, *progress_column, load_state), "清除"));
+    auto identity = menu_right->add_object_shared<lgo::divx_soft_t>(storage_content_depth,
+        lgo::size_2D{32,32},lgo::size_1D{0},
+        lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
+    persistent->m_login_button = identity->add_object_ghost_shared<lgo::button_text_t<lgo::text_line_std_t>>(
+        storage_content_depth,[persistent] { if(persistent->m_login) persistent->m_login(); },
+        "登入",lgo::std_white,lgo::size_1D{32});
+    persistent->m_login_button->set_size({32,32});
+    auto portrait = identity->add_object_ghost_shared<profile_image_t>(storage_content_depth,lgo::size_2D{32,32});
+    persistent->m_profile = [portrait=std::weak_ptr{portrait},login=std::weak_ptr{persistent->m_login_button}]
+        (bool signed_in,const std::string& image)
+    {
+        if (auto picture = portrait.lock())
+        {
+            if (signed_in) { picture->picture(image); picture->show(); }
+            else picture->hide();
+        }
+        if (auto button = login.lock())
+        {
+            if (signed_in) button->hide(); else button->show();
+        }
+    };
+    persistent->m_profile(load_state->m_session && load_state->m_session->oauth,{});
     // Weak references keep the engine callback from retaining an obsolete UI after clear_state().
     engine->callback_window_resize_set(
         [main = std::weak_ptr{main_div}, left = std::weak_ptr{menu_left}, right = std::weak_ptr{menu_right},
@@ -1213,7 +1363,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, menu_right->get_size().y});
             // Keep all seven standard-size buttons visible at the minimum width.
             persistent->m_directory_status->set_size({std::clamp<std::int64_t>(
-                menu_right->get_size().x - 7 * (lgo::button_classic_std_impl_t::size.x + lgo::std_margin.x),
+                menu_right->get_size().x - 40 - 7 * (lgo::button_classic_std_impl_t::size.x + lgo::std_margin.x),
                 0, 96), persistent->m_directory_status->get_size().y});
             header_line->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, header_line->get_size().y});

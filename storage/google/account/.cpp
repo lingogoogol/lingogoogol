@@ -9,6 +9,7 @@ import external.curl;
 import storage.encode;
 import storage.crypto;
 import storage.http.curl;
+import storage.google.oauth;
 
 namespace
 {
@@ -106,6 +107,9 @@ struct google_account_t::implementation_t
     bool refreshing{};
     bool stopped{};
     std::exception_ptr error;
+    std::shared_ptr<google_oauth_user_t> oauth;
+    std::shared_ptr<request_control_t> oauth_control{std::make_shared<request_control_t>()};
+    std::future<oauth_tokens_t> oauth_job;
     // Last: destroy the worker (and its socket callbacks) before account state.
     std::unique_ptr<curl_multi_worker_t> worker;
 };
@@ -153,10 +157,71 @@ auto google_account_t::init(std::string address, std::string_view key) -> void
     m_impl = std::move(state);
 }
 
+auto google_account_t::init_oauth(std::shared_ptr<google_oauth_user_t> user) -> void
+{
+    auto state{std::make_unique<implementation_t>()};
+    state->address = user->address();
+    const auto tokens = user->tokens();
+    state->token = tokens.access;
+    state->expires_at = std::chrono::steady_clock::now() + std::chrono::seconds{
+        std::max<std::int64_t>(0,tokens.expires-std::time(nullptr)-5)};
+    state->refresh_at = state->expires_at-std::chrono::seconds{60};
+    state->oauth = std::move(user);
+    m_impl = std::move(state);
+}
+
+auto google_account_t::update_oauth(std::shared_ptr<google_oauth_user_t> user) -> void
+{
+    std::future<oauth_tokens_t> previous;
+    std::shared_ptr<request_control_t> control;
+    {
+        std::lock_guard lock{m_impl->mutex};
+        if (!m_impl->oauth || user->storage_id()!=m_impl->oauth->storage_id() || m_impl->stopped)
+            throw std::runtime_error{"Cannot replace a different or stopped OAuth account."};
+        if (m_impl->oauth->credential_id()==user->credential_id()) return;
+        previous = std::move(m_impl->oauth_job);
+        control = std::move(m_impl->oauth_control);
+        m_impl->oauth_control = std::make_shared<request_control_t>();
+        m_impl->oauth = std::move(user);
+        const auto tokens = m_impl->oauth->tokens();
+        m_impl->token = tokens.access;
+        m_impl->expires_at = std::chrono::steady_clock::now()+std::chrono::seconds{
+            std::max<std::int64_t>(0,tokens.expires-std::time(nullptr)-5)};
+        m_impl->refresh_at = m_impl->expires_at-std::chrono::seconds{60};
+        m_impl->error = {};
+    }
+    // Join outside the account lock so GUI requests can use the new token.
+    control->cancel();
+    if (previous.valid()) previous.wait();
+}
+
 auto google_account_t::try_token() -> std::optional<std::string>
 {
     std::unique_lock lock{ m_impl->mutex };
     if (m_impl->stopped) throw std::runtime_error{ "OAuth token worker stopped." };
+    if (m_impl->oauth)
+    {
+        if (m_impl->oauth_job.valid() &&
+            m_impl->oauth_job.wait_for(std::chrono::seconds{0}) == std::future_status::ready)
+        {
+            try
+            {
+                const auto tokens = m_impl->oauth_job.get();
+                m_impl->token = tokens.access;
+                m_impl->expires_at = std::chrono::steady_clock::now()+std::chrono::seconds{
+                    std::max<std::int64_t>(0,tokens.expires-std::time(nullptr)-5)};
+                m_impl->refresh_at = m_impl->expires_at-std::chrono::seconds{60};
+            }
+            catch (...) { m_impl->error = std::current_exception(); }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const bool usable = !m_impl->token.empty() && now<m_impl->expires_at;
+        if (!usable && m_impl->error) std::rethrow_exception(m_impl->error);
+        if (now>=m_impl->refresh_at && !m_impl->oauth_job.valid() && !m_impl->error)
+            m_impl->oauth_job = std::async(std::launch::async,
+                [user=m_impl->oauth,control=m_impl->oauth_control] { return user->refresh(control); });
+        return usable ? std::optional{m_impl->token} : std::nullopt;
+    }
     if (m_impl->refreshing)
     {
         try
@@ -218,13 +283,17 @@ auto google_account_t::reject_token(std::string_view rejected) -> void
 auto google_account_t::stop() -> void
 {
     std::unique_ptr<curl_multi_worker_t> worker;
+    std::future<oauth_tokens_t> oauth_job;
     {
         std::unique_lock lock{ m_impl->mutex };
+        m_impl->oauth_control->cancel();
+        oauth_job = std::move(m_impl->oauth_job);
         m_impl->stopped = true;
         worker = std::move(m_impl->worker);
     }
     // Never hold the account mutex across socket shutdown or thread joins.
     if (worker) worker->stop();
+    if (oauth_job.valid()) oauth_job.wait();
 }
 
 auto google_account_t::retry() -> void
@@ -246,4 +315,10 @@ auto google_account_t::address() const -> std::string
 {
     std::lock_guard lock{m_impl->mutex};
     return m_impl->address;
+}
+
+auto google_account_t::appdata() const -> bool
+{
+    std::lock_guard lock{m_impl->mutex};
+    return m_impl->oauth != nullptr;
 }

@@ -65,6 +65,7 @@ export namespace lgo
         std::chrono::steady_clock::time_point m_next_recovery{};
         std::function<void()> m_release_textures{};
         std::function<void()> m_restore_textures{};
+        std::map<const void*, std::pair<std::function<void()>, std::function<void()>>> m_texture_observers;
         bool m_tearing_supported{};
         // Shared by rendering, primitive updates, uploads and GPU recovery. Lock this
         // before a primitive's mutex and hold it through idle waits AND CPU writes.
@@ -149,6 +150,8 @@ export namespace lgo
         auto gpu_available() const noexcept -> bool;
         auto gpu_failure_reason() const noexcept -> std::string_view;
         auto texture_recovery_set(std::function<void()> release, std::function<void()> restore) -> void;
+        auto texture_observer_set(const void* owner, std::function<void()> release, std::function<void()> restore) -> void;
+        auto texture_observer_remove(const void* owner) -> void;
         auto log(std::uint32_t tab_count) const -> void;
 
         auto format_get() const -> vk::Format;

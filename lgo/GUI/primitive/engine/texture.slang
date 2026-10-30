@@ -31,12 +31,13 @@ vertex_out_t vertex_main(vertex_in_t input)
 [shader("fragment")]
 float4 fragment_main(vertex_out_t input) : SV_Target
 {
-    float alpha = texture.Sample(input.texcoord).r;
+    float4 sample = texture.Sample(input.texcoord);
+    float alpha = sample.a;
     //Discard fully transparent fragments so the surrounding empty space of a glyph cell
     //does not write to the depth buffer and occlude adjacent overhanging glyphs.
     if (alpha == 0.0)
     {
         discard;
     }
-    return float4(input.color, alpha);
+    return float4(sample.rgb * input.color, alpha);
 }
