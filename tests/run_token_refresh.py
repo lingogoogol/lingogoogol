@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test production OAuth signing/cache/retries with synthetic keys and local HTTP fixtures."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 source = Path(__file__).resolve().parents[1]
 build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
+
+modes = ('batch-headers', 'recovery', 'temporary', 'invalid',
+         'malformed', 'missing', 'lifetime', 'unavailable', 'queue-error', 'shutdown')
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
+args = parser.parse_args()
 
 
 class State:
@@ -126,6 +133,26 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1.2)  # Arrives after the replacement token has been cached.
             return self.respond(401, {})
 
+        if path.startswith('/batch') and state.mode == 'batch-headers':
+            parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
+            response = []
+            for identifier, part in parts:
+                headers, _, content = part.partition('\r\n\r\n')
+                method, target, *_ = headers.split('\r\n')[0].split()
+                name = urllib.parse.urlparse(target).path.rsplit('/', 1)[-1]
+                if method in ('POST', 'PATCH'):
+                    valid = 'Content-Type: application/json; charset=UTF-8\r\n' in headers + '\r\n'
+                    valid = valid and 'Host: www.googleapis.com\r\n' in headers + '\r\n'
+                    if not valid:
+                        state.violations.append('Missing JSON Content-Type or malformed Host in batch upload.')
+                    status, value = (200, {'id': 'fixture-created', **json.loads(content)}) if valid else (400, {})
+                response.append(f'--fixture\r\nContent-Type: application/http\r\n'
+                                f'Content-ID: response-{identifier}\r\n\r\n'
+                                f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\n\r\n'
+                                + json.dumps(value) + '\r\n')
+            return self.respond(200, (''.join(response) + '--fixture--\r\n').encode(),
+                                'multipart/mixed; boundary=fixture')
+
         if path.startswith('/batch'):
             parts = re.findall(r'Content-ID: (\d+)\r\n\r\nGET [^\r\n]*/files/([ab])\?', body)
             if not parts:
@@ -220,8 +247,7 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
         subprocess.run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:2048',
                         '-out', str(test / 'fixture.key')], check=True, capture_output=True)
         env = {**os.environ, 'WINEDEBUG': '-all'}
-        for mode in ('recovery', 'temporary', 'invalid', 'malformed', 'missing', 'lifetime',
-                     'unavailable', 'queue-error', 'shutdown'):
+        for mode in args.modes:
             server.state = State(mode)
             (test / 'test-queue').write_text('[]')
             try:

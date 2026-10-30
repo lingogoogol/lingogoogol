@@ -127,6 +127,7 @@ auto blob_update(google_batch_t& batch, std::string id, std::string payload) -> 
     http_request_t& request{ batch.request_add_handle() };
     request.method_set("PATCH");
     request.path_set("/drive/v3/files/" + id);
+    request.header_set("Content-Type", "application/json; charset=UTF-8");
     request.body_set(payload);
     return;
 }

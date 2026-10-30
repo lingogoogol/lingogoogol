@@ -83,7 +83,21 @@ auto http_request_t::to_str() const -> std::string
         }
     }
     out += " HTTP/1.1\r\n";
-    out += "Host: " + m_host + "\r\n";
+    // m_host stores an origin URL, but an HTTP Host field contains only its
+    // authority. Batch subrequests must also retain their JSON Content-Type.
+    std::string_view authority{m_host};
+    if (authority.starts_with("https://")) authority.remove_prefix(8);
+    else if (authority.starts_with("http://")) authority.remove_prefix(7);
+    authority = authority.substr(0, authority.find_first_of("/?#"));
+    out += "Host: " + std::string{authority} + "\r\n";
+    for (const auto& [name, value] : m_header)
+    {
+        auto lower{name};
+        std::ranges::transform(lower, lower.begin(), [](unsigned char c) { return std::tolower(c); });
+        // Generate framing fields once, from this request's actual body/origin.
+        if (lower != "host" && lower != "content-length")
+            out += name + ": " + value + "\r\n";
+    }
     out += "Content-Length: " + std::to_string(m_body.size()) + "\r\n";
     out += "\r\n" + m_body;
     return out;

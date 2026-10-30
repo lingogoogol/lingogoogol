@@ -234,6 +234,39 @@ auto queue_case(lgo::engine_t& engine, bool shutdown) -> void
     std::println("PASS: background reserve reports OAuth errors and credential/queue waits stop safely");
 }
 
+auto batch_headers(lgo::engine_t&) -> void
+{
+    http_request_t wire;
+    wire.method_set("PATCH");
+    wire.path_set("/drive/v3/files/test");
+    wire.host_set("https://www.googleapis.com");
+    wire.header_set("Content-Type", "application/json; charset=UTF-8");
+    wire.header_set("X-Fixture", "retained");
+    wire.body_set("{}");
+    const auto serialized = wire.to_str();
+    check(serialized.find("Host: www.googleapis.com\r\n") != std::string::npos &&
+          serialized.find("Content-Type: application/json; charset=UTF-8\r\n") != std::string::npos &&
+          serialized.find("X-Fixture: retained\r\n") != std::string::npos,
+          "Batch serialization dropped headers or used a URL as Host.");
+    google_batch_t upload;
+    upload.host_set(host);
+    upload.boundary_set("fixture");
+    upload.path_set("/drive/v3");
+    auto upload_control = std::make_shared<request_control_t>();
+    upload_control->retry_limit = 0;
+    upload.control_set(upload_control);
+    blob_upload(upload, "fixture-create", "");
+    blob_update(upload, blob_str_opt_t{.m_id="fixture-update", .m_content="fixture-payload"});
+    upload.method_post();
+    quiet(upload);
+    upload.run_try();
+    check(upload.valid(), "Strict JSON batch upload rejected missing request headers.");
+    check(upload.response_get(1).body_get().find("fixture-payload") != std::string::npos,
+          "Batch upload content was lost.");
+
+    std::println("PASS: strict JSON batch uploads, Host and custom headers");
+}
+
 int main(int argc, char** argv)
 {
     std::set_terminate([] { std::_Exit(42); });
@@ -246,7 +279,8 @@ int main(int argc, char** argv)
         lgo::init_logfile("logfile/token-refresh.txt");
         google_account_t::default_get().init("local-test@example.invalid", lgo::get_file_str("fixture.key"));
         lgo::engine_t engine{ lgo::size_2D{ 800, 600 }, "Token refresh regression" };
-        if (mode == "recovery") recovery(engine);
+        if (mode == "batch-headers") batch_headers(engine);
+        else if (mode == "recovery") recovery(engine);
         else if (mode == "shutdown" || mode == "queue-error") queue_case(engine, mode == "shutdown");
         else failure_case(engine, mode == "temporary");
         google_account_t::default_get().stop();
