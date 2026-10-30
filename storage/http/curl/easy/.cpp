@@ -39,7 +39,8 @@ auto curl_easy_t::configure_transport() -> void
     api_curl(curl_easy_setopt(m_interface, CURLOPT_SEEKDATA, static_cast<void*>(m_read.get())));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEFUNCTION, &curl_easy_t::write_callback));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_WRITEDATA, static_cast<void*>(m_write.get())));
-    api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 1L));
+    // Verbose headers expose Bearer credentials on stderr even in Release.
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_VERBOSE, 0L));
     #ifdef LGO_DEBUG_CURL
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGDATA, this));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_DEBUGFUNCTION, &debug_callback));
