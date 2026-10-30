@@ -323,6 +323,9 @@ int main(int argc, char** argv)
                 }
                 check(task->m_result == task_result_t::cancelled && task->m_confirm_button,
                       "Cancelled transfer has no acknowledgement.");
+                const auto label{task == upload ? "上傳：source.bin" : "下載：cancel-paused.bin"};
+                check(task->m_progress_text->get_text() == std::string{"已取消："} + label,
+                      "Cancelled transfer reused its preparation phase as its name.");
                 const auto fraction{task->m_progress_bar->fraction()};
                 check(fraction > 0., "Cancellation lost graphical progress.");
                 const auto remaining_y{download->m_progress_text->get_pos().y};
@@ -350,34 +353,66 @@ int main(int argc, char** argv)
                           "Acknowledging the bottom task did not move the remaining task downward.");
                 }
             }
-            // Hold a preparation future to make cancellation cleanup visible
-            // deterministically, independently of local network speed.
-            storage_atomic_write("cancelling.bin", "keep");
-            loads.m_confirm = [](std::string, auto) {};
-            begin_task(&loads, session, "download-file", "cancelling.bin", "retry-file");
-            auto cancelling{std::dynamic_pointer_cast<download_task_t>(loads.m_task_list.back())};
-            std::promise<void> cleanup_gate;
-            cancelling->m_prepared = cleanup_gate.get_future();
-            cancelling->pause(true);
-            click(cancelling->m_cancel_button, [&] { return cancelling->m_control->cancelled.load(); });
-            for (int i{}; i < 10; ++i) pump();
-            check(cancelling->m_result == task_result_t::cancelling && !cancelling->m_row_removed &&
-                  cancelling->m_progress_text->get_text().starts_with("取消中："),
-                  "Cancellation cleanup was hidden or acknowledged before it finished.");
-            click(cancelling->m_confirm_button, [&]
+            // Hold preparation futures so cleanup remains visible independently
+            // of network speed. Cover file/folder uploads and downloads alike.
+            for (const auto kind : {"upload-file", "upload-folder", "download-file", "download-folder"})
             {
-                return std::filesystem::exists("click.ack") && storage_read("click.ack") == std::to_string(step);
-            });
-            check(!cancelling->m_dismissed, "Cancelling row exposed an acknowledgement button.");
-            cleanup_gate.set_value();
-            pump();
-            check(cancelling->m_result == task_result_t::cancelled &&
-                  cancelling->m_progress_text->get_text().starts_with("已取消："),
-                  "Finished cleanup did not transition to cancelled.");
-            click(cancelling->m_confirm_button, [&] { return cancelling->m_dismissed; });
-            pump();
-            check(cancelling->m_row_removed, "Cleaned cancellation could not be acknowledged.");
-            std::println("PASS: cancelling row stays visible without acknowledgement until background cleanup completes");
+                const bool upload{std::string_view{kind}.starts_with("upload")};
+                const bool folder{std::string_view{kind}.ends_with("folder")};
+                const auto path{std::string{"cancelling-"} + kind};
+                const auto label{std::string{upload ? "上傳：" : "下載："} + path};
+                if (folder) std::filesystem::create_directory(path);
+                else storage_atomic_write(path, "keep");
+                // An unanswered overwrite confirmation leaves downloads in
+                // preparation without deleting the original destination.
+                loads.m_confirm = [](std::string, auto) {};
+                begin_task(&loads, session, kind, path, upload ? pos : "retry-file");
+                auto cancelling{loads.m_task_list.back()};
+                check(cancelling->m_progress_text->get_text() == "準備" + label,
+                      "A new transfer lost its preparation status.");
+                cancelling->pause(true);
+                std::promise<void> cleanup_gate;
+                if (auto task{std::dynamic_pointer_cast<upload_task_t>(cancelling)})
+                {
+                    const auto deadline{std::chrono::steady_clock::now() + 10s};
+                    while (task->m_prepared.wait_for(0s) != std::future_status::ready)
+                    {
+                        check(std::chrono::steady_clock::now() < deadline, "Upload preparation stalled.");
+                        pump();
+                    }
+                    task->m_prepared.get();
+                    task->m_prepared = cleanup_gate.get_future();
+                }
+                else std::dynamic_pointer_cast<download_task_t>(cancelling)->m_prepared = cleanup_gate.get_future();
+                cancelling->m_control->fail("fixture network failure");
+                pump();
+                check(cancelling->m_progress_text->get_text() == "網路失敗：" + label + "（fixture network failure）",
+                      "Network failure reused the preparation phase as the task name.");
+                click(cancelling->m_cancel_button, [&] { return cancelling->m_control->cancelled.load(); });
+                for (int i{}; i < 10; ++i) pump();
+                check(cancelling->m_result == task_result_t::cancelling && !cancelling->m_row_removed &&
+                      cancelling->m_progress_text->get_text() == "取消中：" + label,
+                      "Cancellation cleanup lost its status or kept a preparation phase.");
+                click(cancelling->m_confirm_button, [&]
+                {
+                    return std::filesystem::exists("click.ack") && storage_read("click.ack") == std::to_string(step);
+                });
+                check(!cancelling->m_dismissed, "Cancelling row exposed an acknowledgement button.");
+                cleanup_gate.set_value();
+                pump();
+                check(cancelling->m_result == task_result_t::cancelled &&
+                      cancelling->m_progress_text->get_text() == "已取消：" + label,
+                      "Finished cleanup did not retain the cancelled status and operation name.");
+                for (int i{}; i < 10; ++i) pump();
+                check(cancelling->m_progress_text->get_text() == "已取消：" + label,
+                      "A later frame replaced the terminal cancellation status.");
+                click(cancelling->m_confirm_button, [&] { return cancelling->m_dismissed; });
+                pump();
+                check(cancelling->m_row_removed, "Cleaned cancellation could not be acknowledged.");
+                check(folder ? std::filesystem::is_directory(path) : storage_read(path) == "keep",
+                      "Cancelling preparation changed the original source or destination.");
+            }
+            std::println("PASS: file/folder uploads and downloads keep operation names through failure, cancelling and cancelled; acknowledgement waits for cleanup");
             // Both successful operations retain a full bar, including empty
             // files/folders; use real clicks to acknowledge each terminal row.
             begin_task(&loads, session, "upload-file", "second.bin", pos);

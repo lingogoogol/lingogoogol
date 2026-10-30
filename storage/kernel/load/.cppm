@@ -128,6 +128,7 @@ export
         std::shared_ptr<storage_session_t> m_session;
         std::shared_ptr<request_control_t> m_control{ std::make_shared<request_control_t>() };
         std::shared_ptr<task_journal_t> m_journal;
+        // Stable operation and target name; never includes a preparation phase.
         std::string m_label;
         // GUI-thread snapshot: pause must retain the current progress/phase,
         // rather than replacing it with the original preparation label.

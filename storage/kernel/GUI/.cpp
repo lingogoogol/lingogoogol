@@ -443,10 +443,14 @@ auto folder_create_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
 
 namespace
 {
-    auto task_row(load_state_t* state, const std::shared_ptr<load_task_t>& task, std::string text) -> void
+    auto task_row(load_state_t* state, const std::shared_ptr<load_task_t>& task,
+                  std::string label, bool preparing = false) -> void
     {
         task->m_state = state;
-        task->m_label = text;
+        // Results and network failures identify the operation, independently
+        // of transient preparation, resume and pause messages shown in the row.
+        task->m_label = label;
+        auto text{preparing ? "準備" + label : std::move(label)};
         if (task->m_journal)
         {
             const auto saved = task->m_journal->data();
@@ -606,7 +610,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
         task->m_type = "upload";
         task->m_name = path;
         task->m_pos.m_main_id = pos;
-        task_row(state, task, "準備上傳：" + path);
+        task_row(state, task, "上傳：" + path, true);
         auto* queue{session ? session->queue.get() : nullptr};
         task->m_retry_prepare = [task = task.get(), queue, folder, path]
         {
@@ -637,7 +641,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
         task->m_type = "download";
         task->m_name = path;
         task->m_pos = pos;
-        task_row(state, task, "準備下載：" + path);
+        task_row(state, task, "下載：" + path, true);
         auto launch = [task, folder, path, pos](bool accepted)
         {
             if (task->m_control->cancelled) return;
