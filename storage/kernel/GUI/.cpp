@@ -1359,8 +1359,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         auto panel = menu->add_object_shared<lgo::divy_soft_t>(content,lgo::pos_2D{},
             lgo::size_2D{width,0},lgo::size_1D{8},
             lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top});
-        auto background = panel->add_object_ghost_shared<lgo::rect_t>(
-            lgo::depth_range_t{.158f,.158f},lgo::size_2D{width,0},lgo::std_black);
+        auto background = menu->add_object_shared<lgo::rect_border_t>(
+            lgo::pos_2D{},lgo::size_2D{width,64},lgo::std_black,
+            lgo::std_line_size,lgo::std_dark_gray,lgo::depth_range_t{.1575f,.1585f});
         auto block = panel->add_object_ghost_shared<lgo::click_area_t>(
             lgo::depth_range_t{.157f,.157f},lgo::size_2D{width,0},
             []{},[](auto){},[](auto){},[](auto){},[]{});
