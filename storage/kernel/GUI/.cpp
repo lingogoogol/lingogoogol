@@ -1514,6 +1514,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 { if (auto row{dynamic_cast<lgo::divy_flex_soft_t*>(&child)}) row->fit_children_sideways(); });
 
             center_div->set_size(size);
+            // Win32's modal sizing loop repaints without returning to the app's
+            // message_loop(). Move the popup in the same resize as its toolbar.
+            if (persistent->m_account_menu) persistent->m_layout_accounts();
         });
     // Below this size the fixed-width desktop controls and status column would overlap.
     glfwSetWindowSizeLimits(engine->window_get(), 800, 600, GLFW_DONT_CARE, GLFW_DONT_CARE);

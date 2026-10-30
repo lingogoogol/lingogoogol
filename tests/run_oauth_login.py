@@ -324,6 +324,26 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 std::filesystem::remove("resize-wide");
                 glfwSetWindowSize(engine.window_get(),1536,1024);
             }
+            if (std::filesystem::exists("resize-menu-sequence"))
+            {
+                std::filesystem::remove("resize-menu-sequence");
+                // Win32's interactive sizing loop renders without returning to
+                // the app's message_loop. Exercise that path between sizes.
+                for (const auto size : {lgo::size_2D{1280,900},lgo::size_2D{960,720},
+                    lgo::size_2D{800,600},lgo::size_2D{1100,800},lgo::size_2D{1536,1024}})
+                {
+                    glfwSetWindowSize(engine.window_get(),static_cast<int>(size.x),static_cast<int>(size.y));
+                    if (engine.message_loop()) throw std::runtime_error{"GUI closed during resize."};
+                    const auto panel = persistent.m_account_menu->get_object_shared<lgo::divy_soft_t>(1);
+                    const auto anchor = persistent.m_login_button->get_pos();
+                    const auto at = panel->get_pos();
+                    const auto extent = panel->get_size();
+                    if (engine.get_window_size()!=size || at.x+extent.x!=anchor.x+32 || at.y!=anchor.y+40 ||
+                        at.y+extent.y>size.y-8)
+                        throw std::runtime_error{"Dropdown did not follow the profile during resize."};
+                }
+                storage_atomic_write("resize-menu-sequence.done","ok");
+            }
             if (std::filesystem::exists("lose-device"))
             {
                 std::filesystem::remove("lose-device");
@@ -452,6 +472,8 @@ try:
     click_at={'x':menu['actions'][0]['x']-150,'y':menu['actions'][0]['y']}
     command('mousemove','--window',window,click_at['x'],click_at['y'],'click','--repeat','8','--delay','50','5')
     wait(lambda:snapshot()['actions'][-1]['y']<last_y-100,'Account list did not scroll.')
+    Path('resize-menu-sequence').touch()
+    wait(lambda:Path('resize-menu-sequence.done').exists(),'Dropdown did not follow continuous resizing.')
     Path('resize-small').touch()
     wait(lambda:snapshot()['window_w']==800 and all(0<a['x']<800 and 0<a['y']<600
          for a in snapshot()['footer']),'Open dropdown did not resize within the window.')
