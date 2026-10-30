@@ -637,11 +637,16 @@ auto curl_easy_t::failed(std::string reason) -> void
     if (m_control && !auth)
     {
         const int limit{m_control->retry_limit};
-        if (limit >= 0 && m_failures++ >= static_cast<unsigned>(limit))
+        if (limit >= 0 && m_failures >= static_cast<unsigned>(limit))
             m_control->fail(std::move(reason));
         else
-            m_retry_at =
-                std::chrono::steady_clock::now() + std::chrono::seconds{std::min(30u, m_failures + 1)};
+        {
+            // Unlimited retries still need backoff. Incrementing only inside
+            // the finite-limit condition kept the default (-1) at one second.
+            if (m_failures < std::numeric_limits<unsigned>::max()) ++m_failures;
+            m_retry_at = std::chrono::steady_clock::now() +
+                std::chrono::seconds{std::min(29u, m_failures) + 1};
+        }
     }
 }
 auto curl_easy_t::replay() -> bool

@@ -267,6 +267,29 @@ auto batch_headers(lgo::engine_t&) -> void
     std::println("PASS: strict JSON batch uploads, Host and custom headers");
 }
 
+auto retry_backoff(lgo::engine_t& engine) -> void
+{
+    curl_easy_t retry;
+    auto unlimited = std::make_shared<request_control_t>();
+    unlimited->retry_limit = -1;
+    retry.control_set(unlimited);
+    for (int i{}; i<3; ++i) retry.failed("fixture retry");
+    const auto wait = std::chrono::steady_clock::now() + 2300ms;
+    while (std::chrono::steady_clock::now() < wait) pump(engine);
+    check(!retry.runnable() && !unlimited->paused, "Unlimited retries failed to increase backoff.");
+    unlimited->retry();
+    check(retry.runnable(), "Manual retry did not reset backoff.");
+    auto finite = std::make_shared<request_control_t>();
+    finite->retry_limit = 1;
+    curl_easy_t bounded;
+    bounded.control_set(finite);
+    bounded.failed("first");
+    check(!finite->paused, "Retry budget was exhausted too early.");
+    bounded.failed("second");
+    check(finite->paused && finite->reason()=="second", "Finite retry budget changed.");
+    std::println("PASS: unlimited retry backoff, manual reset and finite retry budget");
+}
+
 int main(int argc, char** argv)
 {
     std::set_terminate([] { std::_Exit(42); });
@@ -280,6 +303,7 @@ int main(int argc, char** argv)
         google_account_t::default_get().init("local-test@example.invalid", lgo::get_file_str("fixture.key"));
         lgo::engine_t engine{ lgo::size_2D{ 800, 600 }, "Token refresh regression" };
         if (mode == "batch-headers") batch_headers(engine);
+        else if (mode == "retry-backoff") retry_backoff(engine);
         else if (mode == "recovery") recovery(engine);
         else if (mode == "shutdown" || mode == "queue-error") queue_case(engine, mode == "shutdown");
         else failure_case(engine, mode == "temporary");

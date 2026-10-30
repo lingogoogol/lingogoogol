@@ -18,7 +18,7 @@ source = Path(__file__).resolve().parents[1]
 build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
-modes = ('batch-headers', 'recovery', 'temporary', 'invalid',
+modes = ('batch-headers', 'retry-backoff', 'recovery', 'temporary', 'invalid',
          'malformed', 'missing', 'lifetime', 'unavailable', 'queue-error', 'shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
@@ -260,7 +260,7 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
                     raise RuntimeError(f'{mode} failed with exit {result.returncode}.')
                 report = server.state.report()
                 assert not report['violations'], report['violations']
-                expected = 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable') else 1
+                expected = 0 if mode == 'retry-backoff' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable') else 1
                 assert report['tokens'] == expected, (mode, report['tokens'], expected)
                 log = (test / 'logfile/token-refresh.txt').read_text(errors='replace')
                 assert 'finished_all!' in log and 'uncaught exception:' not in log
