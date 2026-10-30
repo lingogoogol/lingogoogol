@@ -227,6 +227,18 @@ auto app() -> void
         }
         return candidate;
     };
+    persistent.m_service_accounts = [] { return storage_service_accounts(); };
+    persistent.m_select_service_account = [&](const service_account_file_t& account)
+    {
+        try
+        {
+            selected_email = account.address;
+            auto candidate = settings;
+            candidate.account_path = account.account_path;
+            apply_settings(std::move(candidate),false);
+        }
+        catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入服務帳戶"); }
+    };
     persistent.m_saved_accounts = [&]
     {
         const auto candidate = oauth_settings();
@@ -300,7 +312,8 @@ auto app() -> void
         profile_control->cancel();
         profile_control = std::make_shared<request_control_t>();
         const auto target = load_state.m_session;
-        persistent.m_profile(target && target->oauth,{});
+        persistent.m_profile(!target ? account_profile_t::signed_out :
+            target->oauth ? account_profile_t::google_user : account_profile_t::service_account,{});
         if (target && target->oauth)
             profile_jobs.push_back({target,std::async(std::launch::async,[user=target->oauth,control=profile_control]
                 { return user->download_picture(control); })});
@@ -493,7 +506,7 @@ auto app() -> void
         {
             if (it->future.wait_for(0s)!=std::future_status::ready) { ++it; continue; }
             auto image = it->future.get();
-            if (it->session==load_state.m_session) persistent.m_profile(true,image);
+            if (it->session==load_state.m_session) persistent.m_profile(account_profile_t::google_user,image);
             it = profile_jobs.erase(it);
         }
         if (settings_job.valid() && !account_action)

@@ -233,6 +233,14 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     fixture = fixture.replace('L"LOCALAPPDATA"', 'L"STORAGE_OAUTH_TEST_VAULT"')
     (test / 'oauth.cpp').write_text(fixture)
     easy_fixture = (source / 'storage/google/easy/.cpp').read_text().replace('https://www.googleapis.com', server.host)
+    # Only the fixture bypasses JWT signing for synthetic service credentials.
+    # OAuth still follows the production token and DPoP paths above.
+    easy_fixture = easy_fixture.replace('    auto token{', '''    if (!std::static_pointer_cast<google_account_t>(m_account_context)->appdata())
+    {
+        curl_easy_t::method();
+        return true;
+    }
+    auto token{''', 1)
     (test / 'easy.cpp').write_text(easy_fixture)
     compile_source('storage/google/easy/.cpp', test / 'easy.cpp', test / 'easy.obj')
     compile_source('storage/google/oauth/.cpp', test / 'oauth.cpp', test / 'oauth.obj')
@@ -375,6 +383,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 load_state.m_task_list.back()->pause(true);
             }
             auto actions = nlohmann::json::array(), footer = nlohmann::json::array();
+            auto account_rows = nlohmann::json::array();
             auto account_scroll = nlohmann::json{};
             std::function<void(lgo::GUI_object_t&)> inspect = [&](auto& object)
             {
@@ -393,6 +402,21 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                         {"view_h",scroll->view_size().y},{"content_h",scroll->content()->get_size().y},
                         {"max",scroll->max_scroll().y},{"offset",scroll->scroll_offset().y},
                         {"thumb_x",thumb.x},{"thumb_y",thumb.y},{"thumb_w",extent.x},{"thumb_h",extent.y}};
+                }
+                if (auto row=dynamic_cast<lgo::divx_soft_t*>(&object))
+                {
+                    auto item=nlohmann::json::object();
+                    row->visit_children([&](lgo::GUI_object_t& child)
+                    {
+                        if (auto email=dynamic_cast<lgo::text_line_scroll_std_t*>(&child))
+                            item["email"]=email->get_text();
+                        if (!item.contains("photo_x") && dynamic_cast<lgo::rect_t*>(&child))
+                        {
+                            const auto p=child.get_pos(); const auto z=child.get_size();
+                            item["photo_x"]=p.x+z.x/2; item["photo_y"]=p.y+z.y/2;
+                        }
+                    });
+                    if (item.contains("email")) account_rows.push_back(item);
                 }
                 object.visit_children(inspect);
             };
@@ -421,6 +445,11 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
             storage_atomic_write("oauth-ui.json",nlohmann::json{{"x",at.x},{"y",at.y},
                 {"w",size.x},{"h",size.y},{"window_w",window.x},{"window_h",window.y},
                 {"signed_in",load_state.m_session && load_state.m_session->oauth},
+                {"has_session",bool(load_state.m_session)},
+                {"service_account",load_state.m_session && !load_state.m_session->oauth},
+                {"account_path",load_state.m_session ? load_state.m_session->account_path : ""},
+                {"root_id",load_state.m_session ? load_state.m_session->root : ""},
+                {"account_rows",account_rows},
                 {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},
                 {"actions",actions},{"footer",footer},{"account_scroll",account_scroll},{"account_rows_settled",!progress_column->children_moving()},{"account_tasks",account_tasks},{"tasks",load_state.m_task_list.size()},
                 {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
@@ -643,6 +672,53 @@ try:
     wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Second logout failed.')
     acknowledge(switch_name)
     acknowledge('登出：oauth@example.invalid')
+    # Discover JSON by contents, with services first and no credential deletion UI.
+    Path('key').mkdir()
+    services=[('arbitrary.data','aaa-service@example.invalid','service-root-A'),
+              ('another file','oauth@example.invalid','service-root-B')]
+    for filename,email,root_id in services:
+        (Path('key')/filename).write_text(json.dumps({'client_email':email,'private_key':'fixture-key'}))
+        digest=hashlib.sha256(email.encode()).hexdigest()
+        (Path('root')/digest).write_text(root_id)
+        (Path('blob_queue')/digest).write_text(json.dumps(['service-placeholder']*21000))
+    Path('key/broken.json').write_text('{')
+    original_keys={p.name:p.read_bytes() for p in Path('key').iterdir()}
+    menu=open_menu()
+    assert [r['email'] for r in menu['account_rows']]==[s[1] for s in services]+['oauth@example.invalid']
+    assert [a['text'] for a in menu['actions']]==['登入','登入','登入','移除']
+    command('mousemove',1500,1100)
+    def green_at(points):
+        geometry=dict(line.split('=',1) for line in command('getwindowgeometry','--shell',window).splitlines())
+        image=ImageGrab.grab()
+        return all(all(abs(a-b)<8 for a,b in zip(image.getpixel((int(geometry['X'])+x,int(geometry['Y'])+y))[:3],
+                                                 (188,255,188))) for x,y in points)
+    wait(lambda:green_at([(r['photo_x'],r['photo_y']) for r in menu['account_rows'][:2]]),
+         'Service account rows did not use std_green_light.')
+    for i,(filename,email,root_id) in enumerate(services):
+        if i:menu=open_menu()
+        click(menu['actions'][i])
+        wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and
+                    snapshot()['account_path']=='key/'+filename and snapshot()['root_id']==root_id,
+             'Service selection did not open its own credential and root.')
+        assert snapshot()['tasks']==0,'Service login resumed another account transfer.'
+        command('mousemove',1500,1100)
+        wait(lambda:green_at([(snapshot()['x']+8,snapshot()['y']+16),(snapshot()['x']+24,snapshot()['y']+16)]),
+             'Service toolbar portrait was not a green block.')
+        acknowledge('切換帳戶：'+email)
+    menu=open_menu()
+    assert menu['actions'][-1]['enabled'],'Service session disabled removal of a different OAuth identity.'
+    command('key','Escape')
+    wait(lambda:not snapshot()['menu'],'Account menu did not close.')
+    Path('lose-device').touch()
+    wait(lambda:not Path('lose-device').exists(),'Service GPU recovery was not requested.')
+    wait(lambda:green_at([(snapshot()['x']+16,snapshot()['y']+16)]),'Green portrait did not survive GPU recovery.')
+    menu=open_menu();click(menu['footer'][1])
+    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'],'Service logout failed.')
+    acknowledge('登出：oauth@example.invalid')
+    assert Path('task').read_text()==index,'Service switch or logout modified the OAuth checkpoint.'
+    assert original_keys=={p.name:p.read_bytes() for p in Path('key').iterdir()},'Service credentials were modified.'
+    for p in Path('key').iterdir():p.unlink()
+    Path('key').rmdir()
     menu=open_menu();click(menu['actions'][1])
     wait(lambda:not snapshot()['switching'] and not snapshot()['menu'],'Removal did not finish.')
     acknowledge('移除帳戶：oauth@example.invalid')
@@ -656,7 +732,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -674,7 +750,7 @@ finally:
                     process.kill()
                     stdout, stderr = process.communicate()
                 raise AssertionError('GUI did not launch browser: ' + stdout + stderr)
-            stdout, stderr = process.communicate(timeout=60)
+            stdout, stderr = process.communicate(timeout=90)
             assert process.returncode == 0, stdout + stderr
             assert not server.errors, server.errors
             logs = ''.join(p.read_text(errors='replace') for p in (test / 'logfile').glob('*.txt'))

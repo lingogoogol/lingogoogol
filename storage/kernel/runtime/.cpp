@@ -18,6 +18,36 @@ namespace
         return "clear." + storage_digest(address);
     }
 } // namespace
+auto storage_service_accounts(const std::filesystem::path& directory)
+    -> std::vector<service_account_file_t>
+{
+    std::vector<service_account_file_t> accounts;
+    std::error_code error;
+    if (!std::filesystem::exists(directory, error) && !error) return accounts;
+    auto entry = std::filesystem::directory_iterator{
+        directory, std::filesystem::directory_options::skip_permission_denied, error};
+    if (error) throw std::runtime_error{"Cannot read the service account directory."};
+    const auto end = std::filesystem::directory_iterator{};
+    for (; entry != end; entry.increment(error))
+    {
+        std::error_code file_error;
+        if (!entry->is_regular_file(file_error)) continue;
+        try
+        {
+            // The JSON contents identify an account; names and extensions do
+            // not. One bad or unrelated file must not hide the other accounts.
+            const auto credential = nlohmann::json::parse(storage_read(entry->path()));
+            const auto address = credential.value("client_email", std::string{});
+            if (address.empty() || credential.value("private_key", std::string{}).empty()) continue;
+            accounts.push_back({address, entry->path().generic_string()});
+        }
+        catch (const std::exception&) { }
+    }
+    if (error) throw std::runtime_error{"Cannot enumerate the service account directory."};
+    std::ranges::sort(accounts, [](const auto& a, const auto& b)
+        { return std::tie(a.address,a.account_path) < std::tie(b.address,b.account_path); });
+    return accounts;
+}
 storage_runtime_t::storage_runtime_t(std::atomic_bool* close) : m_close{close}
 {
     // The old files have the same names as the new directories. Do not replace

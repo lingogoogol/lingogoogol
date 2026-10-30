@@ -76,6 +76,24 @@ int main(int argc, char** argv)
             check(storage_settings_t::load().root_path=="custom-roots", "Custom root directory changed.");
             storage_atomic_write("settings.json", R"({"root_path":"root/root"})");
             check(storage_settings_t::load().root_path=="root", "Old default introduced an extra root directory.");
+            check(storage_service_accounts().empty() && !std::filesystem::exists("key"),
+                  "A missing service account directory was created or rejected.");
+            const auto credential = [](std::string email)
+                { return nlohmann::json{{"client_email",email},{"private_key","fixture-key"}}.dump(); };
+            storage_atomic_write("key/arbitrary.data",credential("b@example.invalid"));
+            storage_atomic_write("key/no extension",credential("a@example.invalid"));
+            storage_atomic_write("key/duplicate.json",credential("a@example.invalid"));
+            storage_atomic_write("key/broken.json","{");
+            storage_atomic_write("key/oauth.json",R"({"installed":{}})");
+            storage_atomic_write("key/empty.json",R"({"client_email":"","private_key":"key"})");
+            storage_atomic_write("key/missing.json",R"({"client_email":"missing@example.invalid"})");
+            storage_atomic_write("key/wrong.json",R"({"client_email":42,"private_key":"key"})");
+            storage_atomic_write("key/nested/ignored.json",credential("nested@example.invalid"));
+            const auto accounts = storage_service_accounts();
+            check(accounts.size()==3 && accounts[0].address=="a@example.invalid" &&
+                  accounts[0].account_path=="key/duplicate.json" && accounts[1].account_path=="key/no extension" &&
+                  accounts[2].address=="b@example.invalid" && accounts[2].account_path=="key/arbitrary.data",
+                  "Service account contents, ordering, duplicates or invalid-file isolation changed.");
             std::atomic_bool close{};
             for (const auto name : {"root", "blob_queue"})
             {
@@ -90,7 +108,7 @@ int main(int argc, char** argv)
             }
             std::filesystem::current_path("..");
             std::filesystem::remove_all("layout-probe");
-            std::puts("PASS: new root paths, saved settings/journals and manual legacy relocation.");
+            std::puts("PASS: service account discovery, missing directory and invalid-file isolation; new root paths, saved settings/journals and manual legacy relocation.");
             return 0;
         }
         lgo::init_logfile("logfile/lifecycle.txt");

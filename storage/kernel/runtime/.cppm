@@ -7,6 +7,14 @@ import storage.google;
 import storage.http;
 import storage.state;
 export {
+    struct service_account_file_t
+    {
+        // Keep only the address and credential path in the account menu.
+        std::string address, account_path;
+    };
+    auto storage_service_accounts(const std::filesystem::path& directory = "key")
+        -> std::vector<service_account_file_t>;
+
     class storage_runtime_t
     {
         std::atomic_bool* m_close;

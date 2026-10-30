@@ -1330,6 +1330,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         "登入",lgo::std_white,lgo::size_1D{32});
     persistent->m_login_button->set_size({32,32});
     auto portrait = identity->add_object_ghost_shared<profile_image_t>(storage_content_depth,lgo::size_2D{32,32});
+    auto service_portrait = identity->add_object_ghost_shared<lgo::rect_t>(
+        storage_content_depth,lgo::size_2D{32,32},lgo::std_green_light);
     persistent->m_close_accounts = [persistent]
     {
         // state_t destruction alone does not hide its objects. Unregister
@@ -1348,8 +1350,25 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     {
         if (persistent->m_account_menu) { persistent->m_close_accounts(); return; }
         if (persistent->m_switching || persistent->m_dialog) return;
-        std::vector<oauth_saved_account_t> accounts;
-        try { if (persistent->m_saved_accounts) accounts = persistent->m_saved_accounts(); }
+        struct account_row_t
+        {
+            std::string address, portrait;
+            std::optional<service_account_file_t> service;
+        };
+        std::vector<account_row_t> accounts;
+        try
+        {
+            if (persistent->m_service_accounts)
+                for (auto account : persistent->m_service_accounts())
+                    accounts.push_back({account.address,{},std::move(account)});
+        }
+        catch (const std::exception&) { persistent->m_directory_status->set_text("無法讀取服務帳戶列表"); }
+        try
+        {
+            if (persistent->m_saved_accounts)
+                for (auto account : persistent->m_saved_accounts())
+                    accounts.push_back({std::move(account.address),std::move(account.portrait),{}});
+        }
         catch (const std::exception&) { persistent->m_directory_status->set_text("無法讀取帳號列表"); }
         auto menu = std::make_unique<lgo::state_t>(engine,state->get_depth_tracker());
         // An independent overlay avoids toolbar clipping. Modal dialogs remain
@@ -1385,17 +1404,30 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto row = rows->add_object_shared<lgo::divx_soft_t>(content,
                 lgo::size_2D{row_width,48},lgo::size_1D{8},
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
-            auto photo = row->add_object_shared<profile_image_t>(content,lgo::size_2D{32,32});
-            photo->picture(account.portrait);
+            if (account.service)
+                row->add_object<lgo::rect_t>(content,lgo::size_2D{32,32},lgo::std_green_light);
+            else
+            {
+                auto photo = row->add_object_shared<profile_image_t>(content,lgo::size_2D{32,32});
+                photo->picture(account.portrait);
+            }
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
-            // Reserve both separators and the two 32px text actions before
-            // assigning the email's scrollable width, so options never overlap.
+            // Keep the same email/action columns for both account kinds, even
+            // though service-account files are managed outside the application.
             row->add_object<lgo::text_line_scroll_std_t>(content,account.address,lgo::std_white,
                 lgo::size_1D{row_width-170},false);
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
-            row->add_object<progress_button_t>(content,[persistent,defer,email=account.address]
-                { defer([persistent,email]{ if(persistent->m_select_account) persistent->m_select_account(email); }); },
+            row->add_object<progress_button_t>(content,[persistent,defer,account]
+                {
+                    defer([persistent,account]
+                    {
+                        if (account.service)
+                        { if (persistent->m_select_service_account) persistent->m_select_service_account(*account.service); }
+                        else if (persistent->m_select_account) persistent->m_select_account(account.address);
+                    });
+                },
                 "登入",lgo::std_blue_light,lgo::size_1D{32});
+            if (account.service) continue;
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
             auto remove = row->add_object_shared<progress_button_t>(content,[persistent,defer,email=account.address]
                 { defer([persistent,email]{ if(persistent->m_remove_account) persistent->m_remove_account(email); }); },
@@ -1439,21 +1471,28 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         });
         persistent->m_layout_accounts();
     };
-    persistent->m_profile = [portrait=std::weak_ptr{portrait},login=std::weak_ptr{persistent->m_login_button}]
-        (bool signed_in,const std::string& image)
+    persistent->m_profile = [portrait=std::weak_ptr{portrait},service=std::weak_ptr{service_portrait},
+                             login=std::weak_ptr{persistent->m_login_button}]
+        (account_profile_t kind,const std::string& image)
     {
         if (auto picture = portrait.lock())
         {
-            if (signed_in) { picture->picture(image); picture->show(); }
+            if (kind==account_profile_t::google_user) { picture->picture(image); picture->show(); }
+            else picture->hide();
+        }
+        if (auto picture = service.lock())
+        {
+            if (kind==account_profile_t::service_account) picture->show();
             else picture->hide();
         }
         if (auto button = login.lock())
         {
-            button->set_text(signed_in ? "" : "登入");
+            button->set_text(kind==account_profile_t::signed_out ? "登入" : "");
             button->show();
         }
     };
-    persistent->m_profile(load_state->m_session && load_state->m_session->oauth,{});
+    persistent->m_profile(!load_state->m_session ? account_profile_t::signed_out :
+        load_state->m_session->oauth ? account_profile_t::google_user : account_profile_t::service_account,{});
     // Weak references keep the engine callback from retaining an obsolete UI after clear_state().
     engine->callback_window_resize_set(
         [main = std::weak_ptr{main_div}, left = std::weak_ptr{menu_left}, right = std::weak_ptr{menu_right},

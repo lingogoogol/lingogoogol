@@ -27,4 +27,5 @@ target_link_libraries(
         storage.http
         storage.google
         storage.kernel.load
+        storage.kernel.runtime
 )

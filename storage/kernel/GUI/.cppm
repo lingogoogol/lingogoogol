@@ -11,6 +11,7 @@ import lgo.math.vec;
 import storage.http;
 import storage.google;
 import storage.kernel.load;
+import storage.kernel.runtime;
 
 export {
     // Divs position children but do not transform their depth ranges. Keep
@@ -21,6 +22,8 @@ export {
         std::size_t m_text_index{};
         std::chrono::steady_clock::time_point m_add_time{};
     };
+
+    enum class account_profile_t { signed_out, service_account, google_user };
 
     struct GUI_persistent_t
     {
@@ -37,12 +40,14 @@ export {
         std::function<void(storage_settings_t)> m_apply_settings;
         std::function<void()> m_clear_account;
         std::function<void()> m_login;
+        std::function<std::vector<service_account_file_t>()> m_service_accounts;
+        std::function<void(const service_account_file_t&)> m_select_service_account;
         std::function<std::vector<oauth_saved_account_t>()> m_saved_accounts;
         std::function<void(const std::string&)> m_select_account, m_remove_account;
         std::function<void()> m_logout, m_toggle_accounts, m_close_accounts, m_layout_accounts;
         std::unique_ptr<lgo::state_t> m_account_menu;
         lgo::engine_t::callback_key_t* m_account_menu_key{};
-        std::function<void(bool,const std::string&)> m_profile;
+        std::function<void(account_profile_t,const std::string&)> m_profile;
         std::shared_ptr<lgo::button_text_t<lgo::text_line_std_t>> m_login_button;
         std::vector<std::shared_ptr<lgo::button_classic_std_t>> m_account_buttons;
         std::unique_ptr<lgo::modal_dialog_t> m_dialog;
