@@ -31,6 +31,9 @@ export {
         std::optional<storage_account_logins_t> signed_in_accounts;
         std::string selected_account;
         int network_retries{-1};
+        // Empty disables request/response diagnostics, including batch subrequests.
+        std::string http_log_codes;
+        static auto parse_http_log_codes(std::string_view text) -> std::set<long>;
         static auto load() -> storage_settings_t;
         auto save() const -> void;
     };

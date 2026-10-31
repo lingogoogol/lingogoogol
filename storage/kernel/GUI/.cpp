@@ -1214,7 +1214,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"帳戶檔案", settings.account_path},
                         {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
-                         settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)}});
+                         settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
+                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes}});
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)
@@ -1222,8 +1223,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                     auto settings{load_state->m_settings};
                     try
                     {
-                        for (const auto& value : values)
-                            if (value.empty())
+                        for (std::size_t index{}; index < 5; ++index)
+                            if (values[index].empty())
                                 throw std::runtime_error{"路徑與重試次數不可留空"};
                         settings.logfile_path = values[0];
                         settings.font_path = values[1];
@@ -1241,6 +1242,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                                 throw std::runtime_error{"重試次數必須是非負整數或無限"};
                             settings.network_retries = count;
                         }
+                        settings.http_log_codes = values[5];
+                        storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)
                             persistent->m_apply_settings(settings);
                         return true;

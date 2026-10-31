@@ -185,6 +185,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                                 &curl_easy_multi_access_t::response_code_get(*easy_ptr)
                             )
                         );
+                        easy_ptr->log_http_response();
                         easy_ptr->parse();
                     }
                     catch (lgo::error_t e)

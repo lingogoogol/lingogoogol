@@ -18,7 +18,7 @@ source = Path(__file__).resolve().parents[1]
 build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
-modes = ('batch-headers', 'retry-backoff', 'batch-errors', 'recovery', 'temporary', 'invalid',
+modes = ('http-logging', 'batch-headers', 'retry-backoff', 'batch-errors', 'recovery', 'temporary', 'invalid',
          'malformed', 'missing', 'lifetime', 'unavailable', 'queue-error', 'shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
@@ -35,6 +35,7 @@ class State:
         self.barrier = threading.Event()
         self.done = threading.Event()
         self.violations = []
+        self.diagnostic_counts = {}
 
     def report(self):
         return {key: getattr(self, key) for key in
@@ -65,6 +66,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Content-Type', content_type)
+        if self.path.startswith('/diagnostic/'):
+            self.send_header('X-Diagnostic-Id', 'diagnostic-request-id')
+            self.send_header('Set-Cookie', 'response-cookie-secret')
         self.end_headers()
         try:
             self.wfile.write(data)
@@ -119,6 +123,35 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(.5)
             return self.respond(200, {'access_token': f'fixture-token-{issued}',
                                      'expires_in': 2 if state.mode == 'recovery' and issued == 1 else 3600})
+
+        if path.startswith('/diagnostic/'):
+            status = 500 if path.endswith('/unselected') else 403
+            return self.respond(status, {'error': {'message': 'diagnostic-message'},
+                                        'access_token': 'access-secret', 'refresh_token': 'refresh-secret',
+                                        'privateKeyData': 'private-data-secret'})
+
+        if path.startswith('/batch') and state.mode == 'http-logging':
+            parts = re.findall(r'Content-ID: (\d+)\r\n\r\n(.*?)(?=\r\n--)', body, re.S)
+            response = []
+            for identifier, part in parts:
+                target = part.split(' ', 2)[1]
+                name = urllib.parse.urlparse(target).path.rsplit('/', 1)[-1]
+                count = state.diagnostic_counts.get(name, 0) + 1
+                state.diagnostic_counts[name] = count
+                if name.endswith('-rate'):
+                    status = 403 if count == 1 else 503 if count == 2 else 200
+                else:
+                    status = 500 if count == 1 and name.endswith('-internal') else \
+                        404 if count == 1 and name.endswith('-missing') else 200
+                value = {'marker': f'batch-{name}-{count}', 'access_token': 'access-secret',
+                         'error': {'message': 'diagnostic-message', 'errors': [{'reason': 'rateLimitExceeded'}]}}
+                response.append(f'--fixture\r\nContent-Type: application/http\r\n'
+                                f'Content-ID: response-{identifier}\r\n\r\n'
+                                f'HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\n'
+                                f'X-Diagnostic-Id: batch-{name}-{count}\r\n\r\n'
+                                + json.dumps(value) + '\r\n')
+            return self.respond(200, (''.join(response) + '--fixture--\r\n').encode(),
+                                'multipart/mixed; boundary=fixture')
 
         authorization = self.headers.get('Authorization', '')
         if path.startswith('/revoked/') and authorization == 'Bearer fixture-token-2':
@@ -255,6 +288,7 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
         for mode in args.modes:
             server.state = State(mode)
             (test / 'test-queue').write_text('[]')
+            (test / 'logfile/token-refresh.txt').unlink(missing_ok=True)
             try:
                 result = subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'wine64',
                                          str(test / 'test.exe'), mode, f'http://127.0.0.1:{port}'],
@@ -269,7 +303,13 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
                 assert report['tokens'] == expected, (mode, report['tokens'], expected)
                 log = (test / 'logfile/token-refresh.txt').read_text(errors='replace')
                 assert 'finished_all!' in log and 'uncaught exception:' not in log
-                for secret in ('fixture-token-', 'assertion=', 'sensitive-response-marker'):
+                if mode == 'http-logging':
+                    assert all(server.state.diagnostic_counts[prefix + name] == count
+                               for prefix in ('sync-', 'bg-')
+                               for name, count in (('ok', 1), ('rate', 3), ('internal', 2), ('missing', 2)))
+                secrets = ('fixture-token-', 'sensitive-response-marker')
+                if mode != 'http-logging': secrets += ('assertion=',)
+                for secret in secrets:
                     assert secret not in log, 'OAuth secrets leaked into failure logs.'
             finally:
                 server.state.done.set()

@@ -156,22 +156,30 @@ try:
     time.sleep(.3)
     click(1064, 24)  # Settings
     capture('settings-dialog')
-    click(936, 740)  # Cancel
+    click(936, 774)  # Cancel
     assert not Path('settings.json').exists(), 'Cancel saved settings.'
     click(1064, 24)
-    click(500, 372)
+    click(500, 338)
     run('key', 'ctrl+a')
     run('type', 'changed-logfile')
-    click(500, 440)
+    click(500, 406)
     run('key', 'ctrl+a')
     run('type', 'font/alternate.ttf')
-    click(500, 644)
+    click(500, 610)
     run('key', 'BackSpace', 'BackSpace')
     run('type', '2')
-    click(1056, 740)
+    click(500, 678)
+    run('type', '403,600')
+    click(1056, 774)
+    assert not Path('settings.json').exists(), 'Invalid HTTP status code was accepted.'
+    click(500, 678)
+    run('key', 'ctrl+a')
+    run('type', '403,503')
+    click(1056, 774)
     wait_for(lambda: Path('settings.json').exists(), 'Settings were not applied.')
     value = json.loads(Path('settings.json').read_text())
     assert value['logfile_path'] == 'changed-logfile' and value['network_retries'] == 2
+    assert value['http_log_codes'] == '403,503'
     capture('settings-live')
     def snapshot():
         path = Path('clear-ui.json')
@@ -244,6 +252,13 @@ try:
     assert value['confirm']['x'] == value['retry']['x']
     action('confirm')
     wait_ui(lambda s: s.get('rows') == 0, 'Confirm did not remove the completed row.')
+    click(1064, 24)
+    click(500, 678)
+    run('key', 'ctrl+a')
+    run('key', 'BackSpace')
+    click(1056, 774)
+    wait_for(lambda: json.loads(Path('settings.json').read_text()).get('http_log_codes') == '',
+             'Blank HTTP filter was not applied.')
     run('key', 'alt+F4')
     app.wait(timeout=10)
     assert app.returncode == 0, 'Application did not close normally.'
@@ -354,6 +369,8 @@ int wmain(int argc, wchar_t** argv) {
         assert server.deleted == {'root', 'outside-app-root'}, 'Clear scope differs from the confirmed whole account.'
         logs = ''.join(path.read_text(errors='replace') for path in (test / 'changed-logfile').glob('*.txt'))
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
+        assert 'HTTP error exchange:' in logs and 'status=503' in logs
+        assert '--- request ---' in logs and '--- response ---' in logs
         assert not list(test.glob('clear.*')), 'Completed clear marker was retained.'
         print('PASS: production GUI Cancel/OK, UTF-8 paste, Backspace, Ctrl+A, live settings/font/log reload, typed whole-account clear, running/error cancellation, action geometry, retry, terminal acknowledgement and clean close')
     finally:

@@ -51,6 +51,7 @@ export
     using ::curl_easy_setopt;
     using ::curl_easy_perform;
     using ::curl_easy_header;
+    using ::curl_easy_nextheader;
 
     using ::curl_multi_init;
     using ::curl_multi_cleanup;

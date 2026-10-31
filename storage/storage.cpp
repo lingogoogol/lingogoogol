@@ -40,6 +40,7 @@ auto app() -> void
             .string();
     };
     lgo::init_logfile(log_path(settings));
+    http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
     lgo::font_face_t::freetype_set(&freetype);
@@ -709,6 +710,7 @@ auto app() -> void
                 remember_session(result.settings,result.session);
                 result.settings.save();
                 lgo::init_logfile(log_path(result.settings));
+                http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
                 const bool changed_location{!result.session || !load_state.m_session ||
                     result.session->account != load_state.m_session->account ||
                     result.settings.root_path != settings.root_path ||

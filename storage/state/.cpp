@@ -80,6 +80,26 @@ auto storage_digest(std::string_view content) -> std::string
         result += std::format("{:02x}", byte);
     return result;
 }
+auto storage_settings_t::parse_http_log_codes(std::string_view text) -> std::set<long>
+{
+    std::set<long> codes;
+    while (!text.empty())
+    {
+        const auto end = text.find_first_of(", \t\r\n");
+        const auto token = text.substr(0, end);
+        if (!token.empty())
+        {
+            long code{};
+            const auto [last, error] = std::from_chars(token.data(), token.data() + token.size(), code);
+            if (error != std::errc{} || last != token.data() + token.size() || code < 400 || code > 599)
+                throw std::runtime_error{"HTTP 錯誤碼須為 400–599，以逗號或空白分隔；留空停用"};
+            codes.insert(code);
+        }
+        if (end == std::string_view::npos) break;
+        text.remove_prefix(end + 1);
+    }
+    return codes;
+}
 auto storage_settings_t::load() -> storage_settings_t
 {
     storage_settings_t result;
@@ -106,6 +126,8 @@ auto storage_settings_t::load() -> storage_settings_t
     // root_path now names a directory; keep that default from nesting again.
     if (std::filesystem::path{result.root_path}.lexically_normal()==std::filesystem::path{"root/root"})
         result.root_path = "root";
+    result.http_log_codes = data.value("http_log_codes", std::string{});
+    parse_http_log_codes(result.http_log_codes);
     result.network_retries = data.value("network_retries", -1);
     if (result.network_retries < -1)
         throw std::runtime_error{"Network retries must be nonnegative or -1 (unlimited)."};
@@ -113,7 +135,9 @@ auto storage_settings_t::load() -> storage_settings_t
 }
 auto storage_settings_t::save() const -> void
 {
+    parse_http_log_codes(http_log_codes);
     auto data = nlohmann::json{{"logfile_path", logfile_path},
+                                                         {"http_log_codes", http_log_codes},
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},

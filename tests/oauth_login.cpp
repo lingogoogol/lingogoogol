@@ -2,8 +2,10 @@
 
 import std;
 import storage.google;
+import storage.http;
 import storage.state;
 import storage.kernel;
+import lgo.io;
 
 auto check(bool value,const char* message) -> void
 { if (!value) throw std::runtime_error{message}; }
@@ -13,6 +15,11 @@ int main(int argc,char** argv)
     {
         check(argc==2,"Missing test mode.");
         const std::string mode{argv[1]};
+        if (mode=="login")
+        {
+            lgo::init_logfile("oauth-http-log.txt");
+            http_error_log_codes_set({400});
+        }
         auto control=std::make_shared<request_control_t>();
         if (mode=="cloud-denied")
         {

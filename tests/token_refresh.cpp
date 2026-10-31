@@ -331,6 +331,111 @@ auto batch_errors(lgo::engine_t& engine) -> void
     std::println("PASS: inner HTTP errors and safe task/log diagnostics");
 }
 
+auto http_logging(lgo::engine_t& engine) -> void
+{
+    check(storage_settings_t{}.http_log_codes.empty(), "Detailed logging must default to disabled.");
+    check(storage_settings_t::parse_http_log_codes(" 403, 500\t503,403 ") == std::set<long>{403,500,503},
+          "HTTP error code list did not accept separators/duplicates.");
+    for (const auto* text : {"200", "399", "600", "403x", "4xx", "-403", "403;500"})
+    {
+        bool rejected{};
+        try { storage_settings_t::parse_http_log_codes(text); }
+        catch (const std::runtime_error&) { rejected = true; }
+        check(rejected, "Invalid HTTP error filter was accepted.");
+    }
+    storage_settings_t settings;
+    settings.http_log_codes = "403,503";
+    settings.save();
+    check(storage_settings_t::load().http_log_codes == settings.http_log_codes, "HTTP filter did not persist.");
+    auto logs = [] { return lgo::get_file_str("logfile/token-refresh.txt"); };
+    auto attempt = [&](std::string path, std::string body)
+    {
+        curl_easy_t easy;
+        easy.host_set(host);
+        easy.path_set(path);
+        easy.query_set("key", "query-secret");
+        easy.header_set("Authorization", "Bearer authorization-secret");
+        easy.header_set("cOoKiE", "cookie-secret");
+        easy.header_set("Content-Type", "application/json");
+        easy.method_post(body);
+        quiet(easy);
+        return easy;
+    };
+    auto disabled = attempt("/diagnostic/disabled", "disabled-request");
+    disabled.run_try();
+    check(logs().find("HTTP error exchange:") == std::string::npos, "Default filter logged HTTP bodies.");
+    http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
+    auto sync = attempt("/diagnostic/sync",
+        R"({"visible":"sync-body","private_key":"private-secret\nline","client_secret":"client-secret","assertion":"assertion-secret"})");
+    sync.run_try();
+    auto json = attempt("/diagnostic/json", "visible=form-body&assertion=form-secret&refresh_token=form-refresh-secret");
+    json.run_try();
+    auto unselected = attempt("/diagnostic/unselected", "unselected-request");
+    unselected.run_try();
+
+    auto batch = [&](std::string prefix)
+    {
+        google_batch_t value;
+        value.host_set(host);
+        value.path_set("/drive/v3");
+        value.boundary_set("fixture");
+        for (const auto* name : {"ok", "rate", "internal", "missing"})
+            blob_get(value, prefix + name, "description");
+        value.method_post();
+        quiet(value);
+        return value;
+    };
+    auto synchronous = batch("sync-");
+    synchronous.run();
+    check(synchronous.valid(), "Diagnostic logging changed synchronous batch retries.");
+    curl_multi_worker_t worker;
+    auto control = std::make_shared<request_control_t>();
+    control->retry_limit = 3;
+    auto background = batch("bg-");
+    background.control_set(control);
+    worker.add(std::move(background));
+    const auto deadline = std::chrono::steady_clock::now() + 12s;
+    while (!worker.ready_nonempty())
+    {
+        worker.run();
+        check(!control->paused, "Diagnostic logging interrupted background retries.");
+        check(std::chrono::steady_clock::now() < deadline, "Background diagnostic batch stalled.");
+        pump(engine);
+    }
+    check(worker.ready_get_unique()->valid(), "Background diagnostic batch failed.");
+    worker.stop();
+    curl_multi_t multi;
+    auto direct_control = std::make_shared<request_control_t>();
+    direct_control->retry_limit = 0;
+    auto direct = attempt("/diagnostic/background", "background-body");
+    direct.control_set(direct_control);
+    multi.add(std::move(direct));
+    while (!direct_control->paused)
+    {
+        multi.run();
+        check(std::chrono::steady_clock::now() < deadline, "Direct multi diagnostic request stalled.");
+        pump(engine);
+    }
+    direct_control->cancel();
+    multi.run();
+
+    http_error_log_codes_set({});
+    auto off = attempt("/diagnostic/off", "off-request");
+    off.run_try();
+    const auto text = logs();
+    for (const auto* marker : {"sync-body", "form-body", "background-body", "diagnostic-message",
+                               "X-Diagnostic-Id", "Content-ID=1", "status=403", "status=503",
+                               "batch-sync-rate-1", "batch-sync-rate-2", "batch-bg-rate-1", "batch-bg-rate-2"})
+        check(text.find(marker) != std::string::npos, "Selected HTTP exchange lost request/response detail.");
+    for (const auto* secret : {"authorization-secret", "cookie-secret", "query-secret", "private-secret",
+                               "client-secret", "assertion-secret", "form-secret", "form-refresh-secret",
+                               "access-secret", "refresh-secret", "private-data-secret", "response-cookie-secret",
+                               "disabled-request", "unselected-request", "off-request", "batch-sync-internal-1",
+                               "batch-bg-missing-1", "/files/sync-ok", "/files/bg-ok"})
+        check(text.find(secret) == std::string::npos, "Unselected HTTP details or credentials leaked to logs.");
+    std::println("PASS: HTTP error settings, sync/multi/batch filtering, retry pairing, live disable and credential redaction");
+}
+
 int main(int argc, char** argv)
 {
     std::set_terminate([] { std::_Exit(42); });
@@ -346,6 +451,7 @@ int main(int argc, char** argv)
         if (mode == "batch-headers") batch_headers(engine);
         else if (mode == "retry-backoff") retry_backoff(engine);
         else if (mode == "batch-errors") batch_errors(engine);
+        else if (mode == "http-logging") http_logging(engine);
         else if (mode == "recovery") recovery(engine);
         else if (mode == "shutdown" || mode == "queue-error") queue_case(engine, mode == "shutdown");
         else failure_case(engine, mode == "temporary");

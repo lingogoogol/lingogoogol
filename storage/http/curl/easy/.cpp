@@ -14,6 +14,84 @@ import lgo.io.file;
 
 import storage.http.curl.curl;
 
+namespace
+{
+    // llvm-mingw libc++ does not provide atomic<shared_ptr<T>>. Protect the
+    // filter itself; release the lock before formatting or writing diagnostics.
+    std::mutex http_log_mutex;
+    std::set<long> http_log_codes;
+
+    auto redact_http_secrets(std::string value) -> std::string
+    {
+        // Apply this to entire multipart messages too: nested HTTP headers and
+        // JSON/form credentials must never become a second credential store.
+        static const std::regex headers{
+            R"((^(?:authorization|proxy-authorization|cookie|set-cookie|x-goog-api-key|dpop):)[^\r\n]*)",
+            std::regex::icase | std::regex::multiline};
+        static const std::string names{
+            "access_token|refresh_token|id_token|client_secret|client_assertion|assertion|code_verifier|token|"
+            "private_key|private_key_data|privateKeyData|accessToken|refreshToken|idToken|clientSecret|code"};
+        static const std::regex json{
+            "(\"(?:" + names + ")\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"", std::regex::icase};
+        static const std::regex form{
+            "((?:^|[?&\\s])(?:" + names + "|key)=)[^&\\s]*", std::regex::icase};
+        static const std::regex bearer{R"((Bearer\s+)[A-Za-z0-9._~+/-]+=*)", std::regex::icase};
+        static const std::regex pem{
+            R"(-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----)"};
+        value = std::regex_replace(value, headers, "$1 [REDACTED]");
+        value = std::regex_replace(value, json, "$1\"[REDACTED]\"");
+        value = std::regex_replace(value, form, "$1[REDACTED]");
+        value = std::regex_replace(value, bearer, "$1[REDACTED]");
+        return std::regex_replace(value, pem, "[REDACTED PRIVATE KEY]");
+    }
+}
+
+auto http_error_log_codes_set(std::set<long> codes) -> void
+{
+    std::lock_guard lock{http_log_mutex};
+    http_log_codes = std::move(codes);
+}
+
+auto http_error_log_matches(long code) -> bool
+{
+    std::lock_guard lock{http_log_mutex};
+    return http_log_codes.contains(code);
+}
+
+auto log_http_error_exchange(long code, std::string_view request, std::string_view response,
+                             std::string_view context) -> void
+{
+    if (!http_error_log_matches(code)) return;
+    // One log write keeps a request and its response together across workers.
+    lgo::log_file("HTTP error exchange: " + std::format("{:%FT%T}", std::chrono::system_clock::now()) +
+        " status=" + std::to_string(code) + " " + std::string{context} +
+        "\n--- request ---\n" + redact_http_secrets(std::string{request}) +
+        "\n--- response ---\n" + redact_http_secrets(std::string{response}) +
+        "\n--- end HTTP error exchange ---\n");
+}
+
+auto curl_easy_t::log_http_response() const -> void
+{
+    if (!http_error_log_matches(m_response_code)) return;
+    std::string request{m_verb + " " + m_host + m_path};
+    bool first{true};
+    for (const auto& [name, value] : m_query)
+    {
+        request += (first ? "?" : "&") + name + "=" + value;
+        first = false;
+    }
+    request += " HTTP/1.1\r\n";
+    for (const auto& [name, value] : m_header) request += name + ": " + value + "\r\n";
+    request += "\r\n" + m_read->m_payload;
+    std::string response{"HTTP " + std::to_string(m_response_code) + "\r\n"};
+    curl_header* header{};
+    while ((header = curl_easy_nextheader(m_interface, CURLH_HEADER, -1, header)))
+        response += std::string{header->name} + ": " + header->value + "\r\n";
+    response += "\r\n" + m_write->m_payload;
+    log_http_error_exchange(m_response_code, request, response,
+        "interface=" + std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface)));
+}
+
 auto curl_easy_t::get() -> curl_easy_t&
 {
     thread_local curl_easy_t easy{};
@@ -291,8 +369,7 @@ auto curl_easy_t::run() -> void
             "A transfer failed in curl_easy_t::run:"
             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
             "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(m_interface)) +
-            // OAuth bodies contain signed assertions or access tokens. Keep
-            // failure diagnostics, but never dump arbitrary request/response bodies.
+            // Detailed diagnostics are opt-in and redact credential fields.
             "  response_code: " + std::to_string(m_response_code) + "\n"
         );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
@@ -423,6 +500,7 @@ auto curl_easy_t::run_try() -> void
         }
         break;
     }
+    log_http_response();
     parse();
     if (valid())
         checkpoint();

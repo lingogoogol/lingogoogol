@@ -406,6 +406,12 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
 
     try:
         run('login', authorize=True)
+        diagnostics = (test / 'oauth-http-log.txt').read_text()
+        assert 'status=400' in diagnostics and 'Google OAuth HTTP' in diagnostics
+        assert 'use_dpop_nonce' in diagnostics and '[REDACTED]' in diagnostics
+        for secret in ('fixture-access-', 'fixture-refresh-', 'fixture-public-client-secret',
+                       'fixture-code', 'DPoP: eyJ'):
+            assert secret not in diagnostics, 'OAuth credentials leaked into HTTP diagnostics.'
         run('restore')
         run('relogin', authorize=True)
         assert server.deleted == {'appdata-a', 'appdata-b'} and server.created == 12

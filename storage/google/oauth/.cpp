@@ -15,6 +15,7 @@ module storage.google.oauth;
 import std;
 import storage.state;
 import storage.encode;
+import storage.http.curl.easy;
 
 namespace
 {
@@ -313,7 +314,7 @@ namespace
         }
         auto cleanup = std::unique_ptr<curl_slist,decltype(&curl_slist_free_all)>{list,curl_slist_free_all};
         response_t response;
-        // Never enable curl diagnostics here: request/response bodies contain credentials.
+        // Keep curl verbose output disabled; opt-in diagnostics below redact credentials.
         curl_easy_setopt(easy.get(),CURLOPT_URL,url.c_str());
         curl_easy_setopt(easy.get(),CURLOPT_HTTPHEADER,list);
         curl_easy_setopt(easy.get(),CURLOPT_CONNECTTIMEOUT,15L);
@@ -367,6 +368,19 @@ namespace
         require(!control->cancelled,"Google login was cancelled.");
         require(status == CURLE_OK,"Google OAuth network request failed.");
         curl_easy_getinfo(easy.get(),CURLINFO_RESPONSE_CODE,&response.status);
+        if (http_error_log_matches(response.status))
+        {
+            std::string request_text{(method.empty() ? (body.empty() ? "GET" : "POST") : method) +
+                " " + url + " HTTP/1.1\r\n"};
+            for (const auto& header : headers) request_text += header + "\r\n";
+            request_text += "\r\n" + body;
+            std::string response_text{"HTTP " + std::to_string(response.status) + "\r\n"};
+            curl_header* header{};
+            while ((header = curl_easy_nextheader(easy.get(),CURLH_HEADER,-1,header)))
+                response_text += std::string{header->name} + ": " + header->value + "\r\n";
+            response_text += "\r\n" + response.body;
+            log_http_error_exchange(response.status,request_text,response_text,"Google OAuth HTTP");
+        }
         return response;
     }
     auto exchange(const client_t& client, key_t& key, const std::string& body, std::string code,

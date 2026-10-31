@@ -177,6 +177,7 @@ auto google_batch_t::parse() -> void
         const auto delimiter{ "--" + boundary };
         const auto& response{ m_write->m_payload };
         std::map<std::uint64_t, http_response_t> parsed;
+        std::map<std::uint64_t, std::string> diagnostics;
         auto position{ response.find(delimiter) };
         if (position == std::string::npos) throw std::invalid_argument{ "Multipart boundary not found." };
         while (true)
@@ -207,10 +208,21 @@ auto google_batch_t::parse() -> void
                 throw std::invalid_argument{ "Unexpected or duplicate multipart Content-ID." };
             const auto body_begin{ header_end + 4 };
             parsed.emplace(id, http_response_t{ response.substr(body_begin, next - body_begin) });
+            const auto code = std::stol(parsed.at(id).status_code_get());
+            if (http_error_log_matches(code))
+                diagnostics.emplace(id, response.substr(body_begin, next - body_begin));
             position = next + 2;
         }
         if (parsed.size() != m_count)
             throw std::invalid_argument{ "Missing multipart subresponses." };
+        // Validate the full frame first, then pair each selected inner status
+        // with its own request. The outer batch is normally HTTP 200.
+        for (const auto& [id, raw] : diagnostics)
+            log_http_error_exchange(std::stol(parsed.at(id).status_code_get()),
+                m_part.at(id).m_request.to_str(), raw,
+                "batch=" + m_host + m_path + " interface=" +
+                std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface)) +
+                " Content-ID=" + std::to_string(id));
         std::map<std::string, std::size_t> failures;
         for (auto& [id, response] : parsed)
         {

@@ -7,6 +7,12 @@ import external.curl;
 
 export
 {
+    // Process-wide diagnostics also apply to transfers already running on workers.
+    auto http_error_log_codes_set(std::set<long> codes) -> void;
+    auto http_error_log_matches(long code) -> bool;
+    auto log_http_error_exchange(long code, std::string_view request, std::string_view response,
+                                 std::string_view context) -> void;
+
     class curl_easy_t
     {
     public:
@@ -64,6 +70,7 @@ export
 
         auto run() -> void;
         auto run_try() -> void;
+        auto log_http_response() const -> void;
         // Nonblocking preparation before each attempt. False keeps the request
         // outside CURLM while asynchronous credentials are being refreshed.
         virtual auto prepare() -> bool;
