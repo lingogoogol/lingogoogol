@@ -892,7 +892,8 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                    ancestor = metadata.at("parent").get<std::string>();
                                }
                                if (session && ancestor == session->root)
-                                   path.push_back({{"id", session->root}, {"name", "根目錄"}});
+                                   path.push_back({{"id", session->root}, {"name", session->oauth ?
+                                       std::string{"根目錄"} : session->address.substr(0, session->address.find('@'))}});
                                std::reverse(path.begin(), path.end());
                                return nlohmann::json{{"entries", std::move(entries)}, {"path", std::move(path)}};
                            })};

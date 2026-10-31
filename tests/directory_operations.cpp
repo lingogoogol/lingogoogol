@@ -349,7 +349,7 @@ int main(int argc, char** argv)
             wait([&] { return persistent.m_breadcrumb_folder=="root"; });
             pos="nav-7"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-7"; });
-            check(names().size()==9 && names().front()=="根目錄","Direct navigation did not load every actual ancestor.");
+            check(names().size()==9 && names().front()=="mock","Direct navigation did not load every actual ancestor with the service account name.");
             input(json::array()); // Verify rendered separator pixels before moving the path.
             check(viewer->get_pos().y>=crumbs->get_pos().y+crumbs->get_size().y &&
                   crumbs->max_scroll().x>0,"Breadcrumbs are not a separate horizontal viewport above contents.");
@@ -375,14 +375,14 @@ int main(int argc, char** argv)
             wait([&] { return persistent.m_breadcrumb_folder=="nav-6"; });
             check(pos=="nav-6" && names().size()==8 && crumbs->scroll_offset().x==0,"Ancestor click did not truncate the path.");
             input(json::array());
-            click_crumb("根目錄");
+            click_crumb("mock");
             wait([&] { return persistent.m_breadcrumb_folder=="root"; });
             check(pos=="root" && names().size()==1,"Root breadcrumb did not navigate.");
             google_easy_t request;
             blob_update_name_run(request,"nav-5",json{{"name","moved-parent"},{"parent","root"},{"next","null"}}.dump());
             pos="nav-5"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-5"; });
-            check(names()==std::vector<std::string>{"根目錄","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
+            check(names()==std::vector<std::string>{"mock","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
             auto verify_columns = [&]
             {
                 lgo::text_line_t *name_header{}, *size_header{}, *actions_header{};
