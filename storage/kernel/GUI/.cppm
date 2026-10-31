@@ -23,8 +23,6 @@ export {
         std::chrono::steady_clock::time_point m_add_time{};
     };
 
-    enum class account_profile_t { signed_out, service_account, google_user };
-
     struct GUI_persistent_t
     {
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
@@ -51,7 +49,7 @@ export {
         std::function<void()> m_logout, m_toggle_accounts, m_close_accounts, m_layout_accounts;
         std::unique_ptr<lgo::state_t> m_account_menu;
         lgo::engine_t::callback_key_t* m_account_menu_key{};
-        std::function<void(account_profile_t,const std::string&)> m_profile;
+        std::function<void(bool)> m_account_status;
         std::shared_ptr<lgo::button_text_t<lgo::text_line_std_t>> m_login_button;
         std::vector<std::shared_ptr<lgo::button_classic_std_t>> m_account_buttons;
         std::unique_ptr<lgo::modal_dialog_t> m_dialog;

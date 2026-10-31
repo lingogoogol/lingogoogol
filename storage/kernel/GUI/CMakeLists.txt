@@ -21,8 +21,6 @@ target_link_libraries(
         lgo.dev
         lgo.math
         lgo.GUI
-        windowscodecs
-        ole32
         storage.dialog
         storage.http
         storage.google

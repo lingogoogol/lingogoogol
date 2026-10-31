@@ -120,13 +120,6 @@ auto app() -> void
         std::shared_ptr<storage_session_t> session;
     };
     std::future<settings_result_t> settings_job;
-    struct profile_job_t
-    {
-        std::shared_ptr<storage_session_t> session;
-        std::future<std::string> future;
-    };
-    std::list<profile_job_t> profile_jobs;
-    auto profile_control = std::make_shared<request_control_t>();
     auto settings_control{std::make_shared<request_control_t>()};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
     std::shared_ptr<progress_button_t> settings_retry, settings_cancel, settings_confirm;
@@ -150,12 +143,10 @@ auto app() -> void
         curl_multi_worker_t& multi;
         GUI_persistent_t& gui;
         std::shared_ptr<request_control_t> settings, clear;
-        std::shared_ptr<request_control_t>& profile;
         ~shutdown_t()
         {
             close_app = true;
             settings->cancel();
-            profile->cancel();
             clear->cancel();
             for (auto& listing : gui.m_listings)
                 listing.control->cancel();
@@ -168,7 +159,7 @@ auto app() -> void
             runtime.stop();
             multi.stop();
         }
-    } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control, profile_control};
+    } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control};
     home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
     std::string selected_email, settings_task_name;
     std::vector<std::pair<std::uint64_t,std::shared_ptr<bool>>> settings_rows;
@@ -368,7 +359,6 @@ auto app() -> void
         if (selected(current))
         {
             persistent.m_reset_view();
-            profile_control->cancel();
             current.reset();
         }
         begin_settings_row(all ? "登出所有" : "登出："+targets.begin()->second.address,false);
@@ -408,18 +398,11 @@ auto app() -> void
         }
         catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出所有帳號"); }
     };
-    auto update_profile = [&]
+    auto update_account_status = [&]
     {
-        profile_control->cancel();
-        profile_control = std::make_shared<request_control_t>();
-        const auto target = load_state.m_session;
-        persistent.m_profile(!target ? account_profile_t::signed_out :
-            target->oauth ? account_profile_t::google_user : account_profile_t::service_account,{});
-        if (target && target->oauth)
-            profile_jobs.push_back({target,std::async(std::launch::async,[user=target->oauth,control=profile_control]
-                { return user->download_picture(control); })});
+        persistent.m_account_status(bool(load_state.m_session));
     };
-    update_profile();
+    update_account_status();
     if (!startup_error.empty())
     {
         persistent.m_directory_status->set_text("請重新登入");
@@ -606,7 +589,7 @@ auto app() -> void
                 load_state.m_settings = settings;
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
-                update_profile();
+                update_account_status();
                 restore_after_login = bool(result.session);
                 fonts.push_back(std::move(next_font));
                 lgo::font_preference_t::default_get().assign(1, fonts.back().get());
@@ -637,13 +620,6 @@ auto app() -> void
         {
             restore_available_tasks();
             restore_after_login = false;
-        }
-        for (auto it=profile_jobs.begin();it!=profile_jobs.end();)
-        {
-            if (it->future.wait_for(0s)!=std::future_status::ready) { ++it; continue; }
-            auto image = it->future.get();
-            if (it->session==load_state.m_session) persistent.m_profile(account_profile_t::google_user,image);
-            it = profile_jobs.erase(it);
         }
         if (settings_job.valid() && !account_action)
         {

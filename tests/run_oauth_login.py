@@ -75,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {'user': {'emailAddress': getattr(self.server, 'email', 'oauth@example.invalid'),
                                            'photoLink': self.server.host + '/photo'}})
         if self.path == '/photo':
+            self.server.photos = getattr(self.server, 'photos', 0) + 1
             assert not self.headers.get('Authorization'), 'Credentials leaked to the picture URL.'
             return self.reply(200, png())
         # Production directory listing, redirected only by mock_google_easy.cpp.
@@ -366,7 +367,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                     const auto extent = panel->get_size();
                     if (engine.get_window_size()!=size || at.x+extent.x!=anchor.x+32 || at.y!=anchor.y+40 ||
                         at.y+extent.y>size.y-8)
-                        throw std::runtime_error{"Dropdown did not follow the profile during resize."};
+                        throw std::runtime_error{"Dropdown did not follow the account button during resize."};
                 }
                 storage_atomic_write("resize-menu-sequence.done","ok");
             }
@@ -394,7 +395,17 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                     location["text"]=button->get_text(); location["enabled"]=button->enabled();
                     actions.push_back(location);
                 }
-                if (dynamic_cast<lgo::button_classic_std_t*>(&object)) footer.push_back(location);
+                if (auto button=dynamic_cast<lgo::button_classic_std_t*>(&object))
+                {
+                    location["enabled"]=button->enabled();
+                    std::function<void(lgo::GUI_object_t&)> label = [&](auto& child)
+                    {
+                        if (auto text=dynamic_cast<lgo::text_line_t*>(&child)) location["text"]=text->get_text();
+                        child.visit_children(label);
+                    };
+                    button->visit_children(label);
+                    footer.push_back(location);
+                }
                 if (auto scroll=dynamic_cast<lgo::scroll_t*>(&object))
                 {
                     const auto thumb=scroll->scrollbar_pos(false); const auto extent=scroll->scrollbar_size(false);
@@ -410,11 +421,8 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                     {
                         if (auto email=dynamic_cast<lgo::text_line_scroll_std_t*>(&child))
                             item["email"]=email->get_text();
-                        if (!item.contains("photo_x") && dynamic_cast<lgo::rect_t*>(&child))
-                        {
-                            const auto p=child.get_pos(); const auto z=child.get_size();
-                            item["photo_x"]=p.x+z.x/2; item["photo_y"]=p.y+z.y/2;
-                        }
+                        if (auto rect=dynamic_cast<lgo::rect_t*>(&child);
+                            rect && rect->get_size()==lgo::size_2D{32,32}) item["portrait"]=true;
                     });
                     if (item.contains("email")) account_rows.push_back(item);
                 }
@@ -447,6 +455,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
             const auto window=engine.get_window_size();
             storage_atomic_write("oauth-ui.json",nlohmann::json{{"x",at.x},{"y",at.y},
                 {"w",size.x},{"h",size.y},{"window_w",window.x},{"window_h",window.y},
+                {"account_button_text",persistent.m_login_button->get_text()},
                 {"signed_in",load_state.m_session && load_state.m_session->oauth},
                 {"has_session",bool(load_state.m_session)},
                 {"service_account",load_state.m_session && !load_state.m_session->oauth},
@@ -458,12 +467,6 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
         }
 '''
-        entry = entry.replace('return google_oauth_user_t::saved_accounts(candidate.account_path);', r'''auto accounts = google_oauth_user_t::saved_accounts(candidate.account_path);
-        if (std::filesystem::exists("few-accounts") && !accounts.empty())
-            accounts.push_back({"few@example.invalid",accounts.front().portrait});
-        if (std::filesystem::exists("many-accounts") && !accounts.empty())
-            for (int i{};i<30;++i) accounts.push_back({"fixture-"+std::to_string(i)+"@example.invalid",accounts.front().portrait});
-        return accounts;''')
         entry = entry.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
         (test / 'entry.cpp').write_text(entry)
         compile_source('storage/storage.cpp', test / 'entry.cpp', test / 'entry.obj')
@@ -484,6 +487,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('original-service-account-root')
         (test / 'browser-url').unlink(missing_ok=True)
         interaction = r'''
+
 import hashlib
 import json,subprocess,sys,time
 from pathlib import Path
@@ -502,89 +506,77 @@ def wait(predicate,message,timeout=25):
         time.sleep(.05)
     raise AssertionError(message + ('; last UI: '+Path('oauth-ui.json').read_text() if Path('oauth-ui.json').exists() else ''))
 def snapshot():return json.loads(Path('oauth-ui.json').read_text())
+def click(at):command('mousemove','--window',window,at['x'],at['y'],'click','1')
+def open_menu():
+    at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
+    value=wait(lambda:snapshot() if snapshot()['menu'] else None,'Account dropdown missing.')
+    assert value['footer'][0]['text']=='新增帳戶' and not value['footer'][0]['enabled']
+    assert all('portrait' not in row for row in value['account_rows']),'Account row retained a portrait.'
+    return value
+def close_menu():
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Escape did not close the dropdown.')
+def finished_account_task(name,prefix='已完成：'):
+    value=snapshot()
+    if not value['account_rows_settled']:return None
+    return next((t for t in value['account_tasks'] if t['text'].startswith(prefix+name) and t['確定']['shown']),None)
+def acknowledge(name,prefix='已完成：'):
+    task=wait(lambda:finished_account_task(name,prefix),'Named account task did not finish: '+name)
+    assert not task['取消']['shown'] and not task['重試']['shown']
+    count=len(snapshot()['account_tasks'])
+    click(task['確定'])
+    wait(lambda:len(snapshot()['account_tasks'])==count-1 and snapshot()['account_rows_settled'],'Confirmation did not remove the account task.')
+def restart():
+    global app,window
+    command('key','alt+F4');assert app.wait(timeout=10)==0
+    Path('oauth-ui.json').unlink()
+    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
+    wait(lambda:Path('oauth-ui.json').exists(),'Restart failed.')
+    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
+    command('windowfocus','--sync',window)
 try:
     wait(lambda:Path('oauth-ui.json').exists(),'Signed-out UI did not appear.')
     window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
     command('windowfocus','--sync',window)
     first=snapshot()
-    assert not first['signed_in'] and first['w']==first['h']==32
-    assert first['x']+32<=first['window_w'] and first['x']>=first['window_w']-48
+    assert not first['has_session'] and first['w']==first['h']==32 and first['account_button_text']=='登入'
     Path('resize-small').touch()
     narrow=wait(lambda:snapshot() if snapshot()['window_w']==800 else None,'Narrow layout did not appear.')
     assert narrow['x']+32<=800 and narrow['x']>=752
-    command('mousemove','--window',window,narrow['x']+16,narrow['y']+16,'click','1')
-    menu=wait(lambda:snapshot() if snapshot()['menu'] else None,'Signed-out dropdown missing.')
-    assert not menu['actions'] and len(menu['footer'])==1
-    def click(at):command('mousemove','--window',window,at['x'],at['y'],'click','1')
-    click(menu['footer'][0])
-    wait(lambda:snapshot()['signed_in'] and not snapshot()['switching'],'Google login did not become active.')
-    command('mousemove',1500,1100) # Remove the cursor highlight before checking photo colors.
-    def colored():
-        at=snapshot()
+    menu=open_menu()
+    assert not menu['actions'] and not menu['account_rows'] and len(menu['footer'])==1
+    click(menu['footer'][0]);time.sleep(.2)
+    assert snapshot()['menu'] and not snapshot()['switching'] and not snapshot()['account_tasks']
+    assert not Path('browser-url').exists(),'Disabled add-account button launched OAuth.'
+    # Verify disabled border pixels after moving the cursor off the button.
+    command('mousemove',1500,1100)
+    def disabled_border():
+        at=snapshot()['footer'][0]
         geometry=dict(line.split('=',1) for line in command('getwindowgeometry','--shell',window).splitlines())
         image=ImageGrab.grab()
-        left=image.getpixel((int(geometry['X'])+at['x']+8,int(geometry['Y'])+at['y']+16))
-        right=image.getpixel((int(geometry['X'])+at['x']+24,int(geometry['Y'])+at['y']+16))
-        correct=all(abs(a-b)<8 for a,b in zip(left[:3],(240,40,30))) and all(abs(a-b)<8 for a,b in zip(right[:3],(30,210,70)))
-        return image if correct else None
-    image=wait(colored,'Profile photo was not rendered in color.')
-    image.save('/tmp/storage-oauth-profile.png')
-    Path('lose-device').touch()
-    wait(lambda:not Path('lose-device').exists(),'GPU recovery was not requested.')
-    time.sleep(1)
-    wait(colored,'Profile photo did not survive GPU recovery.')
+        # std_dark_gray (linear 0.25) is approximately 137 in the sRGB capture.
+        pixel=image.getpixel((int(geometry['X'])+at['x'],int(geometry['Y'])+at['y']-15))
+        return image if all(abs(c-137)<8 for c in pixel[:3]) else None
+    wait(disabled_border,'Disabled add-account border was not gray.').save('/tmp/storage-service-accounts-disabled.png')
+    close_menu()
     Path('resize-wide').touch()
-    wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Wide layout did not return.')
-    assert wide['w']==wide['h']==32 and wide['x']+32<=1536
-    def finished_account_task(name,prefix='已完成：'):
-        value=snapshot()
-        if not value['account_rows_settled']:return None
-        return next((t for t in value['account_tasks'] if t['text'].startswith(prefix+name) and t['確定']['shown']),None)
-    def acknowledge(name,prefix='已完成：'):
-        task=wait(lambda:finished_account_task(name,prefix),'Named account task did not finish: '+name)
-        assert not task['取消']['shown'] and not task['重試']['shown']
-        count=len(snapshot()['account_tasks'])
-        click(task['確定'])
-        wait(lambda:len(snapshot()['account_tasks'])==count-1 and snapshot()['account_rows_settled'],'Confirmation did not remove the account task.')
-    def open_menu():
-        at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
-        return wait(lambda:snapshot() if snapshot()['menu'] else None,'Account dropdown missing.')
+    wait(lambda:snapshot()['window_w']==1536,'Wide layout did not return.')
+    Path('key').mkdir()
+    services=[('arbitrary.data','aaa-service@example.invalid','service-root-A'),
+              ('another file','oauth@example.invalid','service-root-B')]
+    for filename,email,root_id in services:
+        (Path('key')/filename).write_text(json.dumps({'client_email':email,'private_key':'fixture-key'}))
+        digest=hashlib.sha256(email.encode()).hexdigest()
+        (Path('root')/digest).write_text(root_id)
+        (Path('blob_queue')/digest).write_text(json.dumps(['service-placeholder']*21000))
+    Path('key/broken.json').write_text('{')
+    original_keys={p.name:p.read_bytes() for p in Path('key').iterdir()}
     menu=open_menu()
-    assert [a['text'] for a in menu['actions']]==['登入','登出','移除']
-    assert menu['actions'][0]['enabled'] and menu['actions'][1]['enabled'] and not menu['actions'][2]['enabled']
-    click(menu['actions'][2]);time.sleep(.2)
-    assert snapshot()['menu'] and snapshot()['signed_in'],'Disabled removal handled a click.'
-    click(menu['actions'][0])
-    switch_name='切換帳戶：oauth@example.invalid'
-    wait(lambda:finished_account_task(switch_name),'Switch did not retain its task name.')
-    acknowledge('新增帳戶：oauth@example.invalid')
-    Path('hold-account-switch').touch()
-    menu=open_menu();click(menu['actions'][0])
-    wait(lambda:Path('account-switch-started').exists(),'Held switch did not start.')
-    running=snapshot()['account_tasks'][-1]
-    assert running['text']==switch_name+'（處理中）' and running['取消']['shown'] and not running['確定']['shown']
-    acknowledge(switch_name)  # Acknowledging the previous row must not cancel this switch.
-    assert snapshot()['switching']
-    running=snapshot()['account_tasks'][-1];click(running['取消'])
-    acknowledge(switch_name,'已取消：')
-    assert snapshot()['signed_in'] and not snapshot()['switching']
-    Path('hold-account-switch').unlink()
-    Path('fail-account-switch').touch()
-    menu=open_menu();click(menu['actions'][0])
-    acknowledge(switch_name,'失敗：')
-    Path('fail-account-switch').unlink()
-    menu=open_menu()
-    command('mousemove',1500,1100)
-    ImageGrab.grab().save('/tmp/storage-account-dropdown.png')
-    command('key','Escape')
-    wait(lambda:not snapshot()['menu'],'Escape did not dismiss dropdown.')
-    menu=open_menu();click({'x':700,'y':400})
-    wait(lambda:not snapshot()['menu'],'Outside click did not dismiss dropdown.')
-    Path('few-accounts').touch()
-    menu=open_menu();bar=menu['account_scroll']
-    assert bar['max']==0 and bar['view_h']==bar['content_h'], 'Short account list has an unnecessary scrollbar: '+str(bar)
-    command('key','Escape');wait(lambda:not snapshot()['menu'],'Short dropdown did not close.')
-    Path('few-accounts').unlink()
+    assert [r['email'] for r in menu['account_rows']]==[s[1] for s in services]
+    assert [a['text'] for a in menu['actions']]==['登入','登出']*2
+    assert not any(menu['actions'][i]['enabled'] for i in (1,3))
+    bar=menu['account_scroll']
+    assert bar['max']==0 and bar['view_h']==bar['content_h'],'Short account list has an unnecessary scrollbar.'
+    close_menu()
     def check_account_bar(menu):
         bar=menu['account_scroll']
         assert bar['view_h']==min(bar['content_h'],max(0,menu['window_h']-menu['y']-112)), bar
@@ -595,8 +587,12 @@ try:
         assert bar['thumb_x']==bar['x']+bar['w']-2, bar
         assert bar['thumb_y']==bar['y']+bar['offset']*(length-expected)//bar['max'], bar
         return bar
-    Path('many-accounts').touch()
-    menu=open_menu();assert len(menu['actions'])==93
+    extras=[]
+    for i in range(30):
+        path=Path('key')/('scroll-'+str(i)+'.json')
+        path.write_text(json.dumps({'client_email':'scroll-'+str(i)+'@example.invalid','private_key':'fixture-key'}))
+        extras.append(path)
+    menu=open_menu();assert len(menu['actions'])==64
     bar=check_account_bar(menu)
     last_y=menu['actions'][-1]['y']
     click_at={'x':menu['actions'][0]['x']-150,'y':menu['actions'][0]['y']}
@@ -642,196 +638,93 @@ try:
     wide=wait(lambda:snapshot() if snapshot()['window_w']==1536 else None,'Initially small dropdown did not expand.')
     assert check_account_bar(wide)['view_h']>small['view_h']
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Expanded dropdown did not close.')
-    Path('many-accounts').unlink()
-    Path('resize-wide').touch()
-    wait(lambda:snapshot()['window_w']==1536,'Wide layout did not return after dropdown resize.')
-    Path('prepare-paused-task').touch()
-    wait(lambda:snapshot()['tasks']==1 and snapshot()['paused'],'Paused fixture was not created.')
-    index=Path('task').read_text()
-    menu=open_menu();assert len(menu['footer'])==2
-    click(menu['actions'][1])
-    wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Logout failed.')
-    acknowledge('登出：oauth@example.invalid')
-    assert Path('task').read_text()==index,'Logout deleted the transfer checkpoint.'
-    command('key','alt+F4');app.wait(timeout=10)
-    assert app.returncode==0
-    checkpoint=Path('task.data')/json.loads(index)[0]/'state'
-    saved=json.loads(checkpoint.read_text())
-    assert saved.pop('root_directory')=='root','New checkpoint did not save the root directory.'
-    saved['root_path']='root.appdata.'+'a'*64  # Older journals saved a root file path.
-    checkpoint.write_text(json.dumps(saved))
-    Path('oauth-ui.json').unlink()
-    app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
-    wait(lambda:Path('oauth-ui.json').exists(),'Signed-out restart failed.')
-    assert not snapshot()['signed_in'] and snapshot()['tasks']==0,'Restart resumed a signed-out account.'
-    window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
-    command('windowfocus','--sync',window)
-    menu=open_menu();assert menu['actions'][2]['enabled'] and not menu['actions'][1]['enabled'] and len(menu['footer'])==1
-    click(menu['actions'][0])
-    wait(lambda:snapshot()['signed_in'] and not snapshot()['switching'] and snapshot()['tasks']==1,
-         'Saved-account login did not restore the transfer.')
-    assert snapshot()['paused'],'Login lost explicit pause state.'
-    menu=open_menu();click(menu['actions'][1])
-    wait(lambda:not snapshot()['signed_in'] and not snapshot()['switching'],'Second logout failed.')
-    acknowledge(switch_name)
-    acknowledge('登出：oauth@example.invalid')
-    # Discover JSON by contents, with services first and no credential deletion UI.
-    Path('key').mkdir()
-    services=[('arbitrary.data','aaa-service@example.invalid','service-root-A'),
-              ('another file','oauth@example.invalid','service-root-B')]
-    for filename,email,root_id in services:
-        (Path('key')/filename).write_text(json.dumps({'client_email':email,'private_key':'fixture-key'}))
-        digest=hashlib.sha256(email.encode()).hexdigest()
-        (Path('root')/digest).write_text(root_id)
-        (Path('blob_queue')/digest).write_text(json.dumps(['service-placeholder']*21000))
-    Path('key/broken.json').write_text('{')
-    original_keys={p.name:p.read_bytes() for p in Path('key').iterdir()}
-    def restart():
-        global app,window
-        command('key','alt+F4');app.wait(timeout=10)
-        assert app.returncode==0
-        Path('oauth-ui.json').unlink()
-        app=subprocess.Popen(['wine64',sys.argv[1]],cwd='launch-cwd')
-        wait(lambda:Path('oauth-ui.json').exists(),'Service restart failed.')
-        window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
-        command('windowfocus','--sync',window)
+
+    for path in extras:path.unlink()
+    # Duplicate emails remain separate rows and sort by credential path.
+    duplicate=Path('key/duplicate.json');duplicate.write_bytes(Path('key/arbitrary.data').read_bytes())
     menu=open_menu()
-    assert [r['email'] for r in menu['account_rows']]==[s[1] for s in services]+['oauth@example.invalid']
-    assert [a['text'] for a in menu['actions']]==['登入','登出','登入','登出','登入','登出','移除']
-    assert not any(menu['actions'][i]['enabled'] for i in (1,3,5))
-    command('mousemove',1500,1100)
-    def green_at(points):
-        geometry=dict(line.split('=',1) for line in command('getwindowgeometry','--shell',window).splitlines())
-        image=ImageGrab.grab()
-        return all(all(abs(a-b)<8 for a,b in zip(image.getpixel((int(geometry['X'])+x,int(geometry['Y'])+y))[:3],
-                                                 (188,255,188))) for x,y in points)
-    wait(lambda:green_at([(r['photo_x'],r['photo_y']) for r in menu['account_rows'][:2]]),
-         'Service account rows did not use std_green_light.')
+    assert [r['email'] for r in menu['account_rows']]==[services[0][1],services[0][1],services[1][1]]
+    assert len(menu['actions'])==6
+    close_menu();duplicate.unlink()
     for i,(filename,email,root_id) in enumerate(services):
-        if i:menu=open_menu()
-        click(menu['actions'][2*i])
+        menu=open_menu();click(menu['actions'][2*i])
         wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and
-                    snapshot()['account_path']=='key/'+filename and snapshot()['root_id']==root_id,
-             'Service selection did not open its own credential and root.')
-        assert snapshot()['tasks']==0,'A no-task login resumed a signed-out transfer.'
-        command('mousemove',1500,1100)
-        wait(lambda:green_at([(snapshot()['x']+8,snapshot()['y']+16),(snapshot()['x']+24,snapshot()['y']+16)]),
-             'Service toolbar portrait was not a green block.')
+                    snapshot()['account_path']=='key/'+filename and snapshot()['root_id']==root_id,'Wrong service account selected.')
+        assert snapshot()['account_button_text']=='帳戶' and snapshot()['tasks']==0
         acknowledge('切換帳戶：'+email)
-    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['tasks']==0
-    saved_logins=json.loads(Path('settings.json').read_text())
-    assert set(saved_logins['signed_in_accounts'])=={s[1] for s in services}
-    assert saved_logins['selected_account']=='oauth@example.invalid'
+    assert len(snapshot()['signed_in_accounts'])==2
     restart()
-    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['service_account'] and snapshot()['tasks']==0, \
-        'Restart lost a signed-in account that has no transfer journal.'
-    assert snapshot()['root_id']=='service-root-B','Restart changed the selected browser account.'
+    assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['root_id']=='service-root-B' and snapshot()['tasks']==0
+    switch_name='切換帳戶：'+services[0][1]
+    menu=open_menu();click(menu['actions'][0])
+    wait(lambda:finished_account_task(switch_name),'Completed switch did not retain its task.')
+    Path('hold-account-switch').touch()
+    menu=open_menu();click(menu['actions'][0])
+    wait(lambda:Path('account-switch-started').exists(),'Held switch did not start.')
+    acknowledge(switch_name)
+    assert snapshot()['switching'],'Acknowledging an old result stopped the current switch.'
+    click(snapshot()['account_tasks'][-1]['取消'])
+    acknowledge(switch_name,'已取消：');Path('hold-account-switch').unlink()
+    Path('fail-account-switch').touch()
+    menu=open_menu();click(menu['actions'][0]);acknowledge(switch_name,'失敗：')
+    Path('fail-account-switch').unlink()
     for i,(filename,email,root_id) in enumerate(services):
-        menu=open_menu();assert all(menu['actions'][j]['enabled'] for j in (1,3))
-        click(menu['actions'][2*i])
+        menu=open_menu();click(menu['actions'][2*i])
         wait(lambda:not snapshot()['switching'] and snapshot()['root_id']==root_id,'Service reselection failed.')
         acknowledge('切換帳戶：'+email)
         Path('prepare-paused-task').touch()
-        wait(lambda:snapshot()['tasks']==i+1 and snapshot()['paused'],'Service paused task was not created.')
-    service_index=Path('task').read_text()
-    assert len(json.loads(service_index))==3 and set(json.loads(index))<set(json.loads(service_index))
-    menu=open_menu()
-    assert all(menu['actions'][i]['enabled'] for i in (1,3,6))
-    assert not menu['actions'][5]['enabled'],'Same-email service login marked the OAuth user as signed in.'
-    # Sign out the background service while the other service remains selected.
-    click(menu['actions'][1])
-    wait(lambda:not snapshot()['switching'] and snapshot()['tasks']==1,'Background service sign-out did not stop only its task.')
-    assert snapshot()['service_account'] and snapshot()['root_id']=='service-root-B'
-    acknowledge('登出：aaa-service@example.invalid')
-    menu=open_menu()
-    assert not menu['actions'][1]['enabled'] and menu['actions'][3]['enabled']
-    click(menu['actions'][1]);time.sleep(.2)
-    assert snapshot()['menu'] and not snapshot()['switching'],'Disabled sign-out handled a click.'
-    command('key','Escape');wait(lambda:not snapshot()['menu'],'Account menu did not close.')
-    Path('lose-device').touch()
-    wait(lambda:not Path('lose-device').exists(),'Service GPU recovery was not requested.')
-    wait(lambda:green_at([(snapshot()['x']+16,snapshot()['y']+16)]),'Green portrait did not survive GPU recovery.')
-    menu=open_menu();click(menu['actions'][3])
-    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==0,'Service logout failed.')
-    acknowledge('登出：oauth@example.invalid')
-    assert Path('task').read_text()==service_index,'Service logout modified transfer checkpoints.'
-    assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==[s[1] for s in services]
-    queue=Path('blob_queue')/hashlib.sha256(b'oauth@example.invalid').hexdigest()
-    queue_before=queue.read_bytes()
-    restart()
-    assert not snapshot()['has_session'] and snapshot()['tasks']==0,'Restart resumed a signed-out service account.'
-    assert queue.read_bytes()==queue_before and Path('task').read_text()==service_index
-    menu=open_menu();assert len(menu['footer'])==1 and len(menu['account_rows'])==3
-    assert not any(menu['actions'][i]['enabled'] for i in (1,3,5))
-    click(menu['actions'][2])
-    wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and snapshot()['tasks']==1,
-         'Explicit service login did not restore only its transfer.')
-    assert snapshot()['paused'],'Service login lost the saved pause state.'
-    assert json.loads(Path('settings.json').read_text())['signed_out_service_accounts']==['aaa-service@example.invalid']
-    acknowledge('切換帳戶：oauth@example.invalid')
-    restart()
-    wait(lambda:snapshot()['service_account'] and snapshot()['tasks']==1,'Signed-in service state was not restored.')
-    assert snapshot()['paused']
-    menu=open_menu();click(menu['actions'][0])
-    wait(lambda:not snapshot()['switching'] and snapshot()['tasks']==2,'Second service relogin did not restore its own task.')
-    acknowledge('切換帳戶：aaa-service@example.invalid')
-    # With the selected account signed out, the background account is still live.
+        wait(lambda:snapshot()['tasks']==i+1 and snapshot()['paused'],'Paused service task was not created.')
+    index=Path('task').read_text()
+    assert len(json.loads(index))==2
     menu=open_menu();click(menu['actions'][1])
-    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==1,
-         'Current service sign-out stopped the background service.')
-    acknowledge('登出：aaa-service@example.invalid')
-    restart()
-    assert not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1 and snapshot()['tasks']==1, \
-        'Restart selected or lost an account that was only running in the background.'
-    assert json.loads(Path('settings.json').read_text())['selected_account']==''
+    wait(lambda:not snapshot()['switching'] and snapshot()['tasks']==1,'Background service logout affected another account.')
+    assert snapshot()['root_id']=='service-root-B'
+    acknowledge('登出：'+services[0][1])
+    menu=open_menu();assert not menu['actions'][1]['enabled'] and menu['actions'][3]['enabled']
+    click(menu['actions'][1]);time.sleep(.2)
+    assert snapshot()['menu'] and not snapshot()['switching'],'Disabled logout handled a click.'
+    close_menu()
+    Path('lose-device').touch();wait(lambda:not Path('lose-device').exists(),'GPU recovery was not requested.')
+    wait(lambda:snapshot()['account_button_text']=='帳戶','Account text did not survive GPU recovery.')
     menu=open_menu()
-    assert len(menu['footer'])==2 and menu['actions'][3]['enabled'] and not menu['actions'][1]['enabled']
-    click(menu['actions'][0])
-    wait(lambda:not snapshot()['switching'] and snapshot()['tasks']==2,'Service relogin failed.')
-    acknowledge('切換帳戶：aaa-service@example.invalid')
-    menu=open_menu();click(menu['actions'][4])
-    wait(lambda:snapshot()['signed_in'] and not snapshot()['switching'] and snapshot()['tasks']==3,
-         'OAuth login did not preserve both service transfers.')
-    acknowledge('切換帳戶：oauth@example.invalid')
-    assert len(snapshot()['signed_in_accounts'])==3,'Switching duplicated or discarded live accounts.'
-    # The OAuth account must also restore in the background, with its paused task.
-    menu=open_menu();click(menu['actions'][2])
-    wait(lambda:not snapshot()['switching'] and snapshot()['root_id']=='service-root-B','Background OAuth setup failed.')
-    acknowledge('切換帳戶：oauth@example.invalid')
+    command('mousemove',1500,1100)
+    ImageGrab.grab().save('/tmp/storage-service-accounts-menu.png')
+    click(menu['actions'][3])
+    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==0,'Current service logout failed.')
+    acknowledge('登出：'+services[1][1])
+    assert Path('task').read_text()==index and snapshot()['account_button_text']=='登入'
     restart()
-    assert len(snapshot()['signed_in_accounts'])==3 and snapshot()['tasks']==3 and snapshot()['service_account'], \
-        'Restart failed to restore mixed logins and the background OAuth transfer.'
-    assert snapshot()['root_id']=='service-root-B' and snapshot()['paused']
-    menu=open_menu()
-    assert all(menu['actions'][i]['enabled'] for i in (1,3,5)) and not menu['actions'][6]['enabled']
+    assert not snapshot()['has_session'] and snapshot()['tasks']==0
+    menu=open_menu();assert len(menu['footer'])==1 and not any(menu['actions'][i]['enabled'] for i in (1,3))
+    click(menu['actions'][2])
+    wait(lambda:snapshot()['service_account'] and not snapshot()['switching'] and snapshot()['tasks']==1,'Explicit relogin did not restore its task.')
+    assert snapshot()['paused'];acknowledge('切換帳戶：'+services[1][1])
+    restart()
+    assert snapshot()['service_account'] and snapshot()['tasks']==1 and snapshot()['paused']
+    menu=open_menu();click(menu['actions'][0])
+    wait(lambda:not snapshot()['switching'] and snapshot()['tasks']==2,'Second service relogin failed.')
+    acknowledge('切換帳戶：'+services[0][1])
+    menu=open_menu();click(menu['actions'][1])
+    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==1,'Selected logout stopped a background account.')
+    acknowledge('登出：'+services[0][1])
+    restart()
+    assert not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1 and snapshot()['tasks']==1
+    menu=open_menu();assert len(menu['footer'])==2 and menu['actions'][3]['enabled']
     click(menu['footer'][1])
-    wait(lambda:not snapshot()['has_session'] and not snapshot()['switching'] and snapshot()['tasks']==0,
-         'Sign out all did not stop every account task.')
-    acknowledge('登出所有')
-    assert not snapshot()['signed_in_accounts'] and Path('task').read_text()==service_index
-    restart()
-    assert not snapshot()['has_session'] and snapshot()['tasks']==0,'Restart resumed accounts after sign out all.'
-    menu=open_menu()
-    assert len(menu['footer'])==1 and not any(menu['actions'][i]['enabled'] for i in (1,3,5))
-    command('key','Escape');wait(lambda:not snapshot()['menu'],'Final account menu did not close.')
-    index=service_index
-    assert original_keys=={p.name:p.read_bytes() for p in Path('key').iterdir()},'Service credentials were modified.'
-    for p in Path('key').iterdir():p.unlink()
+    wait(lambda:not snapshot()['switching'] and not snapshot()['signed_in_accounts'] and snapshot()['tasks']==0,'Sign out all failed.')
+    acknowledge('登出所有');assert Path('task').read_text()==index
+    restart();assert not snapshot()['has_session'] and snapshot()['tasks']==0
+    assert original_keys=={p.name:p.read_bytes() for p in Path('key').iterdir()},'Credentials were modified.'
+    for path in Path('key').iterdir():path.unlink()
     Path('key').rmdir()
-    menu=open_menu();click(menu['actions'][2])
-    wait(lambda:not snapshot()['switching'] and not snapshot()['menu'],'Removal did not finish.')
-    acknowledge('移除帳戶：oauth@example.invalid')
-    menu=open_menu();assert not menu['actions'] and len(menu['footer'])==1,'Removed account remains in history.'
-    assert Path('task').read_text()==index,'Removal deleted the transfer checkpoint.'
-    command('key','alt+F4')
-    app.wait(timeout=10)
-    assert app.returncode==0
-    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text()=='original-service-account-root'
+    menu=open_menu();assert not menu['account_rows'] and not menu['actions'] and len(menu['footer'])==1
+    close_menu()
+    command('key','alt+F4');assert app.wait(timeout=10)==0
     assert not list(Path('launch-cwd').iterdir()),'GUI wrote state into the launching CWD.'
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
-               for folder in ('root','blob_queue') for p in Path(folder).iterdir()),'Non-hash state filenames were created.'
-    print('PASS: service account contents/order, missing key directory, same-email selection, no removal, green portraits and GPU recovery; all signed-in accounts restored without tasks, independent browser selection, background OAuth task restoration, per-row sign-out and disabled states, background account isolation, sign out all three identities, durable sign-out/restart, explicit relogin and paused task restoration; account scrollbar extent, thumb pixels, wheel/track/drag and resize geometry; named account tasks, success/cancel/failure acknowledgement and independent old rows; bin executable uses its parent from an unrelated CWD; signed-in/out account dropdown, disabled active removal, cached login, durable logout, checkpoint restoration, removal, photo color/GPU recovery and clean close.')
+               for folder in ('root','blob_queue') for p in Path(folder).iterdir())
+    print('PASS: service-only dropdown, text account entry, no portraits, disabled gray add-account button and click isolation; service discovery/sorting/duplicate emails, scrolling/resizing, GPU recovery, named switch results, isolated logout, paused checkpoints and login persistence across restarts.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -839,16 +732,8 @@ finally:
                                     'python3', '-c', interaction, str(test / 'bin/gui.exe')],
                                    cwd=test, env={**env, 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        photos_before_gui = getattr(server, 'photos', 0)
         try:
-            try:
-                browser()
-            except Exception:
-                try:
-                    stdout, stderr = process.communicate(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                raise AssertionError('GUI did not launch browser: ' + stdout + stderr)
             stdout, stderr = process.communicate(timeout=120)
             assert process.returncode == 0, stdout + stderr
             assert not server.errors, server.errors
@@ -856,6 +741,8 @@ finally:
             assert 'finished_all!' in logs and 'uncaught exception:' not in logs
             assert 'fixture-access-' not in logs + stdout + stderr
             assert 'fixture-refresh-' not in logs + stdout + stderr
+            assert getattr(server, 'photos', 0) == photos_before_gui, 'GUI downloaded a profile photo.'
+            assert not (test / 'browser-url').exists(), 'GUI launched OAuth from its disabled button.'
             print(stdout.strip())
         finally:
             if process.poll() is None:
@@ -913,33 +800,32 @@ try:
     launch()
     assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['tasks']==0 and snapshot()['root_id']=='multi-root-0'
     current=menu()
-    assert [r['email'] for r in current['account_rows']]==['first-multi@example.invalid','second-multi@example.invalid']
-    assert all(current['actions'][i]['enabled'] for i in (1,4))
+    assert not current['account_rows'] and not current['actions']
+    assert len(current['footer'])==2 and not current['footer'][0]['enabled']
+    click(current['footer'][0]);time.sleep(.2)
+    assert snapshot()['menu'] and len(snapshot()['signed_in_accounts'])==2 and not snapshot()['switching']
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Multi-user menu did not close.')
     restart()
     assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['root_id']=='multi-root-0' and snapshot()['tasks']==0
-    current=menu();click(current['actions'][1])
-    wait(lambda:not snapshot()['switching'] and not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1,
-         'One OAuth sign-out affected another user.')
-    restart()
-    assert not snapshot()['has_session'] and len(snapshot()['signed_in_accounts'])==1 and snapshot()['tasks']==0
     current=menu()
-    assert not current['actions'][1]['enabled'] and current['actions'][4]['enabled'] and len(current['footer'])==2
+    assert not current['account_rows'] and not current['actions'] and len(current['footer'])==2
     click(current['footer'][1])
     wait(lambda:not snapshot()['switching'] and not snapshot()['signed_in_accounts'],'Multi-user sign out all failed.')
     restart()
     assert not snapshot()['has_session'] and not snapshot()['signed_in_accounts'] and snapshot()['tasks']==0
     current=menu()
-    assert not current['actions'][1]['enabled'] and not current['actions'][4]['enabled'] and len(current['footer'])==1
+    assert not current['account_rows'] and not current['actions'] and len(current['footer'])==1
     command('key','alt+F4');assert app.wait(timeout=10)==0
-    print('PASS: two OAuth users without tasks restore independently of the legacy active pointer; browser selection, single-user sign-out, background-only login and sign out all persist across restarts.')
+    print('PASS: existing OAuth logins restore but remain hidden from the service-only dropdown; disabled add-account button and sign out all survive restart.')
 finally:
     if app is not None and app.poll() is None:app.kill();app.wait()
 '''
+        photos_before_gui = getattr(server, 'photos', 0)
         result = subprocess.run(['xvfb-run','-a','-s','-screen 0 1600x1200x24','python3','-c',multi_interaction,str(test/'bin/gui.exe')],
                                 cwd=test,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=100)
         assert result.returncode==0,result.stdout+result.stderr
         assert not server.errors,server.errors
+        assert getattr(server, 'photos', 0) == photos_before_gui, 'Restored OAuth account downloaded a profile photo.'
         print(result.stdout.strip())
         # Unmodified native implementation: synthetic config; Wine fails before
         # opening the browser or sending any network traffic. No secret fallback.
