@@ -22,6 +22,7 @@ namespace
     constexpr auto token_endpoint = "https://oauth2.googleapis.com/token";
     constexpr auto auth_endpoint = "https://accounts.google.com/o/oauth2/v2/auth";
     constexpr auto drive_scope = "https://www.googleapis.com/auth/drive.appdata";
+    constexpr auto cloud_scopes = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
     std::mutex vault_mutex;
 
     auto require(bool ok, const char* message) -> void
@@ -94,7 +95,11 @@ namespace
     struct client_t
     {
         std::string id, secret;
-        explicit client_t(const std::string& path)
+        oauth_purpose_t purpose;
+        auto scope() const -> std::string { return purpose==oauth_purpose_t::cloud ? cloud_scopes : drive_scope; }
+        auto vault_id() const -> std::string
+        { return purpose==oauth_purpose_t::cloud ? id+":cloud-platform" : id; }
+        explicit client_t(const std::string& path, oauth_purpose_t kind = oauth_purpose_t::drive) : purpose{kind}
         {
             try
             {
@@ -192,10 +197,10 @@ namespace
         std::array<wchar_t,32768> path{};
         const auto count = GetEnvironmentVariableW(L"LOCALAPPDATA", path.data(), path.size());
         require(count > 0 && count < path.size(), "Windows LocalAppData is unavailable.");
-        return std::filesystem::path{path.data()} / "lingogoogol" / "storage" / "oauth" / storage_digest(client.id);
+        return std::filesystem::path{path.data()} / "lingogoogol" / "storage" / "oauth" / storage_digest(client.vault_id());
     }
     auto crypt_key_name(const client_t& client, const std::string& account) -> std::wstring
-    { return L"lingogoogol.storage.tokens." + widen_ascii(storage_digest(client.id + ":" + account)); }
+    { return L"lingogoogol.storage.tokens." + widen_ascii(storage_digest(client.vault_id() + ":" + account)); }
 
     auto wrap(key_t& key, std::string input, bool decrypt) -> std::string
     {
@@ -295,7 +300,7 @@ namespace
     }
     struct response_t { long status{}; std::string body, nonce; };
     auto request(const std::string& url, const std::string& body, const std::vector<std::string>& headers,
-                 const std::shared_ptr<request_control_t>& control) -> response_t
+                 const std::shared_ptr<request_control_t>& control, const std::string& method = {}) -> response_t
     {
         auto easy = std::unique_ptr<CURL,decltype(&curl_easy_cleanup)>{curl_easy_init(),curl_easy_cleanup};
         require(easy != nullptr,"Could not initialize the OAuth connection.");
@@ -357,6 +362,7 @@ namespace
             curl_easy_setopt(easy.get(),CURLOPT_POSTFIELDS,body.c_str());
             curl_easy_setopt(easy.get(),CURLOPT_POSTFIELDSIZE,static_cast<long>(body.size()));
         }
+        if (!method.empty()) curl_easy_setopt(easy.get(),CURLOPT_CUSTOMREQUEST,method.c_str());
         const auto status = curl_easy_perform(easy.get());
         require(!control->cancelled,"Google login was cancelled.");
         require(status == CURLE_OK,"Google OAuth network request failed.");
@@ -396,14 +402,16 @@ namespace
                 {
                     require(!response.nonce.empty(),"Google did not confirm DPoP nonce support.");
                     std::istringstream scopes{data.value("scope","")};
-                    std::string scope; bool drive{};
-                    while (scopes >> scope) if (scope == drive_scope) drive = true;
-                    require(drive,"Google Drive permission was not granted.");
+                    std::set<std::string> granted;
+                    for (std::string scope; scopes >> scope;) granted.insert(scope);
+                    std::istringstream requested{client.scope()};
+                    for (std::string scope; requested >> scope;)
+                        require(granted.contains(scope),"A required Google permission was not granted.");
                 }
                 result.expires = started+lifetime;
                 return result;
             }
-            catch (...) { throw std::runtime_error{"Google returned incomplete tokens or Drive permission was not granted."}; }
+            catch (...) { throw std::runtime_error{"Google returned incomplete tokens or required permission was not granted."}; }
         }
         throw std::runtime_error{"Google OAuth nonce negotiation failed."};
     }
@@ -507,10 +515,10 @@ struct google_oauth_user_t::implementation_t
     oauth_tokens_t tokens;
     std::unique_ptr<key_t> key;
     mutable std::mutex mutex;
-    explicit implementation_t(const std::string& path):client{path}{}
+    explicit implementation_t(const std::string& path, oauth_purpose_t purpose = oauth_purpose_t::drive):client{path,purpose}{}
     auto save(bool select = false) -> void
     {
-        save_vault(client,storage_digest(email),json{{"client_id",client.id},{"scope",drive_scope},{"email",email},
+        save_vault(client,storage_digest(email),json{{"client_id",client.id},{"scope",client.scope()},{"email",email},
             {"photo",photo},{"portrait",portrait},{"dpop_key",key_name},{"access",tokens.access},
             {"refresh",tokens.refresh},{"nonce",tokens.nonce},{"expires",tokens.expires}},select);
     }
@@ -518,10 +526,10 @@ struct google_oauth_user_t::implementation_t
 google_oauth_user_t::google_oauth_user_t(std::unique_ptr<implementation_t> impl):m_impl{std::move(impl)}{}
 google_oauth_user_t::~google_oauth_user_t() = default;
 
-auto google_oauth_user_t::restore(const std::string& path, std::string expected_email)
+auto google_oauth_user_t::restore(const std::string& path, std::string expected_email, oauth_purpose_t purpose)
     -> std::shared_ptr<google_oauth_user_t>
 {
-    auto impl = std::make_unique<implementation_t>(path);
+    auto impl = std::make_unique<implementation_t>(path,purpose);
     const auto directory = vault_directory(impl->client);
     if (expected_email.empty() && !std::filesystem::exists(directory/"active")) return {};
     try
@@ -530,7 +538,7 @@ auto google_oauth_user_t::restore(const std::string& path, std::string expected_
         require(account.size()==64 && account.find_first_not_of("0123456789abcdef")==std::string::npos,"Invalid saved OAuth account.");
         const auto saved = load_vault(impl->client,account);
         impl->email = saved.at("email");
-        require(saved.at("client_id")==impl->client.id && saved.at("scope")==drive_scope && storage_digest(impl->email)==account &&
+        require(saved.at("client_id")==impl->client.id && saved.at("scope")==impl->client.scope() && storage_digest(impl->email)==account &&
             (expected_email.empty() || expected_email==impl->email),"Saved Google account does not match.");
         impl->photo = saved.value("photo","");
         impl->portrait = saved.value("portrait","");
@@ -543,10 +551,10 @@ auto google_oauth_user_t::restore(const std::string& path, std::string expected_
     catch (...) { throw std::runtime_error{"Could not restore Google login; sign in again on this Windows user account."}; }
     return std::shared_ptr<google_oauth_user_t>{new google_oauth_user_t{std::move(impl)}};
 }
-auto google_oauth_user_t::login(const std::string& path, const std::shared_ptr<request_control_t>& control)
+auto google_oauth_user_t::login(const std::string& path, const std::shared_ptr<request_control_t>& control, oauth_purpose_t purpose)
     -> std::shared_ptr<google_oauth_user_t>
 {
-    auto impl = std::make_unique<implementation_t>(path);
+    auto impl = std::make_unique<implementation_t>(path,purpose);
     impl->key_name = "lingogoogol.storage.dpop."+storage_digest(random_bytes(32));
     impl->key = std::make_unique<key_t>(widen_ascii(impl->key_name),true,true);
     impl->key->remove_on_close = true;
@@ -554,7 +562,7 @@ auto google_oauth_user_t::login(const std::string& path, const std::shared_ptr<r
     const auto state = oauth_base64(random_bytes(32));
     loopback_t loopback;
     const auto url = std::string{auth_endpoint}+"?client_id="+percent(impl->client.id)+
-        "&redirect_uri="+percent(loopback.redirect)+"&response_type=code&scope="+percent(drive_scope)+
+        "&redirect_uri="+percent(loopback.redirect)+"&response_type=code&scope="+percent(impl->client.scope())+
         "&access_type=offline&prompt=consent&code_challenge_method=S256&code_challenge="+
         oauth_base64(sha256(verifier))+"&state="+state;
     // The URL contains only ASCII because every variable component is encoded.
@@ -563,24 +571,28 @@ auto google_oauth_user_t::login(const std::string& path, const std::shared_ptr<r
     const auto code = loopback.wait(state,control);
     impl->tokens = exchange(impl->client,*impl->key,"grant_type=authorization_code&code="+percent(code)+
         "&redirect_uri="+percent(loopback.redirect)+"&code_verifier="+percent(verifier),code,{},control);
-    const auto response = request("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,photoLink)","",
-        {"Authorization: Bearer "+impl->tokens.access},control);
-    require(response.status==200,"Could not read the signed-in Google Drive profile.");
+    const auto profile_url = purpose==oauth_purpose_t::cloud ? "https://www.googleapis.com/oauth2/v2/userinfo" :
+        "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,photoLink)";
+    const auto response = request(profile_url,"", {"Authorization: Bearer "+impl->tokens.access},control);
+    require(response.status==200,"Could not read the signed-in Google profile.");
     try
     {
-        const auto user = json::parse(response.body).at("user");
-        impl->email = user.at("emailAddress");
-        impl->photo = user.value("photoLink","");
-        require(!impl->email.empty(),"Google Drive profile has no email address.");
+        const auto data = json::parse(response.body);
+        const auto user = purpose==oauth_purpose_t::cloud ? data : data.at("user");
+        impl->email = user.at(purpose==oauth_purpose_t::cloud ? "email" : "emailAddress");
+        impl->photo = user.value(purpose==oauth_purpose_t::cloud ? "picture" : "photoLink","");
+        if (purpose==oauth_purpose_t::cloud)
+            require(user.value("verified_email",false),"Google email address is not verified.");
+        require(!impl->email.empty(),"Google profile has no email address.");
     }
-    catch (...) { throw std::runtime_error{"Google Drive returned an incomplete user profile."}; }
+    catch (...) { throw std::runtime_error{"Google returned an incomplete user profile."}; }
     impl->save(true);
     impl->key->remove_on_close = false;
     return std::shared_ptr<google_oauth_user_t>{new google_oauth_user_t{std::move(impl)}};
 }
-auto google_oauth_user_t::saved_accounts(const std::string& path) -> std::vector<oauth_saved_account_t>
+auto google_oauth_user_t::saved_accounts(const std::string& path, oauth_purpose_t purpose) -> std::vector<oauth_saved_account_t>
 {
-    const client_t client{path};
+    const client_t client{path,purpose};
     std::lock_guard lock{vault_mutex};
     const auto directory = vault_directory(client);
     std::vector<oauth_saved_account_t> accounts;
@@ -594,7 +606,7 @@ auto google_oauth_user_t::saved_accounts(const std::string& path) -> std::vector
         {
             const auto saved = load_vault_locked(client,id);
             const auto email = saved.at("email").get<std::string>();
-            require(saved.at("client_id")==client.id && saved.at("scope")==drive_scope &&
+            require(saved.at("client_id")==client.id && saved.at("scope")==client.scope() &&
                 storage_digest(email)==id,"Saved Google account does not match.");
             accounts.push_back({email,oauth_unbase64(saved.value("portrait",""))});
         }
@@ -620,9 +632,9 @@ auto google_oauth_user_t::sign_out(const std::string& path, const std::string& e
     if (email.empty() || (std::filesystem::exists(active) && storage_read(active)==storage_digest(email)))
         std::filesystem::remove(active);
 }
-auto google_oauth_user_t::remove(const std::string& path, const std::string& email) -> void
+auto google_oauth_user_t::remove(const std::string& path, const std::string& email, oauth_purpose_t purpose) -> void
 {
-    const client_t client{path};
+    const client_t client{path,purpose};
     std::lock_guard lock{vault_mutex};
     const auto id = storage_digest(email);
     const auto directory = vault_directory(client);
@@ -688,4 +700,23 @@ auto google_oauth_user_t::download_picture(const std::shared_ptr<request_control
     }
     catch (...) { }
     return {};
+}
+
+auto google_oauth_user_t::cloud_request(const std::string& method, const std::string& url,
+    const std::string& body, const std::shared_ptr<request_control_t>& control) -> oauth_response_t
+{
+    require(m_impl->client.purpose==oauth_purpose_t::cloud,"Cloud authorization is required.");
+    require(url.starts_with("https://cloudresourcemanager.googleapis.com/") ||
+        url.starts_with("https://serviceusage.googleapis.com/") ||
+        url.starts_with("https://iam.googleapis.com/"),"Unexpected Google Cloud endpoint.");
+    for (int attempt{}; attempt<2; ++attempt)
+    {
+        auto token = tokens();
+        if (token.expires<=std::time(nullptr)+60) token = refresh(control);
+        const auto response = request(url,body,{"Authorization: Bearer "+token.access,
+            "Content-Type: application/json; charset=UTF-8"},control,method);
+        if (response.status!=401 || attempt) return {response.status,response.body};
+        refresh(control);
+    }
+    throw std::runtime_error{"Google Cloud authorization failed."};
 }

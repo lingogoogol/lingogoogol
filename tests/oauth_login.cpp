@@ -14,6 +14,96 @@ int main(int argc,char** argv)
         check(argc==2,"Missing test mode.");
         const std::string mode{argv[1]};
         auto control=std::make_shared<request_control_t>();
+        if (mode=="cloud-denied")
+        {
+            const auto previous = google_oauth_user_t::restore("client.json","oauth@example.invalid",oauth_purpose_t::cloud);
+            bool denied{};
+            try { google_oauth_user_t::login("client.json",control,oauth_purpose_t::cloud); }
+            catch (const std::exception&) { denied = true; }
+            check(denied && google_oauth_user_t::restore("client.json","oauth@example.invalid",oauth_purpose_t::cloud)->credential_id()==previous->credential_id(),
+                "Missing consent replaced a valid Cloud login.");
+            std::println("PASS: incomplete Cloud consent preserves the previous login.");
+            return 0;
+        }
+        if (mode=="seed-cloud")
+        {
+            auto user = google_oauth_user_t::login("client.json",control,oauth_purpose_t::cloud);
+            check(bool(user) && !user->download_picture(control).empty(),"Cloud login or portrait failed.");
+            std::println("PASS: cloud user login and portrait saved separately from Drive credentials.");
+            return 0;
+        }
+        if (mode=="cloud-project-interrupt" || mode=="cloud-lookup-error")
+        {
+            auto user = google_oauth_user_t::restore("client.json","oauth@example.invalid",oauth_purpose_t::cloud);
+            bool failed{};
+            try { google_cloud_prepare(user,control); }
+            catch (const std::exception& error)
+            {
+                const auto message = std::string{error.what()};
+                failed = mode=="cloud-project-interrupt" ? message.find("HTTP 503")!=std::string::npos :
+                    message.find("HTTP 403")!=std::string::npos || message.find("HTTP 404")!=std::string::npos;
+            }
+            check(failed,"Failed project lookup/operation did not stop provisioning.");
+            std::println("PASS: project lookup/operation failure preserves the remembered project.");
+            return 0;
+        }
+        if (mode=="cloud-resume")
+        {
+            auto user = google_oauth_user_t::restore("client.json","oauth@example.invalid",oauth_purpose_t::cloud);
+            check(google_cloud_prepare(user,control).starts_with("storage-ai-"),"Saved project did not survive restart.");
+            std::println("PASS: project reuse across processes and delayed search indexing.");
+            return 0;
+        }
+        if (mode=="cloud-provision")
+        {
+            auto user = google_oauth_user_t::restore("client.json","oauth@example.invalid",oauth_purpose_t::cloud);
+            check(google_oauth_user_t::saved_accounts("client.json",oauth_purpose_t::cloud).size()==1,
+                "Cloud identity was not restored.");
+            const auto project = google_cloud_prepare(user,control);
+            check(project.starts_with("storage-ai-") && google_cloud_prepare(user,control)==project,
+                "Existing project was not reused.");
+            const auto path = google_cloud_create_account(user,control,project,"test-service");
+            const auto key = nlohmann::json::parse(storage_read(path));
+            check(key.at("client_email")=="test-service@"+project+".iam.gserviceaccount.com",
+                "Wrong private key was saved.");
+            auto fails = [](auto work)
+            {
+                try { work(); } catch (const std::exception&) { return; }
+                throw std::runtime_error{"Invalid provisioning operation succeeded."};
+            };
+            for (const auto name : {"bad","UPPER-case","-invalid","invalid-","invalid_name"})
+                fails([&] { google_cloud_create_account(user,control,project,name); });
+            const auto original = storage_read(path);
+            fails([&] { google_cloud_create_account(user,control,project,"test-service"); });
+            check(storage_read(path)==original,"Existing key was overwritten.");
+            bool disabled{};
+            try { google_cloud_create_account(user,control,project,"fail-key"); }
+            catch (const std::exception& error)
+            {
+                disabled = std::string{error.what()}.find("projects/999999")!=std::string::npos &&
+                    std::string{error.what()}.find("iam.googleapis.com")!=std::string::npos;
+            }
+            check(disabled,"SERVICE_DISABLED did not identify the actual API consumer project.");
+            check(!std::filesystem::exists("key/"+project+"-fail-key.json"),"Denied key creation wrote a credential.");
+            fails([&] { google_cloud_create_account(user,control,project,"race-save"); });
+            check(storage_read("key/"+project+"-race-save.json")=="keep-existing","A concurrent key file was overwritten.");
+            std::filesystem::remove("key/"+project+"-race-save.json");
+            control->cancel();
+            fails([&] { google_cloud_prepare(user,control); });
+            check(google_oauth_user_t::restore("client.json")->address()=="oauth@example.invalid",
+                "Cloud provisioning changed the legacy Drive selection.");
+            auto updated = nlohmann::json::parse(storage_read("client.json"));
+            updated["installed"]["client_id"] = "updated-client.apps.googleusercontent.com";
+            storage_atomic_write("updated-client.json",updated.dump());
+            check(google_oauth_user_t::saved_accounts("updated-client.json",oauth_purpose_t::cloud).empty(),
+                "A new OAuth client inherited the old client's authorizations.");
+            fails([&] { google_oauth_user_t::restore("updated-client.json",user->address(),oauth_purpose_t::cloud); });
+            std::filesystem::remove("updated-client.json");
+            std::filesystem::remove(path);
+            std::filesystem::remove("key");
+            std::println("PASS: new/existing Cloud projects, paginated search, API operations, service account/key creation, validation, cancellation, permission denial and atomic key-save rollback.");
+            return 0;
+        }
         if (mode=="seed-login")
         {
             check(bool(google_oauth_user_t::login("client.json",control)),"Fixture login did not succeed.");

@@ -4,6 +4,7 @@ import std;
 
 import external.Windows;
 import external.Vulkan;
+import external.GLFW;
 import lgo.container.str;
 import external.processenv;
 import external.shellapi;
@@ -120,6 +121,14 @@ auto app() -> void
         std::shared_ptr<storage_session_t> session;
     };
     std::future<settings_result_t> settings_job;
+    struct cloud_result_t
+    {
+        enum class kind_t { login, project, account, remove } kind;
+        std::shared_ptr<google_oauth_user_t> user;
+        std::string project;
+        std::filesystem::path path;
+    };
+    std::future<cloud_result_t> cloud_job;
     auto settings_control{std::make_shared<request_control_t>()};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
     std::shared_ptr<progress_button_t> settings_retry, settings_cancel, settings_confirm;
@@ -204,7 +213,7 @@ auto app() -> void
     };
     auto apply_settings = [&](storage_settings_t candidate, bool interactive)
     {
-        if (settings_job.valid())
+        if (settings_job.valid() || cloud_job.valid())
             throw std::runtime_error{"設定正在套用，請稍候"};
         if (clearing_session || (load_state.m_session && load_state.m_session->clearing))
             throw std::runtime_error{"清除期間請稍後再切換設定"};
@@ -248,6 +257,68 @@ auto app() -> void
             if (config.contains("installed")) candidate.account_path = settings.account_path;
         }
         return candidate;
+    };
+    auto begin_cloud = [&](std::string name, std::function<cloud_result_t()> work)
+    {
+        if (settings_job.valid() || cloud_job.valid() || clearing_session)
+            throw std::runtime_error{"另一個帳戶操作仍在執行"};
+        settings_control->retry();
+        settings_control->cancelled = false;
+        begin_settings_row(std::move(name),true);
+        persistent.m_switching = true;
+        persistent.m_directory_status->set_text("帳戶操作中");
+        cloud_job = std::async(std::launch::async,std::move(work));
+    };
+    persistent.m_cloud_users = [&]
+    {
+        auto candidate = settings;
+        candidate.account_path = "client.json";
+        if (!std::filesystem::exists(candidate.account_path)) return std::vector<oauth_saved_account_t>{};
+        return google_oauth_user_t::saved_accounts(candidate.account_path,oauth_purpose_t::cloud);
+    };
+    persistent.m_cloud_login = [&]
+    {
+        try
+        {
+            auto candidate = settings;
+            candidate.account_path = "client.json";
+            begin_cloud("新增 Google 使用者",[path=candidate.account_path,control=settings_control]
+            {
+                auto user = google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
+                user->download_picture(control);
+                return cloud_result_t{cloud_result_t::kind_t::login,std::move(user),{}, {}};
+            });
+        }
+        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
+    };
+    persistent.m_use_cloud_user = [&](const std::string& email)
+    {
+        try
+        {
+            auto candidate = settings;
+            candidate.account_path = "client.json";
+            begin_cloud("準備服務帳戶專案："+email,[path=candidate.account_path,email,control=settings_control]
+            {
+                auto user = google_oauth_user_t::restore(path,email,oauth_purpose_t::cloud);
+                const auto project = google_cloud_prepare(user,control);
+                return cloud_result_t{cloud_result_t::kind_t::project,std::move(user),project,{}};
+            });
+        }
+        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
+    };
+    persistent.m_remove_cloud_user = [&](const std::string& email)
+    {
+        try
+        {
+            auto candidate = settings;
+            candidate.account_path = "client.json";
+            begin_cloud("移除 Google 使用者："+email,[path=candidate.account_path,email]
+            {
+                google_oauth_user_t::remove(path,email,oauth_purpose_t::cloud);
+                return cloud_result_t{cloud_result_t::kind_t::remove,{}, {}, {}};
+            });
+        }
+        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
     };
     persistent.m_service_accounts = [] { return storage_service_accounts(); };
     persistent.m_select_service_account = [&](const service_account_file_t& account)
@@ -566,6 +637,68 @@ auto app() -> void
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
         using namespace std::chrono_literals;
+        if (cloud_job.valid() && cloud_job.wait_for(0s)==std::future_status::ready)
+        {
+            persistent.m_switching = false;
+            settings_retry->hide();
+            settings_cancel->hide();
+            settings_separator->hide();
+            settings_confirm->set_pos(settings_retry->get_pos());
+            settings_confirm->show();
+            try
+            {
+                auto result = cloud_job.get();
+                settings_text->set_text("已完成："+settings_task_name,false);
+                persistent.m_directory_status->set_text("");
+                if (result.kind==cloud_result_t::kind_t::project)
+                {
+                    persistent.m_dialog_queue.push_back([&,user=result.user,project=result.project]
+                    {
+                        persistent.m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                            &engine,&depth,"新增服務帳戶",
+                            std::vector<std::string>{"專案："+project,"名稱為 6–30 個小寫英文字母、數字或連字號"},
+                            std::vector<std::pair<std::string,std::string>>{{"服務帳戶名稱",""}});
+                        persistent.m_dialog_done = [&,user,project](bool accepted,const std::vector<std::string>& values)
+                        {
+                            if (!accepted)
+                            {
+                                persistent.m_deferred.push_back([&] { persistent.m_open_accounts(true); });
+                                return true;
+                            }
+                            try
+                            {
+                                const auto name = values.at(0);
+                                google_cloud_validate_account(name);
+                                begin_cloud("建立服務帳戶："+name,[user,project,name,control=settings_control]
+                                {
+                                    const auto path = google_cloud_create_account(user,control,project,name);
+                                    return cloud_result_t{cloud_result_t::kind_t::account,user,project,path};
+                                });
+                                return true;
+                            }
+                            catch (const std::exception& error)
+                            { persistent.m_dialog->error(error.what()); return false; }
+                        };
+                    });
+                }
+                else
+                {
+                    // Cloud authorization supplies provisioning identities only;
+                    // it must never replace the active Drive storage session.
+                    if (result.kind==cloud_result_t::kind_t::login) glfwFocusWindow(engine.window_get());
+                    if (result.kind==cloud_result_t::kind_t::account)
+                        settings_text->set_text("已完成："+settings_task_name+"（"+result.path.generic_string()+"）",false);
+                    persistent.m_open_accounts(result.kind!=cloud_result_t::kind_t::account);
+                }
+            }
+            catch (const std::exception& error)
+            {
+                settings_text->set_text(settings_control->cancelled ? "已取消："+settings_task_name :
+                    "失敗："+settings_task_name+"（"+error.what()+"）",false);
+                persistent.m_directory_status->set_text(settings_control->cancelled ? "操作已取消" : "帳戶操作失敗");
+                persistent.m_open_accounts(true);
+            }
+        }
         if (settings_job.valid() && settings_job.wait_for(0s) == std::future_status::ready)
         {
             try

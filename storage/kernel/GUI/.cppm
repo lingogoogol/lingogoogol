@@ -38,6 +38,11 @@ export {
         std::function<void(storage_settings_t)> m_apply_settings;
         std::function<void()> m_clear_account;
         std::function<void()> m_login;
+        bool m_cloud_accounts{};
+        std::function<void(bool)> m_open_accounts;
+        std::function<std::vector<oauth_saved_account_t>()> m_cloud_users;
+        std::function<void()> m_cloud_login;
+        std::function<void(const std::string&)> m_use_cloud_user, m_remove_cloud_user;
         std::function<std::vector<service_account_file_t>()> m_service_accounts;
         std::function<void(const service_account_file_t&)> m_select_service_account;
         std::function<std::vector<oauth_saved_account_t>()> m_saved_accounts;

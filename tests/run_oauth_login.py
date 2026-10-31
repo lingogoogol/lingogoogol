@@ -61,6 +61,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.path.startswith('/fixture/authorize?'):
+            url = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)['url'][0]
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            assert query['scope'] == [cloud_scopes]
+            self.server.scope = query['scope'][0]
+            self.server.challenge = query['code_challenge'][0]
+            self.server.redirect = query['redirect_uri'][0]
+            return self.reply(200, {})
+        if self.path.startswith(('/resource/', '/services/', '/iam/')):
+            return self.cloud('GET')
+        if self.path == '/oauth2/v2/userinfo':
+            return self.reply(200, {'email': self.server.email, 'verified_email': True,
+                                    'picture': self.server.host + '/photo'})
         if urllib.parse.urlsplit(self.path).path == '/drive/v3/files':
             try:
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -94,6 +107,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.rfile.read(2)
             else:
                 data = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            if self.path.startswith(('/resource/', '/services/', '/iam/')):
+                return self.cloud('POST', data)
             if self.path.startswith('/drive/v3/files'):
                 value = json.loads(data)
                 assert value['parents'] == ['appDataFolder'], 'Blob escaped appDataFolder.'
@@ -177,10 +192,86 @@ class Handler(BaseHTTPRequestHandler):
             self.server.grants[self.server.refresh] = jwk
             return self.reply(200, {'access_token': 'fixture-access-' + str(self.server.issued),
                                     'refresh_token': self.server.refresh, 'token_type': 'Bearer', 'expires_in': 3600,
-                                    'scope': 'https://www.googleapis.com/auth/drive.appdata'}, 'success-nonce')
+                                    'scope': self.server.scope if not getattr(self.server, 'deny_scope', False) else
+                                        'https://www.googleapis.com/auth/cloud-platform'}, 'success-nonce')
         except Exception:
             self.server.errors.append(traceback.format_exc())
             self.reply(500, {'error': 'fixture-validation'})
+
+    def do_DELETE(self):
+        self.cloud('DELETE')
+
+    def cloud(self, method, body=b''):
+        try:
+            assert self.headers.get('Authorization', '').startswith('Bearer fixture-access-')
+            path = urllib.parse.urlsplit(self.path).path
+            value = json.loads(body) if body else {}
+            self.server.cloud_calls.append((method, path))
+            if path == '/resource/v3/projects:search':
+                if self.server.cloud_rejections == 0:
+                    self.server.cloud_rejections += 1
+                    return self.reply(401, {})
+                # Ignore case-insensitive/partial matches and inactive projects.
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                if 'pageToken' not in query:
+                    return self.reply(200, {'projects': [{'projectId': 'unrelated-project', 'displayName': 'Storage-AI', 'state': 'ACTIVE'},
+                        {'projectId': 'deleted-project', 'displayName': 'storage-ai', 'state': 'DELETE_REQUESTED'}], 'nextPageToken': 'next-page'})
+                assert query['pageToken'] == ['next-page']
+                # Newly created projects may remain absent from search even
+                # though a direct GET already sees them. Keep hiding them until
+                # a specific cold-start discovery scenario opts into visibility.
+                return self.reply(200, {'projects': list(self.server.projects.values()) if self.server.search_visible else []})
+            if path == '/resource/v3/projects' and method == 'POST':
+                assert value['displayName'] == 'storage-ai' and re.fullmatch(r'storage-ai-[a-f0-9]{16}', value['projectId'])
+                if value['projectId'] in self.server.projects:
+                    return self.reply(409, {})
+                self.server.projects[value['projectId']] = {**value, 'name': 'projects/123456', 'state': 'ACTIVE'}
+                return self.reply(200, {'name': 'operations/project-create'})
+            if path.startswith('/resource/v3/projects/'):
+                if self.server.project_read_status:
+                    return self.reply(self.server.project_read_status, {})
+                identifier = path.rsplit('/', 1)[-1]
+                return self.reply(200, self.server.projects[identifier]) if identifier in self.server.projects else self.reply(404, {})
+            if path == '/resource/v3/operations/project-create':
+                if self.server.project_operation_failure:
+                    self.server.project_operation_failure = False
+                    return self.reply(503, {})
+                return self.reply(200, {'done': True})
+            if path == '/services/v1/projects/123456/services:batchEnable':
+                assert value['serviceIds'] == ['drive.googleapis.com']
+                return self.reply(200, {'name': 'operations/enable-apis'})
+            if path == '/services/v1/operations/enable-apis':
+                return self.reply(200, {'done': True})
+            if path.startswith('/iam/v1/projects/'):
+                parts = path.split('/')
+                project = parts[4]
+                if path.endswith('/serviceAccounts'):
+                    name = value['accountId']
+                    email = name + '@' + project + '.iam.gserviceaccount.com'
+                    if email in self.server.service_accounts:
+                        return self.reply(409, {})
+                    self.server.service_accounts[email] = name
+                    return self.reply(200, {'email': email})
+                if path.endswith('/keys'):
+                    email = urllib.parse.unquote(parts[6])
+                    name = self.server.service_accounts[email]
+                    assert value == {'privateKeyType': 'TYPE_GOOGLE_CREDENTIALS_FILE', 'keyAlgorithm': 'KEY_ALG_RSA_2048'}
+                    if name == 'fail-key':
+                        return self.reply(403, {'error': {'details': [{'reason': 'SERVICE_DISABLED',
+                            'metadata': {'consumer': 'projects/999999', 'service': 'iam.googleapis.com'}}]}})
+                    credential = {'type': 'service_account', 'project_id': project, 'client_email': email,
+                        'private_key_id': 'fixture-key-id', 'private_key': 'fixture-cloud-private-key'}
+                    if name == 'race-save':
+                        (self.server.directory/'key'/f'{project}-{name}.json').write_text('keep-existing')
+                    return self.reply(200, {'name': f'projects/{project}/serviceAccounts/{email}/keys/fixture-key-id',
+                        'privateKeyData': base64.b64encode(json.dumps(credential).encode()).decode()})
+                if method == 'DELETE':
+                    self.server.revoked_keys += 1
+                    return self.reply(200, {})
+            raise AssertionError((method, path))
+        except Exception:
+            self.server.errors.append(traceback.format_exc())
+            self.reply(500, {})
 
 
 def compile_source(original, replacement, output):
@@ -192,19 +283,21 @@ def compile_source(original, replacement, output):
     subprocess.run(command, cwd=build, check=True)
 
 
-def link(output, entry, oauth=None, easy=None, gui=False):
+def link(output, entry, oauth=None, easy=None, gui=False, cloud=None):
     text = subprocess.check_output(['ninja', '-t', 'commands', 'storage.exe'], cwd=build, text=True).splitlines()[-1]
     command = shlex.split(text.split(' && ')[1])
     if not gui:
         command = [arg for arg in command if arg not in ('-mwindows', '-municode') and not arg.startswith('-Wl,--out-implib')]
     command[command.index('-o') + 1] = str(output)
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(entry)
-    for target, obj in [('oauth', oauth), ('easy', easy)]:
+    for target, obj in [('oauth', oauth), ('easy', easy), ('cloud', cloud)]:
         if obj:
             command[command.index('storage/google/' + target + '/libstorage.google.' + target + '.a')] = str(obj)
             command.append('storage/google/' + target + '/CMakeFiles/storage.google.' + target + '.dir/.cppm.obj')
     subprocess.run(command, cwd=build, check=True)
 
+
+cloud_scopes = 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile'
 
 with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     test = Path(directory)
@@ -217,6 +310,10 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     server.grants = {}
     server.identifiers = set()
     server.errors = []
+    server.scope = 'https://www.googleapis.com/auth/drive.appdata'
+    server.projects, server.service_accounts = {}, {}
+    server.cloud_calls, server.revoked_keys, server.cloud_rejections = [], 0, 0
+    server.search_visible, server.project_operation_failure, server.project_read_status = False, True, 0
     threading.Thread(target=server.serve_forever, daemon=True).start()
     config = {'installed': {'client_id': 'fixture.apps.googleusercontent.com',
                            'client_secret': 'fixture-public-client-secret',
@@ -228,6 +325,12 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     fixture = fixture.replace('https://oauth2.googleapis.com/token', server.host + '/token')
     fixture = fixture.replace('https://accounts.google.com/o/oauth2/v2/auth', server.host + '/auth')
     fixture = fixture.replace('https://www.googleapis.com/drive/v3/about?', server.host + '/drive/v3/about?')
+    fixture = fixture.replace('https://www.googleapis.com/oauth2/v2/userinfo', server.host + '/oauth2/v2/userinfo')
+    cloud_fixture = (source/'storage/google/cloud/.cpp').read_text()
+    for host, route in [('cloudresourcemanager', 'resource'), ('serviceusage', 'services'), ('iam', 'iam')]:
+        fixture = fixture.replace('https://' + host + '.googleapis.com/', server.host + '/' + route + '/')
+        cloud_fixture = cloud_fixture.replace('https://' + host + '.googleapis.com/', server.host + '/' + route + '/')
+    (test/'cloud.cpp').write_text(cloud_fixture)
     fixture = fixture.replace('CURLOPT_PROTOCOLS_STR,"https"', 'CURLOPT_PROTOCOLS_STR,"http,https"')
     fixture = fixture.replace('CURLOPT_VERBOSE,0L);', 'CURLOPT_VERBOSE,0L);\n        curl_easy_setopt(easy.get(),CURLOPT_PROXY,"");')
     fixture = fixture.replace('if (!m_impl->photo.starts_with("https://"))', 'if (!m_impl->photo.starts_with("http://127.0.0.1:"))')
@@ -245,8 +348,9 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     (test / 'easy.cpp').write_text(easy_fixture)
     compile_source('storage/google/easy/.cpp', test / 'easy.cpp', test / 'easy.obj')
     compile_source('storage/google/oauth/.cpp', test / 'oauth.cpp', test / 'oauth.obj')
+    compile_source('storage/google/cloud/.cpp', test / 'cloud.cpp', test / 'cloud.obj')
     compile_source('storage/storage.cpp', source / 'tests/oauth_login.cpp', test / 'test.obj')
-    link(test / 'test.exe', test / 'test.obj', test / 'oauth.obj', test / 'easy.obj')
+    link(test / 'test.exe', test / 'test.obj', test / 'oauth.obj', test / 'easy.obj', cloud=test/'cloud.obj')
     link(test / 'production.exe', test / 'test.obj')
     for dll in (runtime / 'bin').glob('*.dll'):
         shutil.copy2(dll, test / dll.name)
@@ -254,7 +358,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
     vault.mkdir()
     env = {**os.environ, 'WINEDEBUG': '-all', 'STORAGE_OAUTH_TEST_VAULT': 'Z:' + str(vault).replace('/', '\\')}
 
-    def browser():
+    def browser(cloud=False):
         path = test / 'browser-url'
         deadline = time.monotonic() + 20
         while not path.exists() and time.monotonic() < deadline:
@@ -263,7 +367,8 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(path.read_text()).query)
         assert query['response_type'] == ['code'] and query['code_challenge_method'] == ['S256']
         assert query['prompt'] == ['consent'] and query['access_type'] == ['offline']
-        assert query['scope'] == ['https://www.googleapis.com/auth/drive.appdata']
+        assert query['scope'] == [cloud_scopes if cloud else 'https://www.googleapis.com/auth/drive.appdata']
+        server.scope = query['scope'][0]
         assert len(unb64(query['state'][0])) == 32 and len(unb64(query['code_challenge'][0])) == 32
         server.challenge = query['code_challenge'][0]
         server.redirect = query['redirect_uri'][0]
@@ -286,7 +391,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                                    cwd=test, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             if authorize:
-                browser()
+                browser(cloud=mode in ('seed-cloud', 'cloud-denied'))
             stdout, stderr = process.communicate(timeout=30)
             assert not server.errors, server.errors
             assert process.returncode == 0, stdout + stderr
@@ -307,7 +412,29 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         server.email = 'second@example.invalid'
         run('second-login', authorize=True)
         server.email = 'oauth@example.invalid'
-        files = list(vault.rglob('*.json'))
+        run('seed-cloud', authorize=True)
+        server.deny_scope = True
+        run('cloud-denied', authorize=True)
+        server.deny_scope = False
+        run('cloud-project-interrupt')
+        run('cloud-provision')
+        # A separate process must reuse the ID, even with an empty search index.
+        run('cloud-resume')
+        for status in (403, 404):
+            server.project_read_status = status
+            run('cloud-lookup-error')
+        server.project_read_status = 0
+        run('cloud-resume')
+        # A fresh workspace can still discover an existing project normally.
+        shutil.rmtree(test/'cloud_project')
+        server.search_visible = True
+        run('cloud-resume')
+        server.search_visible = False
+        assert len(server.projects)==1 and server.revoked_keys==1
+        assert server.cloud_rejections==1
+        assert sum(method=='POST' and path=='/resource/v3/projects' for method,path in server.cloud_calls)==1
+        assert sum(method=='POST' and '/fail-key%40' in path and path.endswith('/keys') for method,path in server.cloud_calls)==1
+        files = [p for p in vault.rglob('*.json') if p.parent.name==hashlib.sha256(config['installed']['client_id'].encode()).hexdigest()]
         assert len(files) == 1
         envelope = files[0].read_text()
         assert 'fixture-access-' not in envelope and 'fixture-refresh-' not in envelope
@@ -462,7 +589,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
                 {"account_path",load_state.m_session ? load_state.m_session->account_path : ""},
                 {"root_id",load_state.m_session ? load_state.m_session->root : ""},
                 {"account_rows",account_rows},{"signed_in_accounts",signed_in_accounts},
-                {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},
+                {"switching",persistent.m_switching},{"menu",bool(persistent.m_account_menu)},{"cloud_menu",persistent.m_cloud_accounts},{"dialog",bool(persistent.m_dialog)},
                 {"actions",actions},{"footer",footer},{"account_scroll",account_scroll},{"account_rows_settled",!progress_column->children_moving()},{"account_tasks",account_tasks},{"tasks",load_state.m_task_list.size()},
                 {"paused",!load_state.m_task_list.empty() && load_state.m_task_list.front()->m_control->user_paused}}.dump());
         }
@@ -474,7 +601,7 @@ with tempfile.TemporaryDirectory(prefix='storage-oauth-') as directory:
         (test / 'launch-cwd').mkdir()
         for dll in (runtime / 'bin').glob('*.dll'):
             shutil.copy2(dll, test / 'bin' / dll.name)
-        link(test / 'bin/gui.exe', test / 'entry.obj', test / 'oauth.obj', test / 'easy.obj', gui=True)
+        link(test / 'bin/gui.exe', test / 'entry.obj', test / 'oauth.obj', test / 'easy.obj', gui=True, cloud=test/'cloud.obj')
         for resource in ('font', 'shader'):
             shutil.copytree(runtime / resource, test / resource)
         (test / 'root').mkdir()
@@ -510,7 +637,7 @@ def click(at):command('mousemove','--window',window,at['x'],at['y'],'click','1')
 def open_menu():
     at=snapshot();click({'x':at['x']+16,'y':at['y']+16})
     value=wait(lambda:snapshot() if snapshot()['menu'] else None,'Account dropdown missing.')
-    assert value['footer'][0]['text']=='新增帳戶' and not value['footer'][0]['enabled']
+    assert value['footer'][0]['text']=='新增帳戶' and value['footer'][0]['enabled']
     assert all('portrait' not in row for row in value['account_rows']),'Account row retained a portrait.'
     return value
 def close_menu():
@@ -544,20 +671,60 @@ try:
     assert narrow['x']+32<=800 and narrow['x']>=752
     menu=open_menu()
     assert not menu['actions'] and not menu['account_rows'] and len(menu['footer'])==1
-    click(menu['footer'][0]);time.sleep(.2)
-    assert snapshot()['menu'] and not snapshot()['switching'] and not snapshot()['account_tasks']
-    assert not Path('browser-url').exists(),'Disabled add-account button launched OAuth.'
-    # Verify disabled border pixels after moving the cursor off the button.
-    command('mousemove',1500,1100)
-    def disabled_border():
-        at=snapshot()['footer'][0]
-        geometry=dict(line.split('=',1) for line in command('getwindowgeometry','--shell',window).splitlines())
-        image=ImageGrab.grab()
-        # std_dark_gray (linear 0.25) is approximately 137 in the sRGB capture.
-        pixel=image.getpixel((int(geometry['X'])+at['x'],int(geometry['Y'])+at['y']-15))
-        return image if all(abs(c-137)<8 for c in pixel[:3]) else None
-    wait(disabled_border,'Disabled add-account border was not gray.').save('/tmp/storage-service-accounts-disabled.png')
-    close_menu()
+    # Replace the service dropdown with the Cloud identity dropdown.
+    click(menu['footer'][0])
+    cloud=wait(lambda:snapshot() if snapshot()['menu'] and snapshot()['cloud_menu'] else None,'Cloud dropdown missing.')
+    assert len(cloud['account_rows'])==1 and cloud['account_rows'][0]['portrait']
+    assert [a['text'] for a in cloud['actions']]==['使用','移除'] and len(cloud['footer'])==1
+    click(cloud['footer'][0])
+    wait(lambda:Path('browser-url').exists(),'Cloud OAuth browser did not open.')
+    import urllib.request,urllib.parse,os
+    url=Path('browser-url').read_text()
+    query=urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+    assert set(query['scope'][0].split())=={
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/userinfo.email','https://www.googleapis.com/auth/userinfo.profile'}
+    host='http://127.0.0.1:'+os.environ['STORAGE_GPU_TEST_PORT']
+    urllib.request.urlopen(host+'/fixture/authorize?url='+urllib.parse.quote(url,safe='')).close()
+    urllib.request.urlopen(query['redirect_uri'][0]+'?code=fixture-code&state='+query['state'][0]).close()
+    wait(lambda:snapshot()['menu'] and snapshot()['cloud_menu'] and not snapshot()['switching'],'Cloud login did not return to its dropdown.')
+    assert not snapshot()['has_session'] and len(snapshot()['account_rows'])==1
+    close_menu();acknowledge('新增 Google 使用者')
+    restart()
+    menu=open_menu();click(menu['footer'][0])
+    cloud=wait(lambda:snapshot() if snapshot()['cloud_menu'] and snapshot()['menu'] else None,'Cloud history did not restore.')
+    assert len(cloud['account_rows'])==1 and cloud['account_rows'][0]['portrait']
+    ImageGrab.grab().save('/tmp/storage-cloud-accounts-menu.png')
+    def use_cloud():
+        click(snapshot()['actions'][0])
+        wait(lambda:snapshot()['dialog'],'Service account name dialog missing.')
+        current=snapshot()
+        return (current['window_w']-720)//2,(current['window_h']-276)//2
+    ox,oy=use_cloud()
+    ImageGrab.grab().save('/tmp/storage-cloud-service-account-dialog.png')
+    # Cancel after project/API preparation; no service account should be added.
+    click({'x':ox+496,'y':oy+244})
+    wait(lambda:not snapshot()['dialog'] and snapshot()['menu'],'Cancel did not return to Cloud users.')
+    close_menu();acknowledge('準備服務帳戶專案：oauth@example.invalid')
+    restart() # Cancelling the name dialog must retain the project across restart.
+    menu=open_menu();click(menu['footer'][0]);wait(lambda:snapshot()['cloud_menu'] and snapshot()['menu'],'Cloud menu missing.')
+    ox,oy=use_cloud()
+    click({'x':ox+100,'y':oy+148});command('type','bad')
+    click({'x':ox+616,'y':oy+244});time.sleep(.15)
+    assert snapshot()['dialog'],'Invalid service account name was accepted.'
+    click({'x':ox+100,'y':oy+148});command('key','ctrl+a');command('type','gui-service')
+    click({'x':ox+616,'y':oy+244})
+    wait(lambda:not snapshot()['dialog'] and not snapshot()['switching'] and snapshot()['menu'] and not snapshot()['cloud_menu'],
+         'Service account creation did not return to the service dropdown.')
+    assert not snapshot()['has_session'] and len(snapshot()['account_rows'])==1
+    created=list(Path('key').glob('*-gui-service.json'));assert len(created)==1
+    assert json.loads(created[0].read_text())['type']=='service_account'
+    close_menu();acknowledge('準備服務帳戶專案：oauth@example.invalid');acknowledge('建立服務帳戶：gui-service')
+    menu=open_menu();click(menu['footer'][0]);wait(lambda:snapshot()['cloud_menu'] and snapshot()['menu'],'Cloud menu missing before removal.')
+    click(snapshot()['actions'][1])
+    wait(lambda:snapshot()['menu'] and not snapshot()['switching'] and not snapshot()['account_rows'],'Cloud identity removal failed.')
+    close_menu();acknowledge('移除 Google 使用者：oauth@example.invalid')
+    created[0].unlink();Path('key').rmdir()
     Path('resize-wide').touch()
     wait(lambda:snapshot()['window_w']==1536,'Wide layout did not return.')
     Path('key').mkdir()
@@ -724,7 +891,7 @@ try:
     assert all(p.suffix in ('.exe','.dll') for p in Path('bin').iterdir()),'GUI wrote resources or state into bin.'
     assert all(len(p.name)==64 and all(c in '0123456789abcdef' for c in p.name)
                for folder in ('root','blob_queue') for p in Path(folder).iterdir())
-    print('PASS: service-only dropdown, text account entry, no portraits, disabled gray add-account button and click isolation; service discovery/sorting/duplicate emails, scrolling/resizing, GPU recovery, named switch results, isolated logout, paused checkpoints and login persistence across restarts.')
+    print('PASS: service-only dropdown, text account entry, no portraits, Cloud provisioning submenu, portraits and account creation; service discovery/sorting/duplicate emails, scrolling/resizing, GPU recovery, named switch results, isolated logout, paused checkpoints and login persistence across restarts.')
 finally:
     if app.poll() is None:app.kill();app.wait()
 '''
@@ -741,8 +908,11 @@ finally:
             assert 'finished_all!' in logs and 'uncaught exception:' not in logs
             assert 'fixture-access-' not in logs + stdout + stderr
             assert 'fixture-refresh-' not in logs + stdout + stderr
-            assert getattr(server, 'photos', 0) == photos_before_gui, 'GUI downloaded a profile photo.'
-            assert not (test / 'browser-url').exists(), 'GUI launched OAuth from its disabled button.'
+            assert 'fixture-cloud-private-key' not in logs + stdout + stderr
+            assert getattr(server, 'photos', 0) == photos_before_gui+1, 'Cloud login must download exactly one portrait.'
+            assert (test / 'browser-url').exists(), 'Cloud login did not launch OAuth.'
+            assert len(server.projects)==1, 'Cancelling/restarting created a second project while search lagged.'
+            assert sum(method=='POST' and path=='/resource/v3/projects' for method,path in server.cloud_calls)==1
             print(stdout.strip())
         finally:
             if process.poll() is None:
@@ -801,9 +971,9 @@ try:
     assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['tasks']==0 and snapshot()['root_id']=='multi-root-0'
     current=menu()
     assert not current['account_rows'] and not current['actions']
-    assert len(current['footer'])==2 and not current['footer'][0]['enabled']
-    click(current['footer'][0]);time.sleep(.2)
-    assert snapshot()['menu'] and len(snapshot()['signed_in_accounts'])==2 and not snapshot()['switching']
+    assert len(current['footer'])==2 and current['footer'][0]['enabled']
+    click(current['footer'][0]);wait(lambda:snapshot()['menu'] and snapshot()['cloud_menu'],'Cloud submenu missing with background OAuth sessions.')
+    assert not snapshot()['account_rows'] and len(snapshot()['footer'])==1 and len(snapshot()['signed_in_accounts'])==2
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Multi-user menu did not close.')
     restart()
     assert len(snapshot()['signed_in_accounts'])==2 and snapshot()['root_id']=='multi-root-0' and snapshot()['tasks']==0
@@ -816,7 +986,7 @@ try:
     current=menu()
     assert not current['account_rows'] and not current['actions'] and len(current['footer'])==1
     command('key','alt+F4');assert app.wait(timeout=10)==0
-    print('PASS: existing OAuth logins restore but remain hidden from the service-only dropdown; disabled add-account button and sign out all survive restart.')
+    print('PASS: existing OAuth logins restore but remain hidden from the service-only dropdown; Cloud submenu and sign out all survive restart.')
 finally:
     if app is not None and app.poll() is None:app.kill();app.wait()
 '''

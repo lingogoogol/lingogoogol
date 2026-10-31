@@ -1,6 +1,7 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "profile.hpp"
 
 module storage.kernel.GUI;
 
@@ -22,6 +23,117 @@ import storage.kernel.load;
 
 namespace
 {
+    class profile_image_t : public lgo::rect_t
+    {
+        lgo::engine_t* m_engine;
+        lgo::pixmap_t m_pixels{128,32}; // 32 RGBA pixels per row.
+        lgo::image_t m_image;
+        lgo::image_view_t m_view;
+        auto release() -> void { m_view = {}; m_image.clear(); }
+        auto upload() -> void
+        {
+            auto guard{m_engine->gpu_lock()};
+            auto commands{m_engine->command_buffer_create("profile.upload")};
+            lgo::buffer_t staging{{.name="profile.staging",
+                .device_physical=&m_engine->device_physical_get(),.device=&m_engine->device_get(),
+                .pixmap=&m_pixels}};
+            // Photos are encoded as sRGB. Decode on sampling only when the
+            // framebuffer will encode linear output back to sRGB; UNORM
+            // surface fallbacks instead preserve the original encoded bytes.
+            const auto surface = m_engine->format_get();
+            const auto format = surface==vk::Format::eB8G8R8A8Srgb || surface==vk::Format::eR8G8B8A8Srgb ?
+                vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+            m_image.init({.name="profile",.device_physical=&m_engine->device_physical_get(),
+                .device=&m_engine->device_get(),.command_buffer=&commands,.buffer=&staging,
+                .width=32,.height=32,.format=format,
+                .usage=vk::ImageUsageFlagBits::eTransferDst|vk::ImageUsageFlagBits::eSampled,
+                .property=vk::MemoryPropertyFlagBits::eDeviceLocal});
+            m_view.init({.name="profile",.device=&m_engine->device_get(),
+                .image=&m_image.interface_get(),.format=format,
+                .aspect=vk::ImageAspectFlagBits::eColor});
+            commands.end();
+            const vk::SubmitInfo info{.commandBufferCount=1,.pCommandBuffers=&*commands};
+            m_engine->command_queue_get().submit(info,nullptr);
+            m_engine->command_queue_get().waitIdle();
+        }
+        auto fallback() -> void
+        {
+            for (std::int64_t y{};y<32;++y) for (std::int64_t x{};x<32;++x)
+            {
+                const bool head = (x-16)*(x-16)+(y-11)*(y-11)<30;
+                const bool body = y>19 && (x-16)*(x-16)+(y-31)*(y-31)<120;
+                for (int c{};c<3;++c) m_pixels[x*4+c,y]=std::byte{static_cast<unsigned char>(head||body?210:65)};
+                m_pixels[x*4+3,y]=std::byte{255};
+            }
+        }
+        auto decode(const std::string& data) -> bool
+        {
+            if (data.empty() || data.size()>1024*1024) return false;
+            const auto initialized = CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+            struct uninit_t { bool enabled; ~uninit_t(){if(enabled)CoUninitialize();} } uninit{SUCCEEDED(initialized)};
+            IWICImagingFactory* factory_ptr{};
+            if (FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,
+                IID_IWICImagingFactory,reinterpret_cast<void**>(&factory_ptr)))) return false;
+            std::unique_ptr<IWICImagingFactory,storage_com_release_t<IWICImagingFactory>> factory{factory_ptr};
+            IWICStream* stream_ptr{};
+            if (FAILED(factory->CreateStream(&stream_ptr))) return false;
+            std::unique_ptr<IWICStream,storage_com_release_t<IWICStream>> stream{stream_ptr};
+            if (FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(const_cast<char*>(data.data())),
+                static_cast<DWORD>(data.size())))) return false;
+            IWICBitmapDecoder* decoder_ptr{};
+            if (FAILED(factory->CreateDecoderFromStream(stream.get(),nullptr,WICDecodeMetadataCacheOnDemand,&decoder_ptr))) return false;
+            std::unique_ptr<IWICBitmapDecoder,storage_com_release_t<IWICBitmapDecoder>> decoder{decoder_ptr};
+            IWICBitmapFrameDecode* frame_ptr{};
+            if (FAILED(decoder->GetFrame(0,&frame_ptr))) return false;
+            std::unique_ptr<IWICBitmapFrameDecode,storage_com_release_t<IWICBitmapFrameDecode>> frame{frame_ptr};
+            UINT width{},height{};
+            if (FAILED(frame->GetSize(&width,&height)) || !width || !height || width>4096 || height>4096) return false;
+            IWICBitmapScaler* scaler_ptr{};
+            if (FAILED(factory->CreateBitmapScaler(&scaler_ptr))) return false;
+            std::unique_ptr<IWICBitmapScaler,storage_com_release_t<IWICBitmapScaler>> scaler{scaler_ptr};
+            if (FAILED(scaler->Initialize(frame.get(),32,32,WICBitmapInterpolationModeFant))) return false;
+            IWICFormatConverter* converter_ptr{};
+            if (FAILED(factory->CreateFormatConverter(&converter_ptr))) return false;
+            std::unique_ptr<IWICFormatConverter,storage_com_release_t<IWICFormatConverter>> converter{converter_ptr};
+            if (FAILED(converter->Initialize(scaler.get(),GUID_WICPixelFormat32bppRGBA,
+                WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))) return false;
+            return SUCCEEDED(converter->CopyPixels(nullptr,128,4096,reinterpret_cast<BYTE*>(&m_pixels[0])));
+        }
+      public:
+        profile_image_t(lgo::engine_t* engine,lgo::depth_tracker_t* tracker,lgo::depth_range_t depth,
+                        lgo::pos_2D pos,lgo::size_2D size)
+            :lgo::rect_t{engine,tracker,depth,pos,size,&m_view},m_engine{engine}
+        {
+            fallback();
+            if (engine->gpu_available())
+                try { upload(); }
+                catch (const vk::DeviceLostError&) { engine->device_lost(); }
+            engine->texture_observer_set(this,[this]{release();},[this]{upload();});
+        }
+        ~profile_image_t() override
+        {
+            hide();
+            m_engine->texture_observer_remove(this);
+            auto guard{m_engine->gpu_lock()};
+            try { m_engine->flush(); } catch (...) { }
+            release();
+        }
+        auto picture(const std::string& data) -> void
+        {
+            // Hide the primitive before replacing the image it references.
+            const bool visible = status()==shown;
+            hide();
+            auto guard{m_engine->gpu_lock()};
+            m_engine->flush();
+            if (!decode(data)) fallback();
+            release();
+            if (m_engine->gpu_available())
+                try { upload(); }
+                catch (const vk::DeviceLostError&) { m_engine->device_lost(); }
+            if (visible) show();
+        }
+    };
+
     auto file_size_text(std::uint64_t size) -> std::string
     {
         constexpr std::array<std::string_view,4> units{"B","kB","MB","GB"};
@@ -1231,17 +1343,27 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         persistent->m_layout_accounts = {};
         persistent->m_account_menu.reset();
     };
-    persistent->m_toggle_accounts = [engine,state,persistent,load_state]
+    persistent->m_open_accounts = [engine,state,persistent,load_state](bool cloud)
     {
-        if (persistent->m_account_menu) { persistent->m_close_accounts(); return; }
         if (persistent->m_switching || persistent->m_dialog) return;
-        std::vector<service_account_file_t> accounts;
+        persistent->m_close_accounts();
+        persistent->m_cloud_accounts = cloud;
+        struct account_row_t
+        {
+            std::string address, portrait;
+            std::optional<service_account_file_t> service;
+        };
+        std::vector<account_row_t> accounts;
         try
         {
-            if (persistent->m_service_accounts)
-                accounts = persistent->m_service_accounts();
+            if (cloud && persistent->m_cloud_users)
+                for (const auto& user : persistent->m_cloud_users())
+                    accounts.push_back({user.address,user.portrait,{}});
+            else if (!cloud && persistent->m_service_accounts)
+                for (const auto& account : persistent->m_service_accounts())
+                    accounts.push_back({account.address,{},account});
         }
-        catch (const std::exception&) { persistent->m_directory_status->set_text("無法讀取服務帳戶列表"); }
+        catch (const std::exception&) { persistent->m_directory_status->set_text(cloud ? "無法讀取 Google 使用者列表" : "無法讀取服務帳戶列表"); }
         auto menu = std::make_unique<lgo::state_t>(engine,state->get_depth_tracker());
         // An independent overlay avoids toolbar clipping. Modal dialogs remain
         // in front; the full-window click area prevents clicks reaching files.
@@ -1276,29 +1398,39 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto row = rows->add_object_shared<lgo::divx_soft_t>(content,
                 lgo::size_2D{row_width,48},lgo::size_1D{8},
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
-            // Reserve both action labels, two separators and four row gaps;
-            // the email uses the space previously occupied by the portrait.
+            if (cloud)
+            {
+                auto photo = row->add_object_shared<profile_image_t>(content,lgo::size_2D{32,32});
+                photo->picture(account.portrait);
+                row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
+            }
+            // Cloud users have a portrait; service accounts keep a text-only row.
+            const auto photo_width = cloud ? 32+lgo::std_line_size.x+2*8 : 0;
             row->add_object<lgo::text_line_scroll_std_t>(content,account.address,lgo::std_white,
-                lgo::size_1D{row_width-2*32-2*lgo::std_line_size.x-4*8},false);
+                lgo::size_1D{row_width-2*32-2*lgo::std_line_size.x-4*8-photo_width},false);
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
-            row->add_object<progress_button_t>(content,[persistent,defer,account]
+            row->add_object<progress_button_t>(content,[persistent,defer,account,cloud]
                 {
-                    defer([persistent,account]
+                    defer([persistent,account,cloud]
                     {
-                        if (persistent->m_select_service_account) persistent->m_select_service_account(account);
+                        if (cloud) { if (persistent->m_use_cloud_user) persistent->m_use_cloud_user(account.address); }
+                        else if (persistent->m_select_service_account) persistent->m_select_service_account(*account.service);
                     });
                 },
-                "登入",lgo::std_blue_light,lgo::size_1D{32});
+                cloud ? "使用" : "登入",lgo::std_blue_light,lgo::size_1D{32});
             const bool signed_in = persistent->m_account_signed_in ?
                 persistent->m_account_signed_in(account.address,false) :
                 load_state->m_session && !load_state->m_session->oauth &&
                     load_state->m_session->address==account.address;
             row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
-            auto logout = row->add_object_shared<progress_button_t>(content,[persistent,defer,account]
-                { defer([persistent,email=account.address]
-                    { if (persistent->m_logout_account) persistent->m_logout_account(email,false); }); },
-                "登出",lgo::std_blue_light,lgo::size_1D{32});
-            logout->set_enabled(signed_in);
+            auto logout = row->add_object_shared<progress_button_t>(content,[persistent,defer,account,cloud]
+                { defer([persistent,email=account.address,cloud]
+                    {
+                        if (cloud) { if (persistent->m_remove_cloud_user) persistent->m_remove_cloud_user(email); }
+                        else if (persistent->m_logout_account) persistent->m_logout_account(email,false);
+                    }); },
+                cloud ? "移除" : "登出",lgo::std_blue_light,lgo::size_1D{32});
+            logout->set_enabled(cloud || signed_in);
         }
         // Include the soft div's gaps between rows in the viewport height.
         // Counting only row heights adds a scrollbar even when all rows fit.
@@ -1308,9 +1440,13 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         auto footer = panel->add_object_shared<lgo::divx_soft_t>(content,
             lgo::size_2D{width-16,32},lgo::size_1D{8},
             lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
-        auto add_account = footer->add_object_shared<lgo::button_classic_std_t>(content,[] {},"新增帳戶");
-        add_account->set_enabled(false);
-        if (persistent->m_has_signed_in_accounts ? persistent->m_has_signed_in_accounts() : bool(load_state->m_session))
+        footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer,cloud]
+            { defer([persistent,cloud]
+                {
+                    if (cloud) { if (persistent->m_cloud_login) persistent->m_cloud_login(); }
+                    else persistent->m_open_accounts(true);
+                }); },"新增帳戶");
+        if (!cloud && (persistent->m_has_signed_in_accounts ? persistent->m_has_signed_in_accounts() : bool(load_state->m_session)))
             footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
                 { defer(persistent->m_logout); },"登出所有");
         persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
@@ -1335,6 +1471,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 persistent->m_deferred.push_back(persistent->m_close_accounts);
         });
         persistent->m_layout_accounts();
+    };
+    persistent->m_toggle_accounts = [persistent]
+    {
+        if (persistent->m_account_menu) persistent->m_close_accounts();
+        else persistent->m_open_accounts(false);
     };
     persistent->m_account_status = [login=std::weak_ptr{persistent->m_login_button}](bool signed_in)
     {

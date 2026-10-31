@@ -9,6 +9,7 @@ target_sources(
 )
 
 add_subdirectory(oauth)
+add_subdirectory(cloud)
 add_subdirectory(account)
 add_subdirectory(easy)
 add_subdirectory(batch)
@@ -20,6 +21,7 @@ target_link_libraries(
         common
     PUBLIC
         storage.google.oauth
+        storage.google.cloud
         storage.google.account
         storage.google.easy
         storage.google.batch
