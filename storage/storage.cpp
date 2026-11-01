@@ -93,6 +93,7 @@ auto app() -> void
     {
         storage_settings_t settings;
         std::shared_ptr<storage_session_t> session;
+        bool reopen_space_menu{true};
     };
     std::future<settings_result_t> settings_job;
     struct cloud_result_t
@@ -219,7 +220,8 @@ auto app() -> void
         multi.interrupt();
     };
     auto start_settings = [&](storage_settings_t candidate, std::string name,
-                              std::function<std::shared_ptr<storage_session_t>()> work)
+                              std::function<std::shared_ptr<storage_session_t>()> work,
+                              bool reopen_space_menu = true)
     {
         if (settings_job.valid() || cloud_job.valid() || clearing_session)
             throw std::runtime_error{"另一個操作仍在執行"};
@@ -229,8 +231,8 @@ auto app() -> void
         begin_settings_row(std::move(name),true);
         persistent.m_switching=true;
         settings_job=std::async(std::launch::async,
-            [candidate=std::move(candidate),work=std::move(work)]
-            { return settings_result_t{candidate,work()}; });
+            [candidate=std::move(candidate),work=std::move(work),reopen_space_menu]
+            { return settings_result_t{candidate,work(),reopen_space_menu}; });
     };
     persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
@@ -247,7 +249,7 @@ auto app() -> void
             if (current && candidate.root_path!=settings.root_path)
                 return runtime.open_space(candidate,*std::ranges::find(candidate.spaces,current->storage_id,&storage_space_t::id),settings_control);
             return current;
-        });
+        }, false);
     };
     auto sign_in = [&](std::string id)
     {
@@ -665,7 +667,7 @@ auto app() -> void
                 persistent.m_refresh();
                 // Only operations started from the space menu return to it.
                 // Closing the independent settings dialog leaves it closed.
-                persistent.m_deferred.push_back(show_menu);
+                if (result.reopen_space_menu) persistent.m_deferred.push_back(show_menu);
             }
             catch (const std::exception& error)
             {

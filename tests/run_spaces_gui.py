@@ -217,7 +217,7 @@ try:
         wait(lambda:not snapshot()['dialog'] and not snapshot()['switching'] and
              (workers is None or snapshot()['workers']==workers),'Settings did not finish')
         time.sleep(.2) # Include the deferred-menu turn after settings completion.
-        if snapshot()['menu']:command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu stayed open')
+        assert not snapshot()['menu'],'Closing settings opened the space dropdown'
     emit('session-log-before-settings')
     initial_files=set(original_log.parent.glob('*.txt'))
     s=open_settings();finish_settings(s,False)
