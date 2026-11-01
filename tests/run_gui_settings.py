@@ -369,7 +369,7 @@ int wmain(int argc, wchar_t** argv) {
         assert server.deleted == {'root', 'outside-app-root'}, 'Clear scope differs from the confirmed whole account.'
         logs = ''.join(path.read_text(errors='replace') for path in (test / 'changed-logfile').glob('*.txt'))
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
-        assert 'HTTP error exchange:' in logs and 'status=503' in logs
+        assert 'HTTP status exchange:' in logs and 'status=503' in logs
         assert '--- request ---' in logs and '--- response ---' in logs
         assert not list(test.glob('clear.*')), 'Completed clear marker was retained.'
         print('PASS: production GUI Cancel/OK, UTF-8 paste, Backspace, Ctrl+A, live settings/font/log reload, typed whole-account clear, running/error cancellation, action geometry, retry, terminal acknowledgement and clean close')

@@ -142,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
                 '/diagnostic/connection-reset': 'log-b@fixture.invalid',
             }.get(path)
             if path.startswith('/batch'):
-                expected_account = 'log-a@fixture.invalid' if '/files/sync-' in body else 'log-b@fixture.invalid'
+                expected_account = 'log-b@fixture.invalid' if '/files/bg-' in body else 'log-a@fixture.invalid'
             if expected_account:
                 token = self.headers.get('Authorization', '').removeprefix('Bearer ')
                 with state.lock:
@@ -153,7 +153,8 @@ class Handler(BaseHTTPRequestHandler):
             if path.endswith('/connection-reset'):
                 self.close_connection = True
                 return
-            status = 500 if path.endswith('/unselected') else 403
+            status = int(path.rsplit('/', 1)[-1]) if path.startswith('/diagnostic/status/') else \
+                500 if path.endswith('/unselected') else 403
             return self.respond(status, {'error': {'message': 'diagnostic-message'},
                                         'access_token': 'access-secret', 'refresh_token': 'refresh-secret',
                                         'privateKeyData': 'private-data-secret'})

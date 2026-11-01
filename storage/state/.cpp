@@ -149,8 +149,8 @@ auto storage_settings_t::parse_http_log_codes(std::string_view text) -> std::set
         {
             long code{};
             const auto [last, error] = std::from_chars(token.data(), token.data() + token.size(), code);
-            if (error != std::errc{} || last != token.data() + token.size() || code < 400 || code > 599)
-                throw std::runtime_error{"HTTP 錯誤碼須為 400–599，以逗號或空白分隔；留空停用"};
+            if (error != std::errc{} || last != token.data() + token.size())
+                throw std::runtime_error{"HTTP 狀態碼須為可表示的整數，以逗號或空白分隔；留空停用"};
             codes.insert(code);
         }
         if (end == std::string_view::npos) break;

@@ -1232,7 +1232,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
-                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes},
+                        {"記錄 HTTP 狀態碼（如 0,200,403；留空停用）", settings.http_log_codes},
                         {"worker 數量（正整數）", std::to_string(settings.worker_count)}},
                     "確定", std::vector<std::pair<std::string,bool>>{{"batch_request",settings.batch_request}});
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)

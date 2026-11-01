@@ -232,7 +232,8 @@ try:
     s=open_settings();finish_settings(s,False)
     assert not Path('settings.json').exists(),'Cancel unexpectedly saved settings'
     time.sleep(1.1) # Cross a filename timestamp boundary to detect log rotation.
-    s=open_settings();settings_field(s,6,'17');finish_settings(s,True,17)
+    s=open_settings();settings_field(s,5,'0,200,302,700');settings_field(s,6,'17');finish_settings(s,True,17)
+    assert json.loads(Path('settings.json').read_text())['http_log_codes']=='0,200,302,700'
     assert snapshot()['log_path']==session_log and set(original_log.parent.glob('*.txt'))==initial_files
     emit('session-log-after-settings')
     open_menu();s=open_settings();finish_settings(s,False)

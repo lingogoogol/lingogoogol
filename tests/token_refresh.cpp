@@ -334,19 +334,24 @@ auto batch_errors(lgo::engine_t& engine) -> void
 auto http_logging(lgo::engine_t& engine) -> void
 {
     check(storage_settings_t{}.http_log_codes.empty(), "Detailed logging must default to disabled.");
-    check(storage_settings_t::parse_http_log_codes(" 403, 500\t503,403 ") == std::set<long>{403,500,503},
-          "HTTP error code list did not accept separators/duplicates.");
-    for (const auto* text : {"200", "399", "600", "403x", "4xx", "-403", "403;500"})
+    check(storage_settings_t::parse_http_log_codes(" 0,100,200,302,399,403,500\t503,403,600,700,-1 ") ==
+          std::set<long>{-1,0,100,200,302,399,403,500,503,600,700},
+          "HTTP status code list did not accept integers/separators/duplicates.");
+    const auto limits = std::set<long>{std::numeric_limits<long>::min(),std::numeric_limits<long>::max()};
+    check(storage_settings_t::parse_http_log_codes(std::format("{},{}",*limits.begin(),*limits.rbegin()))==limits,
+          "Representable HTTP status filter boundaries were rejected.");
+    for (const auto* text : {"1.5", "403x", "4xx", "403;500", "999999999999999999999999999"})
     {
         bool rejected{};
         try { storage_settings_t::parse_http_log_codes(text); }
         catch (const std::runtime_error&) { rejected = true; }
-        check(rejected, "Invalid HTTP error filter was accepted.");
+        check(rejected, "Invalid HTTP status filter was accepted.");
     }
     storage_settings_t settings;
-    settings.http_log_codes = "403,503";
+    settings.http_log_codes = "0,200,302,403,503,700";
     settings.save();
     check(storage_settings_t::load().http_log_codes == settings.http_log_codes, "HTTP filter did not persist.");
+    settings.http_log_codes = "403,503";
     auto logs = [] { return lgo::get_file_str("logfile/token-refresh.txt"); };
     auto attempt = [&](std::string path, std::string body)
     {
@@ -363,7 +368,7 @@ auto http_logging(lgo::engine_t& engine) -> void
     };
     auto disabled = attempt("/diagnostic/disabled", "disabled-request");
     disabled.run_try();
-    check(logs().find("HTTP error exchange:") == std::string::npos, "Default filter logged HTTP bodies.");
+    check(logs().find("HTTP status exchange:") == std::string::npos, "Default filter logged HTTP bodies.");
     http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
     auto sync = attempt("/diagnostic/sync",
         R"({"visible":"sync-body","private_key":"private-secret\nline","client_secret":"client-secret","assertion":"assertion-secret"})");
@@ -461,15 +466,15 @@ auto http_logging(lgo::engine_t& engine) -> void
           "Fixture did not exercise account attribution for connection errors.");
     const auto text = logs();
     const auto disabled_text = text.substr(disabled_begin);
-    check(disabled_text.find("HTTP error exchange:") == std::string::npos,
+    check(disabled_text.find("HTTP status exchange:") == std::string::npos,
           "Disabled body logging still recorded an exchange.");
     check(disabled_text.find("account=log-b@fixture.invalid") != std::string::npos,
           "Default error summaries lost the service account.");
     std::map<std::string,std::size_t> attributed;
     std::size_t position{};
-    while ((position = text.find("HTTP error exchange:",position)) != std::string::npos)
+    while ((position = text.find("HTTP status exchange:",position)) != std::string::npos)
     {
-        const auto end = text.find("--- end HTTP error exchange ---",position);
+        const auto end = text.find("--- end HTTP status exchange ---",position);
         check(end != std::string::npos,"Incomplete diagnostic log record.");
         const auto exchange = text.substr(position,end-position);
         for (const auto& [marker,address] : std::map<std::string,std::string>{
@@ -500,7 +505,36 @@ auto http_logging(lgo::engine_t& engine) -> void
                                "disabled-request", "unselected-request", "off-request", "batch-sync-internal-1",
                                "batch-bg-missing-1", "/files/sync-ok", "/files/bg-ok"})
         check(text.find(secret) == std::string::npos, "Unselected HTTP details or credentials leaked to logs.");
-    std::println("PASS: HTTP error settings, sync/multi/batch filtering, retry pairing, service-account attribution, handle rebinding, connection errors, live disable and credential redaction");
+    const auto status_begin = text.size();
+    http_error_log_codes_set({0,200,201,302,700});
+    for (const auto code : {200,201,302,700})
+    {
+        auto response = attempt("/diagnostic/status/"+std::to_string(code),"selected-status-request");
+        response.run_try();
+        check(response.valid()==(code>=200 && code<300),"Logging changed HTTP success classification.");
+    }
+    curl_multi_t success_multi;
+    success_multi.add(attempt("/diagnostic/status/200","multi-success-body"));
+    const auto success_deadline = std::chrono::steady_clock::now()+5s;
+    while (!success_multi.ready_nonempty())
+    {
+        success_multi.run();
+        check(std::chrono::steady_clock::now()<success_deadline,"Successful HTTP logging stalled.");
+        pump(engine);
+    }
+    check(success_multi.ready_get_unique()->valid(),"Successful HTTP logging changed the multi response.");
+    auto selected_batch = batch("success-",first_account);
+    selected_batch.run();
+    check(selected_batch.valid(),"Success logging changed batch retry results.");
+    const auto status_text = logs().substr(status_begin);
+    for (const auto* marker : {"status=200", "status=201", "status=302", "status=700",
+                              "multi-success-body", "/files/success-ok", "Content-ID=0", "[REDACTED]"})
+        check(status_text.find(marker)!=std::string::npos,"Selected HTTP status detail was not logged.");
+    for (const auto* secret : {"authorization-secret", "cookie-secret", "query-secret", "access-secret",
+                              "refresh-secret", "private-data-secret", "response-cookie-secret", "fixture-token-"})
+        check(status_text.find(secret)==std::string::npos,"Successful HTTP logging exposed credentials.");
+    http_error_log_codes_set({});
+    std::println("PASS: integer HTTP status settings including zero, sync/multi/batch success and error filtering, retry pairing, service-account attribution, live disable and credential redaction");
 }
 
 int main(int argc, char** argv)

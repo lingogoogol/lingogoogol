@@ -63,11 +63,11 @@ auto log_http_error_exchange(long code, std::string_view request, std::string_vi
 {
     if (!http_error_log_matches(code)) return;
     // One log write keeps a request and its response together across workers.
-    lgo::log_file("HTTP error exchange: " + std::format("{:%FT%T}", std::chrono::system_clock::now()) +
+    lgo::log_file("HTTP status exchange: " + std::format("{:%FT%T}", std::chrono::system_clock::now()) +
         " status=" + std::to_string(code) + " " + std::string{context} +
         "\n--- request ---\n" + redact_http_secrets(std::string{request}) +
         "\n--- response ---\n" + redact_http_secrets(std::string{response}) +
-        "\n--- end HTTP error exchange ---\n");
+        "\n--- end HTTP status exchange ---\n");
 }
 
 auto curl_easy_t::log_http_response() const -> void
