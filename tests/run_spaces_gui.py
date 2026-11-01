@@ -43,13 +43,21 @@ class Handler(fixture['Handler']):
             if path == '/resource/v3/projects' and method == 'POST':
                 assert value['displayName'] == 'My Project'
                 assert re.fullmatch(r'storage-ai-[a-f0-9]{16}', value['projectId'])
+                self.server.project_attempts.append(value['projectId'])
+                # A genuine POST denial still fails. Retrying that name must
+                # reuse its ID even when GET hides the missing project as 403.
+                if len(self.server.project_attempts) == 1:
+                    return self.reply(403, {})
                 assert value['projectId'] not in self.server.projects
                 self.server.projects[value['projectId']] = {**value, 'name': 'projects/123456', 'state': 'ACTIVE'}
                 return self.reply(200, {'name': 'operations/project-create'})
             if path.startswith('/resource/v3/projects/'):
                 project = path.rsplit('/', 1)[-1]
-                return self.reply(200, self.server.projects[project]) if project in self.server.projects else self.reply(404, {})
+                return self.reply(200, self.server.projects[project]) if project in self.server.projects else self.reply(403, {})
             if path in ('/resource/v3/operations/project-create', '/services/v1/operations/enable'):
+                if path == '/resource/v3/operations/project-create' and self.server.project_operation_failure:
+                    self.server.project_operation_failure = False
+                    return self.reply(503, {})
                 return self.reply(200, {'done': True})
             if path == '/services/v1/projects/123456/services:batchEnable':
                 assert value == {'serviceIds': ['drive.googleapis.com']}
@@ -142,6 +150,7 @@ observation = r'''
                 {"session",load_state.m_session ? load_state.m_session->storage_id : ""},
                 {"root",load_state.m_session ? load_state.m_session->root : ""},
                 {"status",persistent.m_directory_status->get_text()},
+                {"cloud_task",settings_text ? settings_text->get_text() : ""},
                 {"window_w",engine.get_window_size().x},{"window_h",engine.get_window_size().y}};
             storage_atomic_write("spaces-ui.json",value.dump());
         }
@@ -248,6 +257,11 @@ try:
     assert snapshot()['rows'][0]['text']=='oauth@example.invalid' and snapshot()['rows'][0]['photo']
     assert [a['text'] for a in snapshot()['rows'][0]['actions']]==['使用','移除']
     action('使用');ready(3);assert not snapshot()['rows'],'Project ID/state filtering failed'
+    for status in (403, 503):
+        footer('新增專案');dialog('My Project');closed();ready(3)
+        assert not snapshot()['rows'] and 'HTTP '+str(status) in snapshot()['cloud_task'], snapshot()
+    # Resume the saved operation after a process restart, without another POST.
+    restart();open_menu();action('編輯');ready(1);footer('新增帳戶');ready(2);action('使用');ready(3)
     footer('新增專案');dialog('My Project');closed();ready(3)
     assert [r['text'] for r in snapshot()['rows']]==['My Project']
     action('使用');ready(4);assert not snapshot()['rows'],'External IAM account was listed'
@@ -301,6 +315,7 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
     server.issued = server.refreshes = server.created = 0
     server.grants, server.projects, server.service_accounts = {}, {}, {}
     server.identifiers, server.errors, server.cloud_calls = set(), [], []
+    server.project_attempts, server.project_operation_failure = [], True
     server.email = 'oauth@example.invalid'
     server.scope = fixture['cloud_scopes']
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -368,7 +383,11 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
         subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24', 'python3', '-c', interaction,
                         str(test/'gui.exe'), str(test/'clipboard.exe')], cwd=test, env=env, check=True, timeout=200)
         assert not server.errors, server.errors
-        assert sum(method=='POST' and path=='/resource/v3/projects' for method,path in server.cloud_calls)==1
+        assert len(server.project_attempts)==2 and len(set(server.project_attempts))==1
+        project_calls = [(method,path) for method,path in server.cloud_calls if path.startswith('/resource/v3/projects')
+                         and path != '/resource/v3/projects:search']
+        assert project_calls[0] == ('POST', '/resource/v3/projects'), 'Fresh creation queried an inaccessible ID first'
+        assert project_calls[1] == ('GET', '/resource/v3/projects/'+server.project_attempts[0])
         assert sum(method=='POST' and path.endswith('/serviceAccounts') for method,path in server.cloud_calls)==1
         assert not any(method=='DELETE' for method,path in server.cloud_calls), 'Local removal deleted Cloud resources'
     except BaseException:

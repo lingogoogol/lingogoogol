@@ -133,7 +133,8 @@ auto google_cloud_create_project(const std::shared_ptr<google_oauth_user_t>& use
     // Retain an uncertain creation's ID/operation across retries and restarts.
     const auto record = std::filesystem::path{"cloud_project"}/storage_digest(user->storage_id()+":"+name);
     auto saved = std::filesystem::exists(record) ? json::parse(storage_read(record)) : json::object();
-    if (!saved.contains("id"))
+    const bool fresh = !saved.contains("id");
+    if (fresh)
     {
         std::random_device random;
         saved = {{"id","storage-ai-"+storage_digest(std::to_string(random())+
@@ -143,14 +144,23 @@ auto google_cloud_create_project(const std::shared_ptr<google_oauth_user_t>& use
     const auto project = saved.at("id").get<std::string>();
     if (!saved.contains("operation"))
     {
-        const auto existing = user->cloud_request("GET",std::string{resources}+"projects/"+project,"",control);
-        if (existing.status==404)
+        bool create = fresh;
+        if (!fresh)
+        {
+            const auto url = std::string{resources}+"projects/"+project;
+            const auto existing = user->cloud_request("GET",url,"",control);
+            // Resource Manager can hide a nonexistent project behind 403.
+            // A lookup must not prevent creation. On an uncertain retry, POST
+            // only the saved ID; a conflict remains an error, never a new ID.
+            create = existing.status==403 || existing.status==404;
+            if (!create) response_value(existing,"GET",url);
+        }
+        if (create)
         {
             saved["operation"] = call(user,control,"POST",std::string{resources}+"projects",
                 {{"projectId",project},{"displayName",name}});
             storage_atomic_write(record,saved.dump());
         }
-        else response_value(existing,"GET",resources);
     }
     if (saved.contains("operation")) operation(user,control,resources,saved.at("operation"));
     const auto metadata = call(user,control,"GET",std::string{resources}+"projects/"+project);
