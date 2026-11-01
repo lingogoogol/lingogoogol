@@ -67,6 +67,7 @@ auto google_batch_t::clear() -> void
     m_part.clear();
     m_id_current = 0;
     m_auth_rejected = false;
+    m_direct = false;
     m_failure.clear();
     return;
 }
@@ -134,6 +135,22 @@ auto google_batch_t::method_post() -> void
     return;
 }
 
+auto google_batch_t::method_single() -> void
+{
+    if (m_part.size()!=1) throw std::logic_error{"A direct request requires exactly one part."};
+    m_direct = true;
+    const auto& request = m_part.begin()->second.m_request;
+    google_easy_t::path_set(request.path_get());
+    for (const auto& [name,value] : request.queries()) query_set(name,value);
+    for (const auto& [name,value] : request.headers()) header_set(name,value);
+    const auto verb = request.method_get();
+    if (verb=="GET") method_get();
+    else if (verb=="PATCH") method_patch(request.body_get());
+    else if (verb=="DELETE") method_delete();
+    else if (verb=="POST") curl_easy_t::method_post(request.body_get());
+    else throw std::logic_error{"Unsupported direct request method."};
+}
+
 auto google_batch_t::run_clear_if_full() -> void
 {
     if (size() >= 100)
@@ -148,6 +165,21 @@ auto google_batch_t::parse() -> void
 {
     m_auth_rejected = false;
     m_failure.clear();
+    if (m_direct)
+    {
+        auto& part = m_part.begin()->second;
+        part.m_response = http_response_t{"HTTP/1.1 " + std::to_string(m_response_code) +
+                                         " Response\r\n\r\n" + payload()};
+        part.m_valid = curl_easy_t::valid() || (part.m_allow_missing && m_response_code==404);
+        m_auth_rejected = m_response_code==401;
+        if (!part.m_valid)
+        {
+            m_failure = "Google request failed: HTTP " + std::to_string(m_response_code);
+            const auto reason = api_error_reason(payload());
+            if (!reason.empty()) m_failure += " (" + reason + ")";
+        }
+        return;
+    }
     if (!curl_easy_t::valid()) return;
 
     // A successful outer HTTP response can still contain a truncated or invalid
@@ -261,7 +293,7 @@ auto google_batch_t::failure_reason() const -> std::string
 
 auto google_batch_t::valid() -> bool
 {
-    if (!curl_easy_t::valid())
+    if (!m_direct && !curl_easy_t::valid())
     {
         return false;
     }
@@ -281,6 +313,7 @@ auto google_batch_t::resume() -> void
     // Consume this attempt's auth failure. A later transport/framing failure
     // must not mistake an old retained subresponse for another fresh 401.
     m_auth_rejected = false;
+    if (m_direct) return;
     body_generate();
     // The method remains POST. Replacing just the pending body preserves the
     // authentication retry budget; method_post() would start a new request.

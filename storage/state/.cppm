@@ -27,6 +27,7 @@ export {
         std::vector<storage_space_t> spaces;
         std::string selected_space;
         int network_retries{-1};
+        bool batch_request{true};
         // Empty disables request/response diagnostics, including batch subrequests.
         std::string http_log_codes;
         static auto parse_http_log_codes(std::string_view text) -> std::set<long>;

@@ -349,11 +349,18 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
 
     auto& easy_idle_arr{persistent->m_easy_idle};
     auto& load_easy_status_map{persistent->m_easy_status};
-    if (load_easy_status_map.empty())
+    const auto slot_limit = load_state->m_settings.batch_request ? transfer_slot_count : 6400;
+    persistent->m_worker_limit = slot_limit;
+    const auto parts = load_state->m_settings.batch_request ? google_batch_t::part_count_max() : 1;
+    const auto max_window = std::numeric_limits<std::size_t>::max();
+    load_state->m_directory_request_window.store(
+        slot_limit>max_window/parts ? max_window : slot_limit*parts,std::memory_order_relaxed);
+    // Retain idle handles when reducing the limit. In-flight handles and their
+    // request mode are never reconstructed or cancelled by a settings change.
+    while (load_easy_status_map.size()<slot_limit)
     {
-        easy_idle_arr.resize(load_easy_count);
-        for (std::size_t i{}; i < easy_idle_arr.size(); ++i)
-            load_easy_status_map[easy_idle_arr[i].interface_get()].m_text_index = i;
+        easy_idle_arr.emplace_back();
+        load_easy_status_map[easy_idle_arr.back().interface_get()].m_text_index = load_easy_status_map.size();
     }
 
     persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " +
@@ -364,6 +371,9 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     persistent->show_diagnostics(glfwGetKey(engine->window_get(), GLFW_KEY_F3));
     for (auto& load_easy_status : load_easy_status_map)
     {
+        const auto index = load_easy_status.second.m_text_index;
+        if (!persistent->m_diagnostics_visible ||
+            index / persistent->m_diagnostics_page_size != persistent->m_diagnostics_page) continue;
         std::string status_str{};
         if (load_easy_status.second.m_add_time.time_since_epoch() ==
             std::chrono::steady_clock::duration::zero())
@@ -377,13 +387,17 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
                                               load_easy_status.second.m_add_time}.count(),
                 multi->read_progress(load_easy_status.first));
         }
-        persistent->m_load_easy_status[load_easy_status.second.m_text_index]->set_text(
+        persistent->m_load_easy_status[index % persistent->m_diagnostics_page_size]->set_text(
             std::format("#{:02} {:#018x}, {}", load_easy_status.second.m_text_index + 1,
                         reinterpret_cast<std::uint64_t>(load_easy_status.first), status_str), false);
     }
 
-    // Submit at most one new request per frame; only the worker performs curl.
-    if (!easy_idle_arr.empty())
+    // A one-request-per-frame throttle would take over 100 seconds to fill
+    // 6400 slots at 60 FPS. Bound GUI work by time as well as request count.
+    const auto submit_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{4};
+    for (std::size_t submitted{}; submitted<256 && !easy_idle_arr.empty() &&
+         load_easy_status_map.size()-easy_idle_arr.size()<slot_limit &&
+         std::chrono::steady_clock::now()<submit_deadline; ++submitted)
     {
         CURL* key{easy_idle_arr.back().interface_get()};
         if (transfer_begin(load_state, *multi, std::move(easy_idle_arr.back()), blob_queue))
@@ -391,10 +405,12 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             load_easy_status_map[key].m_add_time = std::chrono::steady_clock::now();
             easy_idle_arr.pop_back();
         }
+        else break;
     }
     multi->run();
     // Bound completion work so a burst of finished requests still permits input/rendering.
-    for (std::size_t completed{}; completed < 8; ++completed)
+    const auto complete_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{4};
+    for (std::size_t completed{}; completed < 256 && std::chrono::steady_clock::now()<complete_deadline; ++completed)
     {
         if (!multi->ready_nonempty())
         {
@@ -1216,7 +1232,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
-                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes}});
+                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes}},
+                    "確定", std::vector<std::pair<std::string,bool>>{{"batch_request",settings.batch_request}});
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)
@@ -1243,6 +1260,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                                 throw std::runtime_error{"重試次數必須是非負整數或無限"};
                             settings.network_retries = count;
                         }
+                        settings.batch_request = values[6]=="true";
                         settings.http_log_codes = values[5];
                         storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)
@@ -1546,8 +1564,8 @@ auto GUI_persistent_t::layout_diagnostics(lgo::pos_2D pos, lgo::size_2D size) ->
     const auto rows{std::min(rows_available, rows_needed)};
     m_diagnostics_summary->set_pos({pos.x + gap, pos.y + gap});
     m_diagnostics_summary->set_size({size.x - 2 * gap, m_diagnostics_summary->get_size().y});
-    m_diagnostics_page_size = columns * rows;
-    m_diagnostics_page = std::min(m_diagnostics_page, (load_easy_count - 1) / m_diagnostics_page_size);
+    m_diagnostics_page_size = std::min<std::size_t>(m_load_easy_status.size(),columns * rows);
+    m_diagnostics_page = std::min(m_diagnostics_page, (std::max(std::size_t{1},m_easy_status.size()) - 1) / m_diagnostics_page_size);
     for (std::size_t i{}; i < m_load_easy_status.size(); ++i)
     {
         auto& label{m_load_easy_status[i]};
@@ -1566,10 +1584,12 @@ auto GUI_persistent_t::layout_diagnostics(lgo::pos_2D pos, lgo::size_2D size) ->
 auto GUI_persistent_t::show_diagnostics(bool show) -> void
 {
     m_diagnostics_visible = show;
-    const auto pages{(load_easy_count + m_diagnostics_page_size - 1) / m_diagnostics_page_size};
+    const auto total = std::max(std::size_t{1},m_easy_status.size());
+    const auto pages{(total + m_diagnostics_page_size - 1) / m_diagnostics_page_size};
     m_diagnostics_page_text->set_text(std::format("F3 連線狀態  {}/{}", m_diagnostics_page + 1, pages), false);
     m_diagnostics_summary->set_text(m_frame_rate->get_text() + "  |  " +
-        m_blob_queue_cycle_rate->get_text() + "  |  " + m_blob_queue_count->get_text(), false);
+        m_blob_queue_cycle_rate->get_text() + "  |  " + m_blob_queue_count->get_text() +
+        std::format("  |  worker: {}/{}",m_easy_status.size()-m_easy_idle.size(),m_worker_limit), false);
     for (auto& object : std::vector<std::shared_ptr<lgo::GUI_object_t>>{
              m_diagnostics_backdrop, m_diagnostics_summary, m_diagnostics_page_text,
              m_diagnostics_previous, m_diagnostics_next})
@@ -1578,7 +1598,7 @@ auto GUI_persistent_t::show_diagnostics(bool show) -> void
         else
             object->hide();
     for (std::size_t i{}; i < m_load_easy_status.size(); ++i)
-        if (show && i / m_diagnostics_page_size == m_diagnostics_page)
+        if (show && i < m_diagnostics_page_size && m_diagnostics_page*m_diagnostics_page_size+i<total)
             m_load_easy_status[i]->show();
         else
             m_load_easy_status[i]->hide();

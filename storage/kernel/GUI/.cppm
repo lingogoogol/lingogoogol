@@ -86,6 +86,7 @@ export {
         std::shared_ptr<lgo::text_line_std_t> m_diagnostics_page_text;
         std::size_t m_diagnostics_page{}, m_diagnostics_page_size{64};
         bool m_diagnostics_visible{};
+        std::size_t m_worker_limit{transfer_slot_count};
         auto layout_diagnostics(lgo::pos_2D pos, lgo::size_2D size) -> void;
         auto show_diagnostics(bool show) -> void;
         // Handle ownership and status belong to this GUI/worker pair, never static storage.

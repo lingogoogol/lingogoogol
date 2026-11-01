@@ -126,6 +126,7 @@ auto storage_settings_t::load() -> storage_settings_t
     result.selected_space = data.value("selected_space",std::string{});
     result.http_log_codes = data.value("http_log_codes", std::string{});
     parse_http_log_codes(result.http_log_codes);
+    result.batch_request = data.value("batch_request", true);
     result.network_retries = data.value("network_retries", -1);
     if (result.network_retries < -1)
         throw std::runtime_error{"Network retries must be nonnegative or -1 (unlimited)."};
@@ -139,7 +140,8 @@ auto storage_settings_t::save() const -> void
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},
-                                                         {"network_retries", network_retries}};
+                                                         {"network_retries", network_retries},
+                                                         {"batch_request", batch_request}};
     data["spaces"] = nlohmann::json::array();
     for (const auto& space : spaces)
         data["spaces"].push_back({{"id",space.id},{"name",space.name},

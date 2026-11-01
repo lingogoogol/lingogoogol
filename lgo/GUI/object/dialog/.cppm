@@ -24,6 +24,13 @@ export namespace lgo
         std::shared_ptr<rect_t> m_panel;
         std::vector<std::pair<std::shared_ptr<GUI_object_t>, pos_2D>> m_children;
         std::vector<std::shared_ptr<text_line_std_input_t>> m_inputs;
+        struct checkbox_t
+        {
+            std::string label;
+            bool checked{};
+            std::shared_ptr<button_text_t<text_line_std_t>> button;
+        };
+        std::vector<checkbox_t> m_checkboxes;
         std::shared_ptr<text_line_std_t> m_error;
         std::optional<bool> m_decision;
         std::int64_t m_height{};
@@ -31,7 +38,8 @@ export namespace lgo
       public:
         modal_dialog_t(engine_t* engine, depth_tracker_t* depth, std::string title,
                        std::vector<std::string> lines,
-                       std::vector<std::pair<std::string, std::string>> fields, std::string accept = "確定");
+                       std::vector<std::pair<std::string, std::string>> fields, std::string accept = "確定",
+                       std::vector<std::pair<std::string, bool>> checkboxes = {});
         ~modal_dialog_t()
         {
             m_state.clear_state();

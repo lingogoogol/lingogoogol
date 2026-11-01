@@ -69,6 +69,7 @@ auto app() -> void
     lgo::depth_tracker_t depth;
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
+    runtime.batch_request = settings.batch_request;
     auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
@@ -650,6 +651,7 @@ auto app() -> void
                 }
                 settings = result.settings;
                 load_state.m_settings = settings;
+                runtime.batch_request = settings.batch_request;
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
                 update_account_status();

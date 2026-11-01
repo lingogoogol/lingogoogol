@@ -28,6 +28,7 @@ int main(int argc,char** argv)
         storage_runtime_t runtime{&close};
         auto settings=storage_settings_t::load();
         settings.network_retries=3;
+        runtime.batch_request=settings.batch_request;
         const auto registered=storage_service_accounts();
         check(registered.size()==4,"External key/ files were treated as program-managed accounts.");
         auto session=runtime.open_space(settings,settings.spaces.at(0),std::make_shared<request_control_t>());
@@ -66,7 +67,7 @@ int main(int argc,char** argv)
         {
             check(!message_loop(&engine,&persistent,&multi,&loads,session->queue.get()),"Window closed early.");
             lgo::text_line_t::pending_load();
-            check(persistent.m_easy_idle.size()+loads.m_end.size()==transfer_slot_count,"A request escaped the shared transfer pool.");
+            check(persistent.m_easy_idle.size()+loads.m_end.size()==(settings.batch_request ? transfer_slot_count : 6400),"A request escaped the shared transfer pool.");
             for (const auto& task:loads.m_task_list)
                 if (task->m_control->paused) throw std::runtime_error{task->m_control->reason()};
         };

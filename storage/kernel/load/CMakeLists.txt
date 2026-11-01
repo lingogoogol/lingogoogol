@@ -11,6 +11,7 @@ target_sources(
         directory.cpp
         space.cpp
         progress.cpp
+        request.cpp
 )
 
 target_link_libraries(

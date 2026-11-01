@@ -17,10 +17,11 @@ namespace lgo
     modal_dialog_t::modal_dialog_t(engine_t* engine, depth_tracker_t* depth, std::string title,
                                    std::vector<std::string> lines,
                                    std::vector<std::pair<std::string, std::string>> fields,
-                                   std::string accept)
+                                   std::string accept,
+                                   std::vector<std::pair<std::string, bool>> checkboxes)
         : m_state{engine, depth}
     {
-        m_height = 152 + 28 * lines.size() + 68 * fields.size();
+        m_height = 152 + 28 * lines.size() + 68 * fields.size() + 36 * checkboxes.size();
         m_backdrop = m_state.add_object_shared<rect_t>(
             depth_range_t{.12f, .13f}, pos_2D{}, engine->get_window_size(), color_t{.008f, .008f, .008f});
         m_panel = m_state.add_object_shared<rect_t>(depth_range_t{.10f, .11f}, pos_2D{},
@@ -53,6 +54,20 @@ namespace lgo
             m_children.emplace_back(input, pos_2D{24, y});
             y += 40;
         }
+        for (const auto& [name, checked] : checkboxes)
+        {
+            const auto index = m_checkboxes.size();
+            auto button = m_state.add_object_shared<button_text_t<text_line_std_t>>(
+                depth_range_t{.02f,.03f}, pos_2D{}, [this,index]
+                {
+                    auto& checkbox = m_checkboxes[index];
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.button->set_text(std::string{checkbox.checked ? "[x] " : "[ ] "} + checkbox.label);
+                }, std::string{checked ? "[x] " : "[ ] "} + name, std_white, size_1D{672});
+            m_checkboxes.push_back({name,checked,button});
+            m_children.emplace_back(button,pos_2D{24,y});
+            y += 36;
+        }
         m_error = label("", y, std_red_light);
         auto cancel{m_state.add_object_shared<button_classic_std_t>(
             depth_range_t{.02f, .03f}, pos_2D{}, [this] { m_decision = false; }, "取消")};
@@ -76,6 +91,8 @@ namespace lgo
         std::vector<std::string> result;
         for (const auto& input : m_inputs)
             result.push_back(input->get_text());
+        for (const auto& checkbox : m_checkboxes)
+            result.push_back(checkbox.checked ? "true" : "false");
         return result;
     }
 } // namespace lgo

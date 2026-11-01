@@ -22,8 +22,8 @@ namespace
             request->account = task.m_session->owner(id);
             // Folder blobs always use a direct request, including discovery,
             // parent updates, cloning and deletion. Only file blobs are batched.
-            if (task.m_session->kind(id)=="folder") request->single = std::move(single);
-            else request->configure = std::move(batch);
+            request->single = std::move(single);
+            if (task.m_session->kind(id)!="folder") request->configure = std::move(batch);
             request->allow_missing = allow_missing;
             auto result = request->response.get_future();
             std::lock_guard lock{task.m_requests_mutex};
@@ -98,7 +98,7 @@ namespace
         while (next<size() || !pending.empty())
         {
             if (task.m_control->cancelled) throw std::runtime_error{"操作已中止"};
-            while (pending.size()<transfer_slot_count*google_batch_t::part_count_max() && next<size())
+            while (pending.size()<task.m_state->m_directory_request_window.load(std::memory_order_relaxed) && next<size())
             { pending.emplace(next,start(next)); ++next; }
             bool progressed{};
             for (auto entry{pending.begin()}; entry!=pending.end();)
@@ -524,14 +524,14 @@ auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi
         std::lock_guard lock{task.m_requests_mutex};
         if (task.m_requests.empty()) return false;
         const auto first = task.m_requests.front();
-        if (first->single)
+        if (!first->configure || !task.m_state->m_settings.batch_request)
         { requests.push_back(first); task.m_requests.pop_front(); }
         else
         {
             // Pull only this account's file jobs, preserving other identities
             // for the next physical request. Never mix users in a batch.
             for (auto i=task.m_requests.begin(); i!=task.m_requests.end() && requests.size()<100;)
-                if (!(*i)->single && (*i)->account==first->account)
+                if ((*i)->configure && (*i)->account==first->account)
                 { requests.push_back(*i); i=task.m_requests.erase(i); }
                 else ++i;
         }
@@ -540,7 +540,7 @@ auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi
     easy.m_account_context = task.m_session->accounts.at(requests.front()->account);
     easy.m_journal.reset();
     auto* key = easy.interface_get();
-    if (requests.front()->single)
+    if (!requests.front()->configure || !task.m_state->m_settings.batch_request)
     {
         directory_easy_t operation{std::move(easy)};
         const auto request = requests.front();

@@ -90,6 +90,8 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
             busy = busy || !ready(download->m_prepared);
         if (const auto operation{std::dynamic_pointer_cast<directory_task_t>(*entry)})
             busy = busy || !ready(operation->m_operation);
+        std::erase_if(state.m_pending_parts, [&](const auto& part)
+            { return part.control == task.m_control; });
         std::erase_if(state.m_parked, [&](const auto& parked)
             { return parked.request->m_control == task.m_control; });
         if (task.m_result == task_result_t::cancelling && !busy)
@@ -492,6 +494,8 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
         multi.add(std::move(parked.request));
         return true;
     }
+
+    if (task_part_begin(*state, multi, std::move(easy))) return true;
 
     // Rotate runnable jobs so a large copy/delete cannot monopolize all newly
     // available slots while an upload or download is also waiting for one.
@@ -1052,7 +1056,7 @@ auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upl
         )
     );
     file->m_chunk_load_begin_progress = begin+chunk_count;
-    multi.add(std::move(batch));
+    task_batch_submit(*file->m_task->m_state,multi,std::move(batch));
     return;
 }
 
@@ -1158,7 +1162,7 @@ auto upload_chunk_transfer_begin
         key,
         std::bind(upload_chunk_transfer_end, std::placeholders::_1, file, index)
     );
-    multi.add(std::move(batch));
+    task_batch_submit(*file->m_task->m_state,multi,std::move(batch));
     return;
 }
 
@@ -1478,7 +1482,7 @@ auto download_chunk_load_begin
         std::bind(download_chunk_load_end, std::placeholders::_1, file_i, i_begin)
     );
     download_idle_update(file_i);
-    multi.add(std::move(batch));
+    task_batch_submit(*file_i->m_task->m_state,multi,std::move(batch));
     return;
 }
 
@@ -1559,7 +1563,7 @@ auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& eas
         chunk.m_file->m_task->m_file_arr.begin() +
         (chunk.m_file - chunk.m_file->m_task->m_file_arr.data())
     );
-    multi.add(std::move(batch));
+    task_batch_submit(*chunk.m_file->m_task->m_state,multi,std::move(batch));
     return;
 }
 

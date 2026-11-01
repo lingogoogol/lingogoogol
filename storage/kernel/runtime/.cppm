@@ -24,6 +24,7 @@ export {
         std::map<std::string, std::shared_ptr<google_account_t>> m_accounts;
 
       public:
+        std::atomic_bool batch_request{true};
         explicit storage_runtime_t(std::atomic_bool* close);
         ~storage_runtime_t()
         {

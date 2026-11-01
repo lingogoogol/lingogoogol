@@ -29,6 +29,8 @@ export
         auto body_get() const -> std::string;
         auto body_set(std::string body) -> void;
         
+        auto queries() const -> const std::map<std::string, std::string>& { return m_query; }
+        auto headers() const -> const std::map<std::string, std::string>& { return m_header; }
         auto to_str() const -> std::string;
     };
 }

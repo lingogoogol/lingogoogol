@@ -118,6 +118,9 @@ export
     {
         std::shared_ptr<storage_session_t> m_session;
         storage_settings_t m_settings;
+        // The GUI publishes the logical dispatch window; background directory
+        // coordinators must not read mutable settings across threads.
+        std::atomic_size_t m_directory_request_window{transfer_slot_count*100};
         std::function<void(std::string, std::function<void(bool)>)> m_confirm;
         std::function<void()> m_settings_page;
         std::function<void()> m_clear_page;
@@ -134,6 +137,12 @@ export
         };
         // Logical requests and callbacks remain; no curl handles or pool slots.
         std::deque<parked_request_t> m_parked;
+        struct pending_part_t
+        {
+            std::shared_ptr<request_control_t> control;
+            std::function<void(curl_multi_worker_t&, curl_easy_t&&)> submit;
+        };
+        std::deque<pending_part_t> m_pending_parts;
         std::shared_ptr<lgo::divy_soft_t> m_progress_column{};
         //Serialize read/modify/write publication to existing folders to avoid lost entries.
         std::shared_future<void> m_upload_linked{};
@@ -294,6 +303,10 @@ export
         std::vector<std::shared_ptr<upload_entity_t>>::iterator m_begin_progress{};
         std::vector<std::shared_ptr<upload_entity_t>>::iterator m_end_progress{};
     };
+
+    // Split only newly submitted task batches; existing worker objects are immutable.
+    auto task_batch_submit(load_state_t& state, curl_multi_worker_t& multi, google_batch_t&& request) -> void;
+    auto task_part_begin(load_state_t& state, curl_multi_worker_t& multi, curl_easy_t&& easy) -> bool;
 
     struct directory_request_t
     {

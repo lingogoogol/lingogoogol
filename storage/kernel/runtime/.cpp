@@ -166,7 +166,7 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
         const auto first=item.at("id").get<std::string>();
         if (completed.contains(first)) continue;
         const auto address=item.at("account").get<std::string>();
-        const bool single = item.at("kind")=="folder";
+        const bool single = item.at("kind")=="folder" || !batch_request.load();
         const bool folder=item.at("kind")=="folder";
         std::vector<std::string> group;
         for (const auto& other : ids)

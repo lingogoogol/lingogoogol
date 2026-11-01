@@ -203,7 +203,7 @@ def seed(test):
     (test / 'key/external.json').write_text(json.dumps({'client_email': 'external@example.invalid', 'private_key': 'never-read'}))
     settings = {'spaces': [{'id': 'space-test', 'name': '測試空間', 'accounts': addresses, 'signed_in': True},
                            {'id': 'peer-space', 'name': '共用帳戶空間', 'accounts': [addresses[2]], 'signed_in': True}],
-                'selected_space': 'space-test', 'network_retries': 3, 'batch_request': True}
+                'selected_space': 'space-test', 'network_retries': 3, 'batch_request': '--direct' not in sys.argv, 'worker_count': int(sys.argv[sys.argv.index('--workers')+1]) if '--workers' in sys.argv else (6400 if '--direct' in sys.argv else 64)}
     (test / 'settings.json').write_text(json.dumps(settings))
     return owners
 

@@ -35,6 +35,8 @@ export
         // caller accepting missing GETs must still inspect their status.
         auto response_allow_missing(std::uint64_t id) -> void;
         auto method_post() -> void;
+        // Retain the indexed response API while sending one ordinary HTTP request.
+        auto method_single() -> void;
 
         auto run_clear_if_full() -> void;
         virtual auto parse() -> void;
@@ -61,6 +63,7 @@ export
         std::uint64_t m_id_current{};
         std::string m_body{};
         bool m_auth_rejected{};
+        bool m_direct{};
         std::string m_failure;
         //The number of parts generated in `m_body` in the last call to `body_generate`.
         std::uint64_t m_count{};
