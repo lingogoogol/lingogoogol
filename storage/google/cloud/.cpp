@@ -104,6 +104,94 @@ namespace
     }
 }
 
+auto google_cloud_projects(const std::shared_ptr<google_oauth_user_t>& user,
+    const std::shared_ptr<request_control_t>& control) -> std::vector<cloud_project_t>
+{
+    std::vector<cloud_project_t> projects;
+    std::string token;
+    do
+    {
+        auto url = std::string{resources}+"projects:search?pageSize=100";
+        if (!token.empty()) url += "&pageToken="+encode(token);
+        const auto result = call(user,control,"GET",url);
+        for (const auto& entry : result.value("projects",json::array()))
+        {
+            const auto id = entry.at("projectId").get<std::string>();
+            if (id.starts_with("storage-ai") && entry.value("state","")=="ACTIVE")
+                projects.push_back({id,entry.at("displayName")});
+        }
+        token = result.value("nextPageToken","");
+    } while (!token.empty());
+    std::ranges::sort(projects,{},&cloud_project_t::id);
+    return projects;
+}
+
+auto google_cloud_create_project(const std::shared_ptr<google_oauth_user_t>& user,
+    const std::shared_ptr<request_control_t>& control, const std::string& name) -> std::string
+{
+    check(!name.empty(),"請輸入專案名稱");
+    // Retain an uncertain creation's ID/operation across retries and restarts.
+    const auto record = std::filesystem::path{"cloud_project"}/storage_digest(user->storage_id()+":"+name);
+    auto saved = std::filesystem::exists(record) ? json::parse(storage_read(record)) : json::object();
+    if (!saved.contains("id"))
+    {
+        std::random_device random;
+        saved = {{"id","storage-ai-"+storage_digest(std::to_string(random())+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())).substr(0,16)}};
+        storage_atomic_write(record,saved.dump());
+    }
+    const auto project = saved.at("id").get<std::string>();
+    if (!saved.contains("operation"))
+    {
+        const auto existing = user->cloud_request("GET",std::string{resources}+"projects/"+project,"",control);
+        if (existing.status==404)
+        {
+            saved["operation"] = call(user,control,"POST",std::string{resources}+"projects",
+                {{"projectId",project},{"displayName",name}});
+            storage_atomic_write(record,saved.dump());
+        }
+        else response_value(existing,"GET",resources);
+    }
+    if (saved.contains("operation")) operation(user,control,resources,saved.at("operation"));
+    const auto metadata = call(user,control,"GET",std::string{resources}+"projects/"+project);
+    check(metadata.value("state","")=="ACTIVE","專案尚未啟用");
+    std::filesystem::remove(record);
+    return project;
+}
+
+auto google_cloud_accounts(const std::shared_ptr<google_oauth_user_t>& user,
+    const std::shared_ptr<request_control_t>& control, const std::string& project)
+    -> std::vector<cloud_service_account_t>
+{
+    check(project.starts_with("storage-ai") && project.find_first_not_of(
+        "abcdefghijklmnopqrstuvwxyz0123456789-")==std::string::npos,"無效的專案 ID");
+    const auto metadata = call(user,control,"GET",std::string{resources}+"projects/"+project);
+    // JWT requests consume the service account's project quota. Enable Drive
+    // on the selected project, rather than the OAuth client's consumer project.
+    operation(user,control,services,call(user,control,"POST",
+        std::string{services}+metadata.at("name").get<std::string>()+"/services:batchEnable",
+        {{"serviceIds",{"drive.googleapis.com"}}}));
+    const auto registry = std::filesystem::path{"key/accounts.json"};
+    const auto managed = std::filesystem::exists(registry) ? json::parse(storage_read(registry)) : json::object();
+    std::vector<cloud_service_account_t> accounts;
+    std::string token;
+    do
+    {
+        auto url = std::string{iam}+"projects/"+project+"/serviceAccounts?pageSize=100";
+        if (!token.empty()) url += "&pageToken="+encode(token);
+        const auto result = call(user,control,"GET",url);
+        for (const auto& entry : result.value("accounts",json::array()))
+        {
+            const auto address = entry.at("email").get<std::string>();
+            if (!entry.value("disabled",false) && managed.contains(address))
+                accounts.push_back({address,managed.at(address)});
+        }
+        token = result.value("nextPageToken","");
+    } while (!token.empty());
+    std::ranges::sort(accounts,{},&cloud_service_account_t::address);
+    return accounts;
+}
+
 auto google_cloud_prepare(const std::shared_ptr<google_oauth_user_t>& user,
                           const std::shared_ptr<request_control_t>& control) -> std::string
 {
@@ -213,6 +301,7 @@ auto google_cloud_create_account(const std::shared_ptr<google_oauth_user_t>& use
     // key again, and replaying an ambiguous response would leak extra keys.
     const auto key = call(user,control,"POST",base+"/"+encode(email)+"/keys",
         {{"privateKeyType","TYPE_GOOGLE_CREDENTIALS_FILE"},{"keyAlgorithm","KEY_ALG_RSA_2048"}});
+    bool key_saved{};
     try
     {
         auto private_key = base64url_decode(key.at("privateKeyData").get<std::string>());
@@ -221,6 +310,11 @@ auto google_cloud_create_account(const std::shared_ptr<google_oauth_user_t>& use
             credential.at("project_id")==project && !credential.at("private_key").get<std::string>().empty(),
             "Google Cloud 傳回不完整的金鑰");
         save_key(path,private_key);
+        key_saved=true;
+        const auto registry = directory/"accounts.json";
+        auto managed = std::filesystem::exists(registry) ? json::parse(storage_read(registry)) : json::object();
+        managed[email] = path.generic_string();
+        storage_atomic_write(registry,managed.dump(2));
         std::fill(private_key.begin(),private_key.end(),'\0');
     }
     catch (...)
@@ -228,6 +322,7 @@ auto google_cloud_create_account(const std::shared_ptr<google_oauth_user_t>& use
         // If the downloaded key cannot be saved, revoke precisely that key.
         // Never delete a pre-existing account or touch its other keys.
         const auto failure = std::current_exception();
+        if (key_saved) std::filesystem::remove(path);
         const auto key_name = key.value("name","");
         const auto expected = "projects/"+project+"/serviceAccounts/"+email+"/keys/";
         if (key_name.starts_with(expected) && key_name.substr(expected.size()).find_first_not_of(

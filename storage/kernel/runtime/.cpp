@@ -22,28 +22,13 @@ auto storage_service_accounts(const std::filesystem::path& directory)
     -> std::vector<service_account_file_t>
 {
     std::vector<service_account_file_t> accounts;
-    std::error_code error;
-    if (!std::filesystem::exists(directory, error) && !error) return accounts;
-    auto entry = std::filesystem::directory_iterator{
-        directory, std::filesystem::directory_options::skip_permission_denied, error};
-    if (error) throw std::runtime_error{"Cannot read the service account directory."};
-    const auto end = std::filesystem::directory_iterator{};
-    for (; entry != end; entry.increment(error))
-    {
-        std::error_code file_error;
-        if (!entry->is_regular_file(file_error)) continue;
-        try
-        {
-            // The JSON contents identify an account; names and extensions do
-            // not. One bad or unrelated file must not hide the other accounts.
-            const auto credential = nlohmann::json::parse(storage_read(entry->path()));
-            const auto address = credential.value("client_email", std::string{});
-            if (address.empty() || credential.value("private_key", std::string{}).empty()) continue;
-            accounts.push_back({address, entry->path().generic_string()});
-        }
-        catch (const std::exception&) { }
-    }
-    if (error) throw std::runtime_error{"Cannot enumerate the service account directory."};
+    const auto registry = directory / "accounts.json";
+    if (!std::filesystem::exists(registry)) return accounts;
+    // Only successful in-app provisioning registers a key. Unrelated JSON
+    // files dropped in key/ are intentionally never enumerated or opened.
+    const auto managed = nlohmann::json::parse(storage_read(registry));
+    for (const auto& [address,path] : managed.items())
+        accounts.push_back({address,path.get<std::string>()});
     std::ranges::sort(accounts, [](const auto& a, const auto& b)
         { return std::tie(a.address,a.account_path) < std::tie(b.address,b.account_path); });
     return accounts;
@@ -51,216 +36,204 @@ auto storage_service_accounts(const std::filesystem::path& directory)
 storage_runtime_t::storage_runtime_t(std::atomic_bool* close) : m_close{close}
 {
 }
-auto storage_runtime_t::queue(const std::shared_ptr<storage_session_t>& session)
-    -> std::shared_ptr<blob_queue_t>
-{
-    auto& queue{m_queues[session->storage_id]};
-    if (!queue)
-    {
-        queue = std::make_shared<blob_queue_t>(queue_path(session->storage_id), session->account.get(), m_close);
-        if (std::filesystem::exists(clear_path(session->storage_id)))
-            queue->clear_begin();
-    }
-    return queue;
-}
-auto storage_runtime_t::open(const storage_settings_t& settings,
-                             const std::shared_ptr<request_control_t>& control, std::string expected_email,
-                             std::string saved_root, std::string expected_storage) -> std::shared_ptr<storage_session_t>
-{
-    const auto credential = nlohmann::json::parse(storage_read(settings.account_path));
-    if (credential.contains("installed"))
-    {
-        auto user = google_oauth_user_t::restore(settings.account_path,expected_email);
-        if (!user)
-        {
-            if (!expected_email.empty()) throw std::runtime_error{"Sign in to restore this Google account task."};
-            return {};
-        }
-        if (!expected_storage.empty() && expected_storage!=user->storage_id())
-            throw std::runtime_error{"Saved task belongs to a different OAuth application data space."};
-        return open_oauth(settings,std::move(user),control,std::move(saved_root));
-    }
-    const auto address{credential.at("client_email").get<std::string>()};
-    if (!expected_email.empty() && expected_email != address)
-        throw std::runtime_error{"Saved task account no longer matches its credential file."};
-    // This also gates journal restoration, which can open accounts other than
-    // the one currently shown in the browser. Only explicit login clears it.
-    if (settings.signed_out_service_accounts.contains(address)) return {};
-    auto session{std::make_shared<storage_session_t>()};
-    session->clearing = std::filesystem::exists(clear_path(address));
-    session->address = address;
-    session->storage_id = address;
-    session->account_path = settings.account_path;
-    // Validate/create only the configured directory, before any cloud creation.
-    std::filesystem::create_directories(settings.root_path);
-    session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
-    {
-        std::lock_guard lock{m_mutex};
-        if (*m_close)
-            throw std::runtime_error{"Application is closing."};
-        auto& account{
-            m_accounts[address + ":" + storage_digest(credential.at("private_key").get<std::string>())]};
-        if (!account)
-            account =
-                std::make_shared<google_account_t>(address, credential.at("private_key").get<std::string>());
-        session->account = account;
-        session->queue = queue(session);
-        m_sessions.push_back(session);
-    }
-    if (!saved_root.empty())
-        session->root = std::move(saved_root);
-    else if (std::filesystem::exists(session->root_path))
-        session->root = storage_read(session->root_path);
-    else
-    {
-        google_easy_t request;
-        request.m_account_context = session->account;
-        request.control_set(control);
-        session->root = folder_root_create(request);
-        storage_atomic_write(session->root_path, session->root);
-    }
-    if (session->root.empty())
-        throw std::runtime_error{"Root file is empty."};
-    return session;
-}
-auto storage_runtime_t::open_oauth(const storage_settings_t& settings,
-    std::shared_ptr<google_oauth_user_t> user, const std::shared_ptr<request_control_t>& control,
-    std::string saved_root) -> std::shared_ptr<storage_session_t>
+auto storage_runtime_t::open_space(const storage_settings_t& settings, const storage_space_t& space,
+    const std::shared_ptr<request_control_t>& control) -> std::shared_ptr<storage_session_t>
 {
     auto session = std::make_shared<storage_session_t>();
-    session->oauth = user;
-    session->address = user->address();
-    session->storage_id = user->storage_id();
-    session->account_path = settings.account_path;
-    // Use the same account-specific file naming for service accounts and OAuth.
-    // The OAuth storage ID includes its client, so two apps cannot share roots.
-    std::filesystem::create_directories(settings.root_path);
-    session->root_path = (std::filesystem::path{settings.root_path}/storage_digest(session->storage_id)).generic_string();
-    session->clearing = std::filesystem::exists(clear_path(session->storage_id));
-    {
-        std::lock_guard lock{m_mutex};
-        if (*m_close) throw std::runtime_error{"Application is closing."};
-        auto& account = m_accounts[session->storage_id];
-        if (!account)
+    session->storage_id = space.id;
+    session->address = space.name;
+    session->root_path = (std::filesystem::path{settings.root_path}/space.id).generic_string();
+    const auto registered = storage_service_accounts();
+    std::set<std::string> clearing_accounts;
+    for (const auto& entry : std::filesystem::directory_iterator{"."})
+        if (entry.is_regular_file() && entry.path().filename().string().starts_with("clear."))
         {
-            account = std::make_shared<google_account_t>();
-            account->init_oauth(user);
+            const auto checkpoint=nlohmann::json::parse(storage_read(entry.path()));
+            for (const auto& address : checkpoint.at("accounts"))
+                clearing_accounts.insert(address.get<std::string>());
         }
-        else account->update_oauth(user);
-        // Same-user queues and restored tasks retain this stable account object
-        // and immediately gain new credentials after re-login. Other identities
-        // remain isolated in their original account objects and queues.
-        session->account = account;
-        session->queue = queue(session);
-        m_sessions.push_back(session);
+    // Start queue workers in project rounds as well: association order must not
+    // start every worker in one project before any worker in the next project.
+    std::map<std::string,std::deque<std::string>> by_project;
+    for (const auto& address : space.accounts) by_project[address.substr(address.find('@')+1)].push_back(address);
+    std::vector<std::string> interleaved;
+    while (interleaved.size()<space.accounts.size())
+        for (auto& [project,addresses] : by_project)
+            if (!addresses.empty()) { interleaved.push_back(addresses.front()); addresses.pop_front(); }
+    for (const auto& address : interleaved)
+    {
+        const auto found = std::ranges::find(registered,address,&service_account_file_t::address);
+        if (found==registered.end()) throw std::runtime_error{"無法讀取程式建立的服務帳戶："+address};
+        const auto credential = nlohmann::json::parse(storage_read(found->account_path));
+        std::lock_guard lock{m_mutex};
+        auto& account = m_accounts[address];
+        if (!account) account = std::make_shared<google_account_t>(address,credential.at("private_key").get<std::string>());
+        auto& reserve = m_queues[address];
+        if (!reserve) reserve = std::make_shared<blob_queue_t>(queue_path(address),account.get(),m_close);
+        if (clearing_accounts.contains(address)) reserve->stop();
+        session->accounts[address] = account;
+        session->queues[address] = reserve;
     }
-    if (!saved_root.empty()) session->root = std::move(saved_root);
-    else if (std::filesystem::exists(session->root_path)) session->root = storage_read(session->root_path);
+    if (session->accounts.empty()) throw std::runtime_error{"請先編輯空間並新增服務帳戶"};
+    session->account = session->accounts.begin()->second;
+    session->queue = session->queues.begin()->second;
+    std::filesystem::create_directories(settings.root_path);
+    if (std::filesystem::exists(session->root_path))
+    {
+        const auto root = nlohmann::json::parse(storage_read(session->root_path));
+        session->root = root.at("id");
+        session->root_account = root.at("account");
+    }
     else
     {
+        session->root_account = session->choose(1);
         google_easy_t request;
-        request.m_account_context = session->account;
+        request.m_account_context = session->accounts.at(session->root_account);
         request.control_set(control);
         session->root = folder_root_create(request);
-        storage_atomic_write(session->root_path,session->root);
+        storage_atomic_write(session->root_path,nlohmann::json{{"account",session->root_account},{"id",session->root}}.dump());
     }
-    if (session->root.empty()) throw std::runtime_error{"Root file is empty."};
+    session->remember(session->root,session->root_account,"folder");
+    session->clearing = std::ranges::any_of(space.accounts,[&](const auto& address)
+        { return clearing_accounts.contains(address); });
+    std::lock_guard lock{m_mutex};
+    std::erase_if(m_sessions,[&](const auto& active) { return active->storage_id==space.id; });
+    m_sessions.push_back(session);
     return session;
 }
-
 auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
-                              const std::shared_ptr<request_control_t>& control,
-                              std::atomic_uint64_t& progress, std::atomic_uint64_t& total) -> std::string
+    const std::shared_ptr<request_control_t>& control, std::atomic_uint64_t& progress,
+    std::atomic_uint64_t& total) -> std::string
 {
-    // Stop replenishment and wait for its requests before collecting the full
-    // account inventory. Deleting while paging would skip entries.
-    session->queue->stop();
-    google_easy_t request;
-    request.m_account_context = session->account;
-    request.control_set(control);
-    const auto marker{clear_path(session->storage_id)};
-    std::vector<std::string> ids;
-    if (std::filesystem::exists(marker))
+    // Every linked account is cleared in full, including other spaces' blobs
+    // and unlinked reserves. Freeze shared queues before taking the inventory.
+    const auto marker=clear_path(session->storage_id);
+    auto saved=std::filesystem::exists(marker) ? nlohmann::json::parse(storage_read(marker)) : nlohmann::json::object();
+    if (saved.empty())
     {
-        const auto saved = nlohmann::json::parse(storage_read(marker));
-        ids = saved.at("ids").get<std::vector<std::string>>();
-        progress = saved.at("progress").get<std::uint64_t>();
-        total = ids.size();
+        std::vector<std::string> addresses;
+        for (const auto& [address, unused] : session->accounts) addresses.push_back(address);
+        saved={{"accounts",addresses}};
+        storage_atomic_write(marker,saved.dump());
     }
-    else
+    for (const auto& [address, reserve] : session->queues) reserve->stop();
+    auto ids=saved.value("ids",nlohmann::json::array());
+    if (!saved.contains("ids"))
     {
-        std::string page;
-        do
+        for (const auto& [address, account] : session->accounts)
         {
-            request.clear();
-            request.path_set("/drive/v3/files");
-            request.query_set("pageSize", "1000");
-            if (session->oauth) request.query_set("spaces","appDataFolder");
-            request.query_set("fields", "nextPageToken,files(id)");
-            if (!page.empty())
-                request.query_set("pageToken", page);
-            request.method_get();
-            request.run();
-            const auto response = nlohmann::json::parse(request.payload());
-            for (const auto& file : response.at("files"))
-                ids.push_back(file.at("id").get<std::string>());
-            page = response.value("nextPageToken", "");
-            total = ids.size();
-        } while (!page.empty());
-        storage_atomic_write(marker, nlohmann::json{{"ids", ids}, {"progress", 0}}.dump());
-    }
-    // Empty the durable reserve before the first DELETE, so a crash cannot
-    // restore IDs belonging to files that have already been removed.
-    session->queue->clear_end();
-    session->queue->clear_begin();
-    google_batch_t remove;
-    remove.m_account_context = session->account;
-    remove.control_set(control);
-    remove.boundary_set("+");
-    for (std::size_t index{progress.load()}; index < ids.size();)
-    {
-        remove.clear();
-        remove.path_set("/drive/v3");
-        const auto count{std::min<std::size_t>(google_batch_t::part_count_max(), ids.size()-index)};
-        for (std::size_t part{}; part<count; ++part)
-        {
-            auto& request{remove.request_add_handle()};
-            request.path_set("/drive/v3/files/" + ids[index+part]);
-            request.method_set("DELETE");
-            remove.response_allow_missing(part);
+            google_easy_t request;
+            request.m_account_context=account;
+            request.control_set(control);
+            std::string page;
+            do
+            {
+                request.clear();
+                request.path_set("/drive/v3/files");
+                request.query_set("pageSize","1000");
+                request.query_set("fields","nextPageToken,files(id,name)");
+                if (!page.empty()) request.query_set("pageToken",page);
+                request.method_get(); request.run();
+                const auto response=nlohmann::json::parse(request.payload());
+                for (const auto& file : response.at("files"))
+                {
+                    // Arbitrary Drive files may not use our JSON names. Only
+                    // folder metadata needs a direct request; all other files
+                    // remain eligible for same-account deletion batches.
+                    const auto name=nlohmann::json::parse(file.value("name",std::string{}),nullptr,false);
+                    const bool folder=name.is_object() && name.contains("next") && !name.contains("size");
+                    ids.push_back({{"id",file.at("id")},{"account",address},{"kind",folder ? "folder" : "file"}});
+                }
+                page=response.value("nextPageToken",std::string{});
+                total=ids.size();
+            } while (!page.empty());
         }
-        remove.method_post();
-        remove.run();
-        // Advance only after every part succeeds. A lost response/crash replays
-        // this batch; 404 is accepted only for these idempotent deletes.
-        index += count;
-        progress = index;
-        storage_atomic_write(marker, nlohmann::json{{"ids", ids}, {"progress", progress.load()}}.dump());
+        // Finish and persist every account's inventory before deleting anything;
+        // paging an account while deleting its files can skip entries.
+        saved["ids"]=ids;
+        saved["completed"]=nlohmann::json::array();
+        storage_atomic_write(marker,saved.dump());
     }
-    // The app needs a fresh empty root after literally all Drive files are removed.
-    auto root{folder_root_create(request)};
-    storage_atomic_write(session->root_path, root);
+    for (const auto& [address,reserve] : session->queues)
+    {
+        reserve->clear_end();
+        reserve->clear_begin();
+    }
+    std::set<std::string> completed=saved.at("completed").get<std::set<std::string>>();
+    total=ids.size(); progress=completed.size();
+    for (const auto& item : ids)
+    {
+        const auto first=item.at("id").get<std::string>();
+        if (completed.contains(first)) continue;
+        const auto address=item.at("account").get<std::string>();
+        const bool single = false;
+        const bool folder=item.at("kind")=="folder";
+        std::vector<std::string> group;
+        for (const auto& other : ids)
+            if (!completed.contains(other.at("id").get<std::string>()) && other.at("account")==address &&
+                (other.at("kind")=="folder")==folder && group.size()<(single ? 1u : 100u))
+                group.push_back(other.at("id"));
+        if (single)
+        {
+            class delete_t : public google_easy_t
+            { public: auto valid() -> bool override { return m_response_code==404 || google_easy_t::valid(); } };
+            delete_t request;
+            request.m_account_context=session->accounts.at(address);
+            request.control_set(control);
+            request.path_set("/drive/v3/files/"+group.front()); request.method_delete(); request.run();
+        }
+        else
+        {
+            google_batch_t batch;
+            batch.boundary_set("+");
+            batch.m_account_context=session->accounts.at(address);
+            batch.control_set(control); batch.path_set("/drive/v3");
+            for (std::size_t i{};i<group.size();++i)
+            {
+                auto& request=batch.request_add_handle();
+                request.path_set("/drive/v3/files/"+group[i]); request.method_set("DELETE");
+                batch.response_allow_missing(i);
+            }
+            batch.method_post(); batch.run();
+        }
+        completed.insert(group.begin(),group.end());
+        progress=completed.size();
+        saved["completed"]=completed;
+        storage_atomic_write(marker,saved.dump());
+    }
+    // Commit the new root identity before removing the clear checkpoint. A lost
+    // response may leave an unreachable empty root; retry uses the saved identity.
+    auto address=saved.value("new_root_account",std::string{});
+    if (address.empty()) { address=session->choose(1); saved["new_root_account"]=address; storage_atomic_write(marker,saved.dump()); }
+    google_easy_t request;
+    request.m_account_context=session->accounts.at(address); request.control_set(control);
+    const auto root=saved.contains("new_root") ? saved.at("new_root").get<std::string>() : folder_root_create(request);
+    saved["new_root"]=root; storage_atomic_write(marker,saved.dump());
+    storage_atomic_write(session->root_path,nlohmann::json{{"account",address},{"id",root}}.dump());
+    session->root_account=address;
+    session->remember(root,address,"folder");
     std::filesystem::remove(marker);
     return root;
 }
 auto storage_runtime_t::cleared(const std::shared_ptr<storage_session_t>& session, std::string root) -> void
 {
     std::lock_guard lock{m_mutex};
-    m_queues.erase(session->storage_id);
-    auto replacement{queue(session)};
-    for (auto& context : m_sessions)
-        if (context->storage_id == session->storage_id)
-        {
-            context->queue = replacement;
-            context->clearing = false;
-            if (context->root_path == session->root_path)
-                context->root = root;
-            else
+    // One queue per account, including when several spaces share it. Every
+    // previous reserve ID was deleted, so replace all references together.
+    for (auto& [address,reserve] : session->queues)
+    {
+        auto replacement=std::make_shared<blob_queue_t>(queue_path(address),session->accounts.at(address).get(),m_close);
+        m_queues[address]=replacement;
+        for (auto& context : m_sessions)
+            if (context->queues.contains(address))
             {
-                context->root = root;
-                storage_atomic_write(context->root_path, root);
+                context->queues[address]=replacement;
+                context->queue=context->queues.begin()->second;
+                context->clearing=false;
             }
-        }
+    }
+    session->root=std::move(root);
+    session->clearing=false;
 }
 auto storage_runtime_t::stop() -> void
 {
@@ -274,19 +247,22 @@ auto storage_runtime_t::stop() -> void
 auto storage_runtime_t::sign_out(const std::string& storage_id) -> void
 {
     std::lock_guard lock{m_mutex};
-    if (const auto queue = m_queues.find(storage_id); queue!=m_queues.end())
+    std::erase_if(m_sessions,[&](const auto& session) { return session->storage_id==storage_id; });
+    // Queues and credential workers are per account, possibly shared by another
+    // signed-in space. Stop only identities no remaining space uses.
+    std::erase_if(m_queues,[&](const auto& entry)
     {
-        queue->second->stop();
-        m_queues.erase(queue);
-    }
+        if (std::ranges::any_of(m_sessions,[&](const auto& session)
+            { return session->accounts.contains(entry.first); })) return false;
+        entry.second->stop();
+        return true;
+    });
     std::erase_if(m_accounts,[&](const auto& entry)
     {
-        const bool matches = std::ranges::any_of(m_sessions,[&](const auto& session)
-            { return session->storage_id==storage_id && session->account==entry.second; });
-        if (matches) entry.second->stop();
-        return matches;
+        if (m_queues.contains(entry.first)) return false;
+        entry.second->stop();
+        return true;
     });
-    std::erase_if(m_sessions,[&](const auto& session) { return session->storage_id==storage_id; });
 }
 
 auto storage_runtime_t::retry_accounts() -> void

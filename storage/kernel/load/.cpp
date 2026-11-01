@@ -21,13 +21,17 @@ namespace
     auto task_ids(load_task_t* task, blob_queue_t* queue, std::string key, std::size_t count = 1)
         -> std::vector<std::string>
     {
-        if (task->m_control->cancelled)
-            throw std::runtime_error{"Task cancelled."};
-        if (!task->m_journal)
-            return queue->get(count, &task->m_control->cancelled);
-        return task->m_journal->allocate(std::move(key), count, [queue, task](std::size_t size)
-                                         { return queue->get(size, &task->m_control->cancelled); });
+        if (task->m_control->cancelled) throw std::runtime_error{"Task cancelled."};
+        if (task->m_session)
+        {
+            const auto type = key.starts_with("folder") ? "folder" : key.starts_with("file") ? "file" : "";
+            return task_reserve(*task,key,count,{},type);
+        }
+        return task->m_journal ? task->m_journal->allocate(std::move(key),count,
+            [queue,task](std::size_t size) { return queue->get(size,&task->m_control->cancelled); }) :
+            queue->get(count,&task->m_control->cancelled);
     }
+
     auto task_progress(load_task_t& task, std::uint64_t completed, std::uint64_t size,
                        const std::string& name) -> void
     {
@@ -138,7 +142,7 @@ auto download_on_end(download_task_t& task, CURL* key,
         });
 }
 
-auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::json
+auto list_folder_content(google_easy_t& easy, std::string* pos, storage_session_t* session) -> nlohmann::json
 {
     std::string next{ *pos };
 	//Use `=` instead of `{}` when initializing `nlohmann::json` from a single `nlohmann::json` expression:
@@ -147,9 +151,11 @@ auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::jso
 	nlohmann::json entity_arr = nlohmann::json::array();
 	while (next != "null")
 	{
-		nlohmann::json response_data = blob_get_run(easy, next, "name,description");
+		if (session) session->bind(easy,next);
+        nlohmann::json response_data = blob_get_run(easy, next, "name,description");
 		nlohmann::json response_content = nlohmann::json::parse(response_data["description"].get<std::string>());
-		entity_arr.insert(entity_arr.end(), response_content.begin(), response_content.end());
+		if (session) session->observe(next,nlohmann::json::parse(response_data["name"].get<std::string>()),response_content);
+        entity_arr.insert(entity_arr.end(), response_content.begin(), response_content.end());
 		next = nlohmann::json::parse(response_data["name"].get<std::string>())["next"];
 	}
 	return entity_arr;
@@ -247,6 +253,7 @@ auto file_download
 	file.m_task = task;
 	file.m_name = path_local.string();
     file.m_path_local = path_local.string();
+    if (task->m_session) task->m_session->bind(*easy,pos);
 	file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
 	file.m_next_id = pos;
     if (task->m_journal)
@@ -281,7 +288,7 @@ auto folder_download
 -> void
 {
     // json's initializer_list constructor would wrap the returned array in another array.
-    nlohmann::json obj_list = list_folder_content(*easy, &pos);
+    nlohmann::json obj_list = list_folder_content(*easy, &pos, task->m_session.get());
 	std::filesystem::create_directories(path_local);
 	for (auto i : obj_list)
 	{
@@ -351,7 +358,8 @@ auto folder_add
 (
     google_easy_t& easy,
     std::string pos,
-    nlohmann::json entity
+    nlohmann::json entity,
+    storage_session_t* session
 )
 -> void
 {
@@ -359,9 +367,11 @@ auto folder_add
 	nlohmann::json folder_name{};
 	while (true)
 	{
+        if (session) session->bind(easy,pos);
         folder = blob_get_run(easy, pos, "name,description");
         folder_name = nlohmann::json::parse(folder["name"].get<std::string>());
         const auto existing = nlohmann::json::parse(folder["description"].get<std::string>());
+        if (session) session->observe(pos,folder_name,existing);
         for (const auto& entry : existing)
             if (entry.at("id") == entity.at("id"))
                 return;
@@ -381,17 +391,20 @@ auto folder_add
 	{
 		nlohmann::json array = nlohmann::json::array();
 		array.push_back(entity);
-		std::string data_id
+        std::string data_id;
+        if (session)
         {
-            folder_data_add
-            (
-                easy,
-                pos,
-                folder_name["name"],
-                folder_name["parent"],
-                array
-            )
-        };
+            const auto owner = session->choose(1);
+            easy.m_account_context = session->accounts.at(owner);
+            auto name = folder_name;
+            name["next"] = "null";
+            name["next_account"] = "null";
+            data_id = blob_upload_run(easy,name.dump(),array.dump());
+            session->remember(data_id,owner,"folder");
+            folder_name["next_account"] = owner;
+            session->bind(easy,pos);
+        }
+        else data_id = folder_data_add(easy,pos,folder_name["name"],folder_name["parent"],array);
 		folder_name["next"] = data_id;
 		blob_update_name_run(easy, pos, folder_name.dump());
 	}
@@ -411,6 +424,8 @@ auto folder_root_create(google_easy_t& easy) -> std::string
 		{
 			{ "name", folder_root_name },
 			{ "parent", "null" },
+            { "parent_account", "null" },
+            { "next_account", "null" },
 			{ "next", "null" }
 		}
 		.dump(),
@@ -535,7 +550,7 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                     }
                     if (state->m_on_upload_linked &&
                         (!upload_task_ptr->m_session || !state->m_session ||
-                         upload_task_ptr->m_session->account == state->m_session->account))
+                         upload_task_ptr->m_session->storage_id == state->m_session->storage_id))
                     {
                         state->m_on_upload_linked(upload_task_ptr->m_pos.m_main_id);
                     }
@@ -567,7 +582,6 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                               upload_task_ptr->m_size, upload_task_ptr->m_name);
             }
             // Downloads consume no reserved blobs. Apply the upload reserve only here.
-            if (blob_queue->count() <= 10000) continue;
             auto entity_i{ upload_task_ptr->m_begin_progress };
             if (entity_i == upload_task_ptr->m_entity_arr.end())
             {
@@ -700,7 +714,7 @@ auto upload_complete(upload_entity_t* entity) -> void
     upload_task_t* task{ entity->m_task };
 
     //Update task progress.
-    if (entity != task->m_end_progress->get())
+    if (task->m_end_progress!=task->m_entity_arr.end() && entity != task->m_end_progress->get())
     {
         return;
     }
@@ -762,6 +776,7 @@ auto upload_complete(upload_entity_t* entity) -> void
         {
             link["id"] = dynamic_cast<upload_folder_t*>(root)->m_main_id;
         }
+        if (task->m_session) link["account"] = task->m_session->owner(link.at("id"));
         task->m_progress_text->set_text("上傳：更新目錄 " + task->m_name, false);
         //Each worker owns its easy handle. Waiting for the previous publication prevents
         //concurrent folder_add read/modify/write operations from overwriting each other.
@@ -781,7 +796,7 @@ auto upload_complete(upload_entity_t* entity) -> void
                            request.control_set(control);
                            // Publication rereads the current directory. Cached GETs here could
                            // overwrite links published by other tasks after a restored upload.
-                           folder_add(request, pos, link);
+                           folder_add(request, pos, link, session.get());
                        })
                 .share();
         task->m_state->m_upload_linked = task->m_linked;
@@ -825,6 +840,13 @@ auto upload_file_load_begin
     for (std::size_t i{ 0 }; i < chunk_count; ++i)
     {
         blob.m_content->push_back(file->m_chunk_arr[file->m_file_load_begin_progress + i].m_id);
+    }
+    if (auto session = file->m_task->m_session)
+    {
+        (*blob.m_name)["parent_account"] = session->owner(file->m_parent->m_main_id);
+        (*blob.m_name)["next_account"] = session->owner(file->m_next_id);
+        (*blob.m_name)["account"] = chunk_count ? session->owner(file->m_chunk_arr[file->m_file_load_begin_progress].m_id) : "null";
+        session->bind(easy,blob.m_id);
     }
     google_easy_t easy_google{ std::move(easy) };
     easy_google.path_set("/drive/v3");
@@ -884,9 +906,10 @@ auto upload_file_load_end
 
 auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void
 {
+    file->m_task->m_session->bind(easy,file->m_chunk_arr[file->m_chunk_load_begin_progress].m_id);
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
-    std::uint64_t chunk_count{ std::min(file->m_chunk_arr.size() - file->m_chunk_load_begin_progress, 100ull) };
+    std::uint64_t chunk_count{ std::min<std::uint64_t>(file->m_chunk_arr.size() - file->m_chunk_load_begin_progress, 100-file->m_chunk_load_begin_progress%100) };
     for (std::uint64_t i{ 0 }; i < chunk_count; ++i)
     {
         upload_chunk_t& chunk{ file->m_chunk_arr[file->m_chunk_load_begin_progress + i] };
@@ -902,7 +925,9 @@ auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upl
             {
                 nlohmann::json
                 {
-                    { "parent", file->m_main_id }
+                    { "parent", file->m_main_id },
+                    { "parent_account", file->m_task->m_session->owner(file->m_main_id) },
+                    { "account", file->m_task->m_session->owner(chunk.m_content_id.front()) }
                 }
             },
             .m_content{ id_array }
@@ -964,15 +989,15 @@ auto upload_chunk_transfer_begin
 )
 -> void
 {
-    auto& chunk{file->m_chunk_arr.emplace_back(upload_chunk_t{
-        .m_file{file},
-        .m_id{task_ids(file->m_task, blob_queue,
-                       "chunk:" + file->m_main_id + ":" + std::to_string(file->m_chunk_cover_progress))
-                  .front()}})};
-    std::uint64_t batch_size{ std::min(file->m_size - file->m_chunk_cover_progress, content_size_max_base64 * 100) };
-    //Divide and round up.
-    std::uint64_t content_count{ (batch_size + content_size_max_base64 - 1) / content_size_max_base64 };
-    chunk.m_content_id = task_ids(file->m_task, blob_queue, "content:" + chunk.m_id, content_count);
+    const auto group="chunk-group:"+file->m_main_id+":"+std::to_string(file->m_chunk_arr.size()/100);
+    const auto reservation_key="chunk:"+file->m_main_id+":"+std::to_string(file->m_chunk_cover_progress);
+    const auto owner=task_owner(*file->m_task,group);
+    auto& chunk=file->m_chunk_arr.emplace_back(upload_chunk_t{
+        .m_file=file,.m_id=task_reserve(*file->m_task,reservation_key,1,owner,"chunk").front()});
+    std::uint64_t batch_size{std::min(file->m_size-file->m_chunk_cover_progress,content_size_max_base64*100)};
+    std::uint64_t content_count{(batch_size+content_size_max_base64-1)/content_size_max_base64};
+    chunk.m_content_id=task_reserve(*file->m_task,"content:"+chunk.m_id,content_count,{},"data");
+    file->m_task->m_session->bind(easy,chunk.m_content_id.front());
     chunk.m_size = batch_size;
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
@@ -996,7 +1021,8 @@ auto upload_chunk_transfer_begin
             {
                 nlohmann::json
                 {
-                    { "parent", chunk.m_id }
+                    { "parent", chunk.m_id },
+                    { "parent_account", file->m_task->m_session->owner(chunk.m_id) }
                 }
                 .dump()
             }
@@ -1072,6 +1098,7 @@ auto upload_folder_load_begin
                 nlohmann::json
                 {
                     { "id", element_file->m_main_id },
+                    { "account", folder->m_task->m_session->owner(element_file->m_main_id) },
                     { "type", "file" },
                     { "name", element_file->m_name },
                     { "size", element_file->m_size }
@@ -1086,6 +1113,7 @@ auto upload_folder_load_begin
                 nlohmann::json
                 {
                     { "id", element_folder->m_main_id },
+                    { "account", folder->m_task->m_session->owner(element_folder->m_main_id) },
                     { "type", "folder" },
                     { "name", element_folder->m_name }
                 }
@@ -1112,6 +1140,12 @@ auto upload_folder_load_begin
 			{ "parent", folder->m_parent->m_main_id },
 			{ "next", folder->m_next_id }
 		};
+    if (auto session = folder->m_task->m_session)
+    {
+        (*blob.m_name)["parent_account"] = session->owner(folder->m_parent->m_main_id);
+        (*blob.m_name)["next_account"] = session->owner(folder->m_next_id);
+        session->bind(easy,blob.m_id);
+    }
     google_easy_t easy_google{ std::move(easy) };
     easy_google.path_set("/drive/v3");
 	blob_update(easy_google, blob);
@@ -1222,6 +1256,7 @@ auto download_file_load_begin
 )
 -> void
 {
+    if (file_i->m_task->m_session) file_i->m_task->m_session->bind(easy,file_i->m_next_id);
     google_easy_t easy_google{ std::move(easy) };
     blob_get(easy_google, file_i->m_next_id, "name,description");
     //Get the key to `m_state->m_end` first before `easy_google` is moved.
@@ -1246,6 +1281,7 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
     nlohmann::json blob_content = nlohmann::json::parse(payload["description"].get<std::string>());
     if (!blob_content.is_array() || blob_content.size() > 100)
         throw std::runtime_error{ "File chunk index must be an array of at most 100 IDs." };
+    if (file_i->m_task->m_session) file_i->m_task->m_session->observe(file_i->m_next_id,blob_name,blob_content);
     file_i->m_next_id = blob_name["next"];
     for (const auto& i : blob_content)
     {
@@ -1275,13 +1311,18 @@ auto download_chunk_load_begin
 )
 -> void
 {
+    if (file_i->m_task->m_session) file_i->m_task->m_session->bind(easy,file_i->m_chunk_arr[file_i->m_chunk_load_begin_progress].m_id);
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
     std::size_t i_begin{ file_i->m_chunk_load_begin_progress };
     std::size_t i_end{ std::min(i_begin + 100, file_i->m_chunk_arr.size()) };
+    if (auto session=file_i->m_task->m_session)
+        for (auto i=i_begin+1;i<i_end;++i)
+            if (session->owner(file_i->m_chunk_arr[i].m_id)!=session->owner(file_i->m_chunk_arr[i_begin].m_id))
+            { i_end=i; break; }
     for (std::size_t i{ i_begin }; i < i_end; ++i)
     {
-        blob_get(batch, file_i->m_chunk_arr[i].m_id, "description");
+        blob_get(batch, file_i->m_chunk_arr[i].m_id, "name,description");
     }
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
@@ -1315,6 +1356,8 @@ auto download_chunk_load_end
         nlohmann::json content_id_arr = nlohmann::json::parse(payload["description"].get<std::string>());
         if (!content_id_arr.is_array() || content_id_arr.empty() || content_id_arr.size() > 100)
             throw std::runtime_error{ "Chunk content index must contain 1 to 100 IDs." };
+        if (file_i->m_task->m_session)
+            file_i->m_task->m_session->observe(chunk.m_id,nlohmann::json::parse(payload.at("name").get<std::string>()),content_id_arr);
         chunk.m_content_id.resize(content_id_arr.size());
         std::ranges::copy(content_id_arr, chunk.m_content_id.begin());
         chunk.m_loaded = true;
@@ -1346,6 +1389,7 @@ auto download_chunk_load_end
 auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void
 {
     std::size_t request_count{ chunk.m_content_id.size() };
+    if (chunk.m_file->m_task->m_session) chunk.m_file->m_task->m_session->bind(easy,chunk.m_content_id.front());
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
     for (std::size_t i{ 0 }; i < request_count; ++i)

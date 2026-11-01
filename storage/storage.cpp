@@ -1,4 +1,4 @@
-﻿#include <nlohmann/json.hpp>
+#include <nlohmann/json.hpp>
 
 import std;
 
@@ -34,6 +34,8 @@ auto app() -> void
         { return c>=L'A' && c<=L'Z' ? c-L'A'+L'a' : c; });
     if (directory==L"bin") std::filesystem::current_path(executable.parent_path().parent_path());
     auto settings{storage_settings_t::load()};
+    // Keep one filename for this process; ordinary settings/space operations
+    // must not split the session log. A directory change retains this name.
     auto log_path = [](const storage_settings_t& value)
     {
         return (std::filesystem::path{value.logfile_path} / (std::to_string(std::time(nullptr)) + ".txt"))
@@ -67,47 +69,17 @@ auto app() -> void
     lgo::depth_tracker_t depth;
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
-    const auto login_record = [](const std::shared_ptr<storage_session_t>& account)
-    {
-        return storage_account_login_t{account->address,account->account_path,
-            std::filesystem::path{account->root_path}.parent_path().generic_string(),bool(account->oauth)};
-    };
-    const auto remember_session = [&](storage_settings_t& value, const std::shared_ptr<storage_session_t>& account)
-    {
-        if (!value.signed_in_accounts) value.signed_in_accounts.emplace();
-        if (account) (*value.signed_in_accounts)[account->storage_id] = login_record(account);
-        value.selected_account = account ? account->storage_id : std::string{};
-    };
-    auto startup_control{std::make_shared<request_control_t>()};
+    auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
-    if (!std::filesystem::exists(settings.account_path) && settings.account_path == "key.json" &&
-        std::filesystem::exists("client.json")) settings.account_path = "client.json";
-    if (settings.signed_in_accounts)
-    {
-        // Restore every explicitly signed-in identity, including accounts with
-        // no transfer journal. A failure for one must not hide the others.
-        for (const auto& [id,account] : *settings.signed_in_accounts)
+    for (const auto& space : settings.spaces)
+        if (space.signed_in)
             try
             {
-                auto saved = settings;
-                saved.account_path = account.account_path;
-                saved.root_path = account.root_directory;
-                auto restored = runtime.open(saved,startup_control,account.address,{},id);
-                if (!restored || restored->storage_id!=id || bool(restored->oauth)!=account.oauth)
-                    throw std::runtime_error{"Saved login does not match its credential file."};
-                if (id==settings.selected_account) session = std::move(restored);
+                auto restored = runtime.open_space(settings,space,startup_control);
+                if (space.id==settings.selected_space) session=std::move(restored);
             }
-            catch (const std::exception& error) { startup_error = error.what(); }
-    }
-    else
-    {
-        try
-        {
-            if (std::filesystem::exists(settings.account_path)) session = runtime.open(settings,startup_control);
-        }
-        catch (const std::exception& error) { startup_error = error.what(); }
-    }
+            catch (const std::exception& error) { startup_error=error.what(); }
     if (session) google_account_t::default_shared_set(session->account);
     load_state_t load_state;
     load_state.m_session = session;
@@ -124,10 +96,13 @@ auto app() -> void
     std::future<settings_result_t> settings_job;
     struct cloud_result_t
     {
-        enum class kind_t { login, project, account, remove } kind;
+        enum class kind_t { login, projects, accounts, created_project, created_account, remove } kind;
         std::shared_ptr<google_oauth_user_t> user;
         std::string project;
-        std::filesystem::path path;
+        std::vector<cloud_project_t> projects;
+        std::vector<cloud_service_account_t> accounts;
+        cloud_result_t(kind_t value, std::shared_ptr<google_oauth_user_t> identity = {}, std::string id = {})
+            : kind{value}, user{std::move(identity)}, project{std::move(id)} {}
     };
     std::future<cloud_result_t> cloud_job;
     auto settings_control{std::make_shared<request_control_t>()};
@@ -171,9 +146,9 @@ auto app() -> void
         }
     } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control};
     home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
-    std::string selected_email, settings_task_name;
+    std::string settings_task_name;
     std::vector<std::pair<std::uint64_t,std::shared_ptr<bool>>> settings_rows;
-    bool account_action{}, restore_after_login{};
+    bool restore_after_login{};
     auto begin_settings_row = [&](std::string name, bool cancellable)
     {
         settings_task_name = std::move(name);
@@ -212,274 +187,296 @@ auto app() -> void
         settings_confirm->set_pos(settings_retry->get_pos());
         if (!cancellable) settings_cancel->hide();
     };
-    auto apply_settings = [&](storage_settings_t candidate, bool interactive)
+    enum class menu_page_t { spaces, links, users, projects, services };
+    auto menu_page = menu_page_t::spaces;
+    std::string editing_space, selected_project;
+    std::shared_ptr<google_oauth_user_t> cloud_user;
+    std::vector<cloud_project_t> projects;
+    std::vector<cloud_service_account_t> services;
+    auto show_menu = [&] { persistent.m_open_accounts(false); };
+    auto space_by_id = [&](const std::string& id) -> storage_space_t&
     {
-        if (settings_job.valid() || cloud_job.valid())
-            throw std::runtime_error{"設定正在套用，請稍候"};
-        if (clearing_session || (load_state.m_session && load_state.m_session->clearing))
-            throw std::runtime_error{"清除期間請稍後再切換設定"};
-        // Validate font and output paths before accepting the form.
-        auto next_font{std::make_unique<lgo::font_face_t>(candidate.font_path, lgo::std_font_size.x)};
-        std::filesystem::create_directories(candidate.logfile_path);
-        const auto probe_path{std::filesystem::path{candidate.logfile_path} /
-                              (".storage-write-test." +
-                               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))};
-        std::ofstream probe{probe_path, std::ios::binary};
-        if (!probe)
-            throw std::runtime_error{"無法寫入日誌資料夾"};
-        probe.close();
-        std::filesystem::remove(probe_path);
-        settings_control->retry();
-        settings_control->cancelled = false;
-        settings_control->retry_limit = candidate.network_retries;
-        const auto email = std::exchange(selected_email,{});
-        begin_settings_row(interactive ? "新增帳戶" : email.empty() ? "更新設定" : "切換帳戶："+email,true);
-        persistent.m_switching = true;
-        persistent.m_directory_status->set_text(interactive ? "登入中" : "目錄更新中");
-        settings_job =
-            std::async(std::launch::async, [&, candidate, interactive, email]
-            {
-                auto target = interactive ? runtime.open_oauth(candidate,
-                    google_oauth_user_t::login(candidate.account_path,settings_control),settings_control) :
-                    runtime.open(candidate,settings_control,email);
-                if (target && target->oauth && !email.empty())
-                    google_oauth_user_t::select(candidate.account_path,email);
-                return settings_result_t{candidate,std::move(target)};
-            });
+        const auto found = std::ranges::find(settings.spaces,id,&storage_space_t::id);
+        if (found==settings.spaces.end()) throw std::runtime_error{"空間已移除"};
+        return *found;
     };
-    persistent.m_apply_settings = [&](storage_settings_t candidate) { apply_settings(std::move(candidate),false); };
-    auto oauth_settings = [&]
+    auto sync_settings = [&]
     {
-        auto candidate = settings;
-        candidate.account_path = "client.json";
-        if (std::filesystem::exists(settings.account_path))
-        {
-            const auto config = nlohmann::json::parse(storage_read(settings.account_path));
-            if (config.contains("installed")) candidate.account_path = settings.account_path;
-        }
-        return candidate;
+        settings.save();
+        load_state.m_settings = settings;
     };
-    auto begin_cloud = [&](std::string name, std::function<cloud_result_t()> work)
+    auto suspend_space = [&](const std::string& id)
     {
-        if (settings_job.valid() || cloud_job.valid() || clearing_session)
-            throw std::runtime_error{"另一個帳戶操作仍在執行"};
-        settings_control->retry();
-        settings_control->cancelled = false;
-        begin_settings_row(std::move(name),true);
-        persistent.m_switching = true;
-        persistent.m_directory_status->set_text("帳戶操作中");
-        cloud_job = std::async(std::launch::async,std::move(work));
-    };
-    persistent.m_cloud_users = [&]
-    {
-        auto candidate = settings;
-        candidate.account_path = "client.json";
-        if (!std::filesystem::exists(candidate.account_path)) return std::vector<oauth_saved_account_t>{};
-        return google_oauth_user_t::saved_accounts(candidate.account_path,oauth_purpose_t::cloud);
-    };
-    persistent.m_cloud_login = [&]
-    {
-        try
-        {
-            auto candidate = settings;
-            candidate.account_path = "client.json";
-            begin_cloud("新增 Google 使用者",[path=candidate.account_path,control=settings_control]
-            {
-                auto user = google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
-                user->download_picture(control);
-                return cloud_result_t{cloud_result_t::kind_t::login,std::move(user),{}, {}};
-            });
-        }
-        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
-    };
-    persistent.m_use_cloud_user = [&](const std::string& email)
-    {
-        try
-        {
-            auto candidate = settings;
-            candidate.account_path = "client.json";
-            begin_cloud("準備服務帳戶專案："+email,[path=candidate.account_path,email,control=settings_control]
-            {
-                auto user = google_oauth_user_t::restore(path,email,oauth_purpose_t::cloud);
-                const auto project = google_cloud_prepare(user,control);
-                return cloud_result_t{cloud_result_t::kind_t::project,std::move(user),project,{}};
-            });
-        }
-        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
-    };
-    persistent.m_remove_cloud_user = [&](const std::string& email)
-    {
-        try
-        {
-            auto candidate = settings;
-            candidate.account_path = "client.json";
-            begin_cloud("移除 Google 使用者："+email,[path=candidate.account_path,email]
-            {
-                google_oauth_user_t::remove(path,email,oauth_purpose_t::cloud);
-                return cloud_result_t{cloud_result_t::kind_t::remove,{}, {}, {}};
-            });
-        }
-        catch (const std::exception& error) { persistent.m_directory_status->set_text(error.what()); }
-    };
-    persistent.m_service_accounts = [] { return storage_service_accounts(); };
-    persistent.m_select_service_account = [&](const service_account_file_t& account)
-    {
-        try
-        {
-            selected_email = account.address;
-            auto candidate = settings;
-            candidate.account_path = account.account_path;
-            candidate.signed_out_service_accounts.erase(account.address);
-            apply_settings(std::move(candidate),false);
-        }
-        catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入服務帳戶"); }
-    };
-    persistent.m_saved_accounts = [&]
-    {
-        const auto candidate = oauth_settings();
-        if (!std::filesystem::exists(candidate.account_path)) return std::vector<oauth_saved_account_t>{};
-        return google_oauth_user_t::saved_accounts(candidate.account_path);
-    };
-    persistent.m_login = [&]
-    {
-        try { apply_settings(oauth_settings(),true); }
-        catch (const std::exception&) { persistent.m_directory_status->set_text("無法開始登入"); }
-    };
-    persistent.m_select_account = [&](const std::string& email)
-    {
-        try
-        {
-            selected_email = email;
-            apply_settings(oauth_settings(),false);
-        }
-        catch (const std::exception&) { selected_email.clear(); persistent.m_directory_status->set_text("無法登入帳號"); }
-    };
-    auto menu_account_id = [&](const std::string& email, bool oauth)
-    {
-        if (!oauth) return email;
-        const auto config = nlohmann::json::parse(storage_read(oauth_settings().account_path));
-        return "appdata:"+storage_digest(config.at("installed").at("client_id").get<std::string>())+":"+email;
-    };
-    persistent.m_account_signed_in = [&](const std::string& email, bool oauth)
-    {
-        try
-        {
-            const auto id = menu_account_id(email,oauth);
-            return settings.signed_in_accounts && settings.signed_in_accounts->contains(id);
-        }
-        catch (const std::exception&) { return false; }
-    };
-    persistent.m_has_signed_in_accounts = [&]
-        { return settings.signed_in_accounts && !settings.signed_in_accounts->empty(); };
-    auto suspend_account_tasks = [&](const std::string& id)
-    {
-        // Keep every checkpoint; this is shutdown, not user cancellation.
         auto tasks = load_state.m_task_list;
         for (auto& task : tasks)
             if (task->m_session && task->m_session->storage_id==id)
-                finish_task(*task,task_result_t::signed_out,"等待帳號登入："+task->m_label);
+                finish_task(*task,task_result_t::signed_out,"等待空間登入："+task->m_label);
+        for (auto& listing : persistent.m_listings)
+            if (listing.session && listing.session->storage_id==id) listing.control->cancel();
+        if (persistent.m_clipboard && persistent.m_clipboard->session->storage_id==id)
+            persistent.m_clipboard.reset();
         multi.interrupt();
     };
-    persistent.m_remove_account = [&](const std::string& email)
+    auto start_settings = [&](storage_settings_t candidate, std::string name,
+                              std::function<std::shared_ptr<storage_session_t>()> work)
     {
-        if (persistent.m_switching || clearing_session || persistent.m_account_signed_in(email,true)) return;
-        try
-        {
-            const auto candidate = oauth_settings();
-            const auto user = google_oauth_user_t::restore(candidate.account_path,email);
-            suspend_account_tasks(user->storage_id());
-            begin_settings_row("移除帳戶："+email,false);
-            persistent.m_switching = account_action = true;
-            persistent.m_directory_status->set_text("移除帳號中");
-            settings_job = std::async(std::launch::async,[&,candidate,email,id=user->storage_id(),current=load_state.m_session]
-            {
-                runtime.sign_out(id);
-                google_oauth_user_t::remove(candidate.account_path,email);
-                return settings_result_t{settings,current};
-            });
-        }
-        catch (const std::exception&) { persistent.m_directory_status->set_text("無法移除帳號"); }
+        if (settings_job.valid() || cloud_job.valid() || clearing_session)
+            throw std::runtime_error{"另一個操作仍在執行"};
+        settings_control->retry();
+        settings_control->cancelled=false;
+        settings_control->retry_limit=candidate.network_retries;
+        begin_settings_row(std::move(name),true);
+        persistent.m_switching=true;
+        settings_job=std::async(std::launch::async,
+            [candidate=std::move(candidate),work=std::move(work)]
+            { return settings_result_t{candidate,work()}; });
     };
-    auto logout_accounts = [&](storage_account_logins_t targets, bool all)
+    persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
-        if (targets.empty() || settings_job.valid() || clearing_session) return;
-        auto candidate = settings;
-        std::string oauth_path;
-        if (all)
+        auto next_font=std::make_unique<lgo::font_face_t>(candidate.font_path,lgo::std_font_size.x);
+        std::filesystem::create_directories(candidate.logfile_path);
+        const auto probe_path=std::filesystem::path{candidate.logfile_path}/
+            (".storage-write-test."+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::ofstream probe{probe_path,std::ios::binary};
+        if (!probe) throw std::runtime_error{"無法寫入日誌資料夾"};
+        probe.close();
+        std::filesystem::remove(probe_path);
+        start_settings(candidate,"更新設定",[&,candidate,current=load_state.m_session]
         {
-            // Include known credentials even if their account currently has no
-            // task/session, so journal restoration cannot log it back in.
-            for (const auto& account : storage_service_accounts())
-                candidate.signed_out_service_accounts.insert(account.address);
-            try
-            {
-                const auto path = oauth_settings().account_path;
-                if (std::filesystem::exists(path) &&
-                    nlohmann::json::parse(storage_read(path)).contains("installed")) oauth_path = path;
-            }
-            catch (const std::exception&) { } // Live sessions still carry their own client paths.
-        }
-        auto current = load_state.m_session;
-        const auto selected = [&](const std::shared_ptr<storage_session_t>& session)
-        {
-            return session && targets.contains(session->storage_id);
-        };
-        for (const auto& [id,account] : targets) suspend_account_tasks(id);
-        for (auto& listing : persistent.m_listings)
-            if (selected(listing.session)) listing.control->cancel();
-        if (persistent.m_clipboard && selected(persistent.m_clipboard->session)) persistent.m_clipboard.reset();
-        if (selected(current))
-        {
-            persistent.m_reset_view();
-            current.reset();
-        }
-        begin_settings_row(all ? "登出所有" : "登出："+targets.begin()->second.address,false);
-        persistent.m_switching = account_action = true;
-        persistent.m_directory_status->set_text("登出中");
-        settings_job = std::async(std::launch::async,
-            [&,targets=std::move(targets),candidate=std::move(candidate),current,all,oauth_path]() mutable
-        {
-            for (const auto& [id,account] : targets)
-            {
-                runtime.sign_out(id);
-                if (account.oauth)
-                    google_oauth_user_t::sign_out(account.account_path,all ? std::string{} : account.address);
-                else candidate.signed_out_service_accounts.insert(account.address);
-                if (candidate.signed_in_accounts) candidate.signed_in_accounts->erase(id);
-            }
-            if (!oauth_path.empty()) google_oauth_user_t::sign_out(oauth_path);
-            return settings_result_t{std::move(candidate),current};
+            if (current && candidate.root_path!=settings.root_path)
+                return runtime.open_space(candidate,*std::ranges::find(candidate.spaces,current->storage_id,&storage_space_t::id),settings_control);
+            return current;
         });
     };
-    persistent.m_logout_account = [&](const std::string& email, bool oauth)
+    auto sign_in = [&](std::string id)
     {
-        try
+        auto candidate=settings;
+        auto& space=*std::ranges::find(candidate.spaces,id,&storage_space_t::id);
+        space.signed_in=true;
+        candidate.selected_space=id;
+        start_settings(candidate,"登入空間："+space.name,[&,candidate,space]
         {
-            const auto id = menu_account_id(email,oauth);
-            if (settings.signed_in_accounts)
-                if (const auto account = settings.signed_in_accounts->find(id); account!=settings.signed_in_accounts->end())
-                    logout_accounts({*account},false);
-        }
-        catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出帳號"); }
+            for (const auto& current : runtime.signed_in_sessions())
+                if (current->storage_id==space.id) return current;
+            return runtime.open_space(candidate,space,settings_control);
+        });
     };
-    persistent.m_logout = [&]
+    auto sign_out = [&](std::string id, bool remove_space, std::string remove_account)
     {
-        try
+        if (settings_job.valid() || cloud_job.valid() || clearing_session) return;
+        auto candidate=settings;
+        auto found=std::ranges::find(candidate.spaces,id,&storage_space_t::id);
+        if (found==candidate.spaces.end()) return;
+        found->signed_in=false;
+        if (!remove_account.empty()) std::erase(found->accounts,remove_account);
+        const auto name=found->name;
+        if (remove_space) candidate.spaces.erase(found);
+        auto current=load_state.m_session;
+        if (current && current->storage_id==id) current.reset();
+        if (candidate.selected_space==id) candidate.selected_space.clear();
+        suspend_space(id);
+        start_settings(candidate,remove_space ? "移除空間："+name : remove_account.empty() ? "登出空間："+name : "移除服務帳戶關聯",
+            [&,candidate,current,id,remove_space]
         {
-            if (settings.signed_in_accounts) logout_accounts(*settings.signed_in_accounts,true);
-        }
-        catch (const std::exception&) { persistent.m_directory_status->set_text("無法登出所有帳號"); }
+            runtime.sign_out(id);
+            if (remove_space) std::filesystem::remove(std::filesystem::path{candidate.root_path}/id);
+            return current;
+        });
     };
-    auto update_account_status = [&]
+    auto name_dialog = [&](std::string title, std::string label, std::function<void(std::string)> accept)
     {
-        persistent.m_account_status(bool(load_state.m_session));
+        persistent.m_dialog_queue.push_back([&,title=std::move(title),label=std::move(label),accept=std::move(accept)]
+        {
+            persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,title,
+                std::vector<std::string>{},std::vector<std::pair<std::string,std::string>>{{label,""}});
+            persistent.m_dialog_done=[&,accept](bool ok,const auto& values)
+            {
+                if (!ok) { persistent.m_deferred.push_back(show_menu); return true; }
+                try
+                {
+                    if (values.at(0).empty() || std::ranges::all_of(values.at(0),[](unsigned char c) { return c<=32; }))
+                        throw std::runtime_error{"請輸入名稱"};
+                    accept(values.at(0));
+                    return true;
+                }
+                catch (const std::exception& error) { persistent.m_dialog->error(error.what()); return false; }
+            };
+        });
     };
+    auto typed_removal = [&](std::string title,std::vector<std::string> consequences,std::string phrase,std::function<void()> apply)
+    {
+        consequences.push_back("請輸入「"+phrase+"」以確認。");
+        persistent.m_dialog_queue.push_back([&,title=std::move(title),consequences=std::move(consequences),phrase=std::move(phrase),apply=std::move(apply)]
+        {
+            persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,title,consequences,
+                std::vector<std::pair<std::string,std::string>>{{"確認文字",""}},"移除");
+            persistent.m_dialog_done=[&,phrase,apply](bool ok,const auto& values)
+            {
+                if (!ok) { persistent.m_deferred.push_back(show_menu); return true; }
+                if (values.at(0)!=phrase) { persistent.m_dialog->error("確認文字不符"); return false; }
+                apply();
+                return true;
+            };
+        });
+    };
+    auto begin_cloud = [&](std::string name,std::function<cloud_result_t()> work)
+    {
+        if (settings_job.valid() || cloud_job.valid() || clearing_session)
+            throw std::runtime_error{"另一個操作仍在執行"};
+        settings_control->retry();
+        settings_control->cancelled=false;
+        begin_settings_row(std::move(name),true);
+        persistent.m_switching=true;
+        cloud_job=std::async(std::launch::async,std::move(work));
+    };
+    auto select_project = [&](std::string project)
+    {
+        selected_project=project;
+        begin_cloud("讀取服務帳戶",[user=cloud_user,project,control=settings_control]
+        {
+            cloud_result_t result{cloud_result_t::kind_t::accounts,user,project};
+            result.accounts=google_cloud_accounts(user,control,project);
+            return result;
+        });
+    };
+    persistent.m_space_menu_rows = [&]
+    {
+        std::vector<GUI_persistent_t::menu_row_t> rows;
+        if (menu_page==menu_page_t::spaces)
+            for (const auto& space : settings.spaces)
+                rows.push_back({space.name,{},false,{
+                    {"登入",[&,id=space.id] { sign_in(id); }},
+                    {"登出",[&,id=space.id] { sign_out(id,false,{}); }},
+                    {"編輯",[&,id=space.id] { editing_space=id; menu_page=menu_page_t::links; show_menu(); }},
+                    {"移除",[&,space]
+                    {
+                        typed_removal("移除空間",{"空間："+space.name,"將移除本機空間設定與 root 紀錄，並登出此空間、暫停傳輸。",
+                            "所有雲端 blob 與服務帳戶金鑰都會保留。","失去 root 紀錄後，新建同名空間也不會自動找回原資料。"},
+                            "移除空間",[&,id=space.id] { menu_page=menu_page_t::spaces; sign_out(id,true,{}); });
+                    }}}});
+        else if (menu_page==menu_page_t::links)
+            for (const auto& address : space_by_id(editing_space).accounts)
+                rows.push_back({address.substr(0,address.find('@')),{},false,{{"移除",[&,address]
+                {
+                    typed_removal("移除服務帳戶關聯",{"服務帳戶："+address,"只解除此空間的關聯，雲端 blob 與私鑰都會保留。",
+                        "將登出此空間並暫停傳輸。存在此帳戶的資料及依賴其索引的內容可能無法存取。",
+                        "重新關聯同一服務帳戶後可恢復存取。"},"移除關聯",[&,address] { sign_out(editing_space,false,address); });
+                }}}});
+        else if (menu_page==menu_page_t::users)
+        {
+            if (!std::filesystem::exists(settings.account_path)) return rows;
+            for (const auto& user : google_oauth_user_t::saved_accounts(settings.account_path,oauth_purpose_t::cloud))
+                rows.push_back({user.address,user.portrait,true,{
+                    {"使用",[&,email=user.address]
+                    {
+                        begin_cloud("讀取專案",[path=settings.account_path,email,control=settings_control]
+                        {
+                            auto user=google_oauth_user_t::restore(path,email,oauth_purpose_t::cloud);
+                            cloud_result_t result{cloud_result_t::kind_t::projects,user};
+                            result.projects=google_cloud_projects(user,control);
+                            return result;
+                        });
+                    }},
+                    {"移除",[&,email=user.address]
+                    {
+                        begin_cloud("移除 Google 使用者",[path=settings.account_path,email]
+                        { google_oauth_user_t::remove(path,email,oauth_purpose_t::cloud); return cloud_result_t{cloud_result_t::kind_t::remove}; });
+                    }}}});
+        }
+        else if (menu_page==menu_page_t::projects)
+            for (const auto& project : projects)
+                rows.push_back({project.name,{},false,{{"使用",[&,id=project.id] { select_project(id); }}}});
+        else
+            for (const auto& account : services)
+                rows.push_back({account.address.substr(0,account.address.find('@')),{},false,{{"使用",[&,address=account.address]
+                {
+                    auto& space=space_by_id(editing_space);
+                    if (std::ranges::find(space.accounts,address)==space.accounts.end()) space.accounts.push_back(address);
+                    sync_settings();
+                    menu_page=menu_page_t::links;
+                    if (space.signed_in)
+                    {
+                        auto candidate=settings;
+                        start_settings(candidate,"更新空間服務帳戶",[&,candidate,space]
+                        { return runtime.open_space(candidate,space,settings_control); });
+                    }
+                    else show_menu();
+                }}}});
+        return rows;
+    };
+    persistent.m_space_menu_actions = [&]
+    {
+        using action_t=std::pair<std::string,std::function<void()>>;
+        std::vector<action_t> actions;
+        if (menu_page==menu_page_t::spaces)
+            actions.emplace_back("新增空間",[&]
+            {
+                name_dialog("新增空間","空間名稱",[&](std::string name)
+                {
+                    std::random_device random;
+                    const auto id=storage_digest(name+std::to_string(random())+
+                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+                    settings.spaces.push_back({id,std::move(name),{},false});
+                    sync_settings();
+                    persistent.m_deferred.push_back(show_menu);
+                });
+            });
+        else
+        {
+            actions.emplace_back("返回",[&]
+            {
+                menu_page=menu_page==menu_page_t::links ? menu_page_t::spaces :
+                    menu_page==menu_page_t::users ? menu_page_t::links :
+                    menu_page==menu_page_t::projects ? menu_page_t::users : menu_page_t::projects;
+                show_menu();
+            });
+            if (menu_page==menu_page_t::links)
+                actions.emplace_back("新增帳戶",[&] { menu_page=menu_page_t::users; show_menu(); });
+            else if (menu_page==menu_page_t::users)
+                actions.emplace_back("新增使用者",[&]
+                {
+                    begin_cloud("新增 Google 使用者",[path=settings.account_path,control=settings_control]
+                    {
+                        auto user=google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
+                        user->download_picture(control);
+                        return cloud_result_t{cloud_result_t::kind_t::login,user};
+                    });
+                });
+            else if (menu_page==menu_page_t::projects)
+                actions.emplace_back("新增專案",[&]
+                {
+                    name_dialog("新增專案","專案名稱",[&](std::string name)
+                    {
+                        begin_cloud("新增專案："+name,[user=cloud_user,name,control=settings_control]
+                        { return cloud_result_t{cloud_result_t::kind_t::created_project,user,google_cloud_create_project(user,control,name)}; });
+                    });
+                });
+            else
+                actions.emplace_back("新增帳戶",[&]
+                {
+                    name_dialog("新增服務帳戶","服務帳戶名稱",[&](std::string name)
+                    {
+                        google_cloud_validate_account(name);
+                        begin_cloud("新增服務帳戶："+name,[user=cloud_user,project=selected_project,name,control=settings_control]
+                        {
+                            google_cloud_create_account(user,control,project,name);
+                            return cloud_result_t{cloud_result_t::kind_t::created_account,user,project};
+                        });
+                    });
+                });
+        }
+        return actions;
+    };
+    // Opening the toolbar always starts at the space list; nested pages retain
+    // their selection only while navigating within this dropdown workflow.
+    persistent.m_toggle_accounts = [&]
+    {
+        if (persistent.m_account_menu) persistent.m_close_accounts();
+        else { menu_page=menu_page_t::spaces; show_menu(); }
+    };
+    auto update_account_status = [&] { persistent.m_account_status(bool(load_state.m_session)); };
     update_account_status();
-    if (!startup_error.empty())
-    {
-        persistent.m_directory_status->set_text("請重新登入");
-        lgo::log_file("Startup account unavailable; sign in or update account settings.\n");
-    }
+    if (!startup_error.empty()) persistent.m_directory_status->set_text("空間登入失敗："+startup_error);
     persistent.m_clear_account = [&]
     {
         if (!load_state.m_session || clear_job.valid() || settings_job.valid())
@@ -491,7 +488,9 @@ auto app() -> void
         clear_control->cancelled = false;
         clear_control->retry();
         clearing_session = load_state.m_session;
-        clearing_session->clearing = true;
+        for (const auto& active : runtime.signed_in_sessions())
+            if (std::ranges::any_of(active->accounts,[&](const auto& entry)
+                { return clearing_session->accounts.contains(entry.first); })) active->clearing=true;
         persistent.m_reset_view();
         clear_progress = 0;
         clear_total = 0;
@@ -502,7 +501,8 @@ auto app() -> void
         auto account_tasks{load_state.m_task_list};
         account_tasks.insert(account_tasks.end(), load_state.m_finished_tasks.begin(), load_state.m_finished_tasks.end());
         for (auto& task : account_tasks)
-            if (task->m_session && task->m_session->storage_id == clearing_session->storage_id)
+            if (task->m_session && std::ranges::any_of(task->m_session->accounts,[&](const auto& entry)
+                { return clearing_session->accounts.contains(entry.first); }))
             {
                 task->m_control->cancel();
                 cancelled.push_back(task);
@@ -515,7 +515,7 @@ auto app() -> void
         clear_dismissed = std::make_shared<bool>(false);
         clear_rows.emplace_back(row_id, clear_dismissed);
         clear_text = row->add_object_shared<lgo::text_line_scroll_std_t>(
-            storage_content_depth, clearing_session->oauth ? "清除：列出應用程式資料" : "清除：列出全部 Drive 檔案", lgo::std_red_light, lgo::size_1D{256}, false);
+            storage_content_depth, "清除：列出關聯帳戶全部 Drive 檔案", lgo::std_red_light, lgo::size_1D{256}, false);
         auto clear_actions{row->add_object_shared<lgo::divx_soft_t>(
             storage_content_depth, lgo::div_create_from_member{},
             lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -525,7 +525,7 @@ auto app() -> void
             storage_content_depth,
             [&]
             {
-                load_state.m_session->account->retry();
+                runtime.retry_accounts();
                 if (clear_job.valid()) clear_control->retry();
                 else clear_restart = true;
             },
@@ -575,65 +575,15 @@ auto app() -> void
     };
     auto restore_available_tasks = [&]
     {
-        restore_tasks(&load_state,
-            [&](const nlohmann::json& intent) -> std::shared_ptr<storage_session_t>
-            {
-                const auto space = intent.value("account_namespace", "");
-                if (settings.signed_in_accounts)
-                {
-                    auto login = settings.signed_in_accounts->find(space);
-                    if (space.empty())
-                    {
-                        const auto email = intent.at("account_email").get<std::string>();
-                        const auto path = intent.at("account_path").get<std::string>();
-                        login = std::ranges::find_if(*settings.signed_in_accounts,[&](const auto& entry)
-                            { return entry.second.address==email && entry.second.account_path==path; });
-                    }
-                    if (login==settings.signed_in_accounts->end()) return {};
-                    // Use the matching restored login, rather than requiring it
-                    // to be the account currently selected in the browser.
-                    for (const auto& active : runtime.signed_in_sessions())
-                        if (active->storage_id==login->first && !active->root.empty())
-                        {
-                            auto saved = settings;
-                            saved.account_path = login->second.account_path;
-                            saved.root_path = intent.value("root_directory",login->second.root_directory);
-                            if (active->oauth)
-                                return runtime.open_oauth(saved,active->oauth,startup_control,intent.at("root"));
-                            return runtime.open(saved,startup_control,active->address,intent.at("root"),login->first);
-                        }
-                    return {};
-                }
-                if (space.starts_with("appdata:"))
-                {
-                    if (!load_state.m_session || load_state.m_session->storage_id!=space)
-                        return {}; // Keep signed-out account journals until that user logs in.
-                    auto saved = settings;
-                    saved.account_path = intent.at("account_path");
-                    // Old journals already carry the cloud root ID; after manual
-                    // relocation they use the configured root directory.
-                    saved.root_path = intent.value("root_directory",settings.root_path);
-                    // The task's root can differ from the user's current browser root.
-                    return runtime.open_oauth(saved,load_state.m_session->oauth,startup_control,intent.at("root"));
-                }
-                auto saved = settings;
-                saved.account_path = intent.at("account_path");
-                saved.root_path = intent.value("root_directory",settings.root_path);
-                try { return runtime.open(saved,startup_control,intent.at("account_email"),intent.at("root"),space); }
-                catch (const std::exception&) { return {}; }
-            });
+        restore_tasks(&load_state,[&](const nlohmann::json& intent) -> std::shared_ptr<storage_session_t>
+        {
+            for (const auto& active : runtime.signed_in_sessions())
+                if (active->storage_id==intent.at("account_namespace").get<std::string>()) return active;
+            return {};
+        });
     };
     restore_available_tasks();
-    if (!settings.signed_in_accounts)
-    {
-        // Migrate only identities actually recovered from legacy selection/tasks;
-        // saved credential history alone does not mean that a user is signed in.
-        remember_session(settings,session);
-        for (const auto& task : load_state.m_task_list)
-            if (task->m_session) (*settings.signed_in_accounts)[task->m_session->storage_id] = login_record(task->m_session);
-        load_state.m_settings = settings;
-    }
-    if (session && session->clearing)
+    if (session && std::filesystem::exists("clear."+storage_digest(session->storage_id)))
         persistent.m_clear_account();
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
@@ -651,53 +601,31 @@ auto app() -> void
                 auto result = cloud_job.get();
                 settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_directory_status->set_text("");
-                if (result.kind==cloud_result_t::kind_t::project)
+                if (result.user) cloud_user=result.user;
+                if (result.kind==cloud_result_t::kind_t::projects)
+                { projects=std::move(result.projects); menu_page=menu_page_t::projects; show_menu(); }
+                else if (result.kind==cloud_result_t::kind_t::accounts)
+                { services=std::move(result.accounts); menu_page=menu_page_t::services; show_menu(); }
+                else if (result.kind==cloud_result_t::kind_t::created_project)
                 {
-                    persistent.m_dialog_queue.push_back([&,user=result.user,project=result.project]
+                    begin_cloud("讀取專案",[user=cloud_user,control=settings_control]
                     {
-                        persistent.m_dialog = std::make_unique<lgo::modal_dialog_t>(
-                            &engine,&depth,"新增服務帳戶",
-                            std::vector<std::string>{"專案："+project,"名稱為 6–30 個小寫英文字母、數字或連字號"},
-                            std::vector<std::pair<std::string,std::string>>{{"服務帳戶名稱",""}});
-                        persistent.m_dialog_done = [&,user,project](bool accepted,const std::vector<std::string>& values)
-                        {
-                            if (!accepted)
-                            {
-                                persistent.m_deferred.push_back([&] { persistent.m_open_accounts(true); });
-                                return true;
-                            }
-                            try
-                            {
-                                const auto name = values.at(0);
-                                google_cloud_validate_account(name);
-                                begin_cloud("建立服務帳戶："+name,[user,project,name,control=settings_control]
-                                {
-                                    const auto path = google_cloud_create_account(user,control,project,name);
-                                    return cloud_result_t{cloud_result_t::kind_t::account,user,project,path};
-                                });
-                                return true;
-                            }
-                            catch (const std::exception& error)
-                            { persistent.m_dialog->error(error.what()); return false; }
-                        };
+                        cloud_result_t next{cloud_result_t::kind_t::projects,user};
+                        next.projects=google_cloud_projects(user,control);
+                        return next;
                     });
                 }
+                else if (result.kind==cloud_result_t::kind_t::created_account)
+                    select_project(result.project);
                 else
-                {
-                    // Cloud authorization supplies provisioning identities only;
-                    // it must never replace the active Drive storage session.
-                    if (result.kind==cloud_result_t::kind_t::login) glfwFocusWindow(engine.window_get());
-                    if (result.kind==cloud_result_t::kind_t::account)
-                        settings_text->set_text("已完成："+settings_task_name+"（"+result.path.generic_string()+"）",false);
-                    persistent.m_open_accounts(result.kind!=cloud_result_t::kind_t::account);
-                }
+                { menu_page=menu_page_t::users; glfwFocusWindow(engine.window_get()); show_menu(); }
             }
             catch (const std::exception& error)
             {
                 settings_text->set_text(settings_control->cancelled ? "已取消："+settings_task_name :
                     "失敗："+settings_task_name+"（"+error.what()+"）",false);
                 persistent.m_directory_status->set_text(settings_control->cancelled ? "操作已取消" : "帳戶操作失敗");
-                persistent.m_open_accounts(true);
+                show_menu();
             }
         }
         if (settings_job.valid() && settings_job.wait_for(0s) == std::future_status::ready)
@@ -707,12 +635,11 @@ auto app() -> void
                 auto result{settings_job.get()};
                 auto next_font{
                     std::make_unique<lgo::font_face_t>(result.settings.font_path, lgo::std_font_size.x)};
-                remember_session(result.settings,result.session);
                 result.settings.save();
                 lgo::init_logfile(log_path(result.settings));
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
                 const bool changed_location{!result.session || !load_state.m_session ||
-                    result.session->account != load_state.m_session->account ||
+                    result.session->storage_id != load_state.m_session->storage_id ||
                     result.settings.root_path != settings.root_path ||
                     result.session->root != load_state.m_session->root};
                 if (changed_location)
@@ -730,17 +657,18 @@ auto app() -> void
                 lgo::font_preference_t::default_get().assign(1, fonts.back().get());
                 persistent.set_directory_header_font(settings.font_path);
                 lgo::text_line_t::reload_fonts();
-                if (settings_task_name=="新增帳戶" && result.session)
-                    settings_task_name += "："+result.session->address;
                 settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_refresh();
+                // Only operations started from the space menu return to it.
+                // Closing the independent settings dialog leaves it closed.
+                persistent.m_deferred.push_back(show_menu);
             }
             catch (const std::exception& error)
             {
-                persistent.m_directory_status->set_text(account_action ? "帳號操作失敗" : "設定套用失敗");
-                settings_text->set_text(!account_action && settings_control->cancelled ?
+                persistent.m_directory_status->set_text("空間或設定操作失敗");
+                settings_text->set_text(settings_control->cancelled ?
                     "已取消："+settings_task_name : "失敗："+settings_task_name+"（"+error.what()+"）",false);
-                lgo::log_file(std::string{account_action ? "Account action failed: " : "Settings failed: "} + error.what() + "\n");
+                lgo::log_file(std::string{"Space/settings operation failed: "} + error.what() + "\n");
             }
             settings_retry->hide();
             settings_cancel->hide();
@@ -748,7 +676,6 @@ auto app() -> void
             settings_confirm->set_pos(settings_retry->get_pos());
             settings_confirm->show();
             persistent.m_switching = false;
-            account_action = false;
         }
         if (restore_after_login && !std::ranges::any_of(load_state.m_finished_tasks,
             [](const auto& task){ return task->m_result==task_result_t::signed_out; }))
@@ -756,7 +683,7 @@ auto app() -> void
             restore_available_tasks();
             restore_after_login = false;
         }
-        if (settings_job.valid() && !account_action)
+        if (settings_job.valid())
         {
             if (settings_control->paused)
             {
@@ -852,8 +779,7 @@ auto app() -> void
         }
         lgo::text_line_t::pending_load();
     }
-    // Account actions save immediately; also persist a legacy login snapshot
-    // when a session was simply opened and closed without any account action.
+    // Space membership and sign-in state are durable independently of tasks.
     settings.save();
     engine.flush();
     state.clear_state();

@@ -333,16 +333,19 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
 
     if (load_state->m_session)
         blob_queue = load_state->m_session->queue.get();
-    if (blob_queue) blob_queue->control()->retry_limit = load_state->m_settings.network_retries;
+    std::uint64_t queue_count{}, queue_cycles{};
     std::string queue_error;
-    try
+    auto inspect_queue=[&](const auto& queue)
     {
-        if (blob_queue) blob_queue->check_error();
-    }
-    catch (const std::exception& error)
-    {
-        queue_error = error.what();
-    }
+        queue->control()->retry_limit=load_state->m_settings.network_retries;
+        queue_count+=queue->count();
+        queue_cycles+=queue->cycle_rate();
+        try { queue->check_error(); }
+        catch (const std::exception& error) { if (queue_error.empty()) queue_error=error.what(); }
+    };
+    if (load_state->m_session)
+        for (const auto& [address,queue] : load_state->m_session->queues) inspect_queue(queue);
+    else if (blob_queue) inspect_queue(blob_queue);
 
     auto& easy_idle_arr{persistent->m_easy_idle};
     auto& load_easy_status_map{persistent->m_easy_status};
@@ -354,9 +357,9 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     }
 
     persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " +
-                                                  std::to_string(blob_queue ? blob_queue->cycle_rate() : 0));
+                                                  std::to_string(queue_cycles));
     persistent->m_blob_queue_count->set_text(queue_error.empty()
-                                                 ? "blob_queue_count: " + std::to_string(blob_queue ? blob_queue->count() : 0)
+                                                 ? "blob_queue_count: " + std::to_string(queue_count)
                                                  : "預備佇列失敗：" + queue_error);
     persistent->show_diagnostics(glfwGetKey(engine->window_get(), GLFW_KEY_F3));
     for (auto& load_easy_status : load_easy_status_map)
@@ -432,7 +435,7 @@ auto folder_create_callback(lgo::engine_t* engine, GUI_persistent_t* persistent,
             {
                 directory_validate_name(values.at(0));
                 if (state->m_session != session || session->clearing)
-                    throw std::runtime_error{"帳戶已變更，請重新開啟對話框"};
+                    throw std::runtime_error{"空間已變更，請重新開啟對話框"};
                 begin_directory_task(state, session, "directory-create", source, {}, {}, values[0]);
                 return true;
             }
@@ -507,8 +510,7 @@ namespace
                     task->pause(false);
                     if (task->m_session)
                     {
-                        task->m_session->account->retry();
-                        task->m_session->queue->retry();
+                        for (const auto& [address,queue] : task->m_session->queues) queue->retry();
                     }
                     task->m_control->retry();
                     if (task->m_preparation_failed && task->m_retry_prepare)
@@ -558,7 +560,8 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     if (!journal)
         journal = task_journal_t::create(nlohmann::json{{"kind", kind}, {"path", name}, {"pos", source},
             {"entity", entity}, {"destination", destination}, {"account_path", session->account_path},
-            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()}, {"root", session->root}});
+            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()}, {"root", session->root}, {"routing",session->routing()}});
+    session->restore_routing(journal->data().at("routing"));
     auto task{std::make_shared<directory_task_t>()};
     task->m_session = session; task->m_journal = journal; task->m_type = "directory";
     task->m_kind = kind; task->m_name = name; task->m_source = source;
@@ -601,7 +604,8 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                         {"account_path", session->account_path},
                                                         {"account_email", session->address}, {"account_namespace", session->storage_id},
                                                         {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()},
-                                                        {"root", session->root}});
+                                                        {"root", session->root}, {"routing",session->routing()}});
+    if (session && journal) session->restore_routing(journal->data().at("routing"));
     if (upload)
     {
         auto task{std::make_shared<upload_task_t>()};
@@ -657,6 +661,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                 task->m_file_arr.clear();
                 task->m_size = 0;
                 task->m_progress = 0;
+                task->m_progress = 0;
                 task->m_prepared = std::async(std::launch::async,
                                               [task, folder, path, pos]
                                               {
@@ -677,10 +682,8 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                       if (task->m_journal)
                                                           task->m_journal->set("destination_ready", true);
                                                   }
-                                                  if (folder)
-                                                      folder_download(&request, task, pos, path);
-                                                  else
-                                                      file_download(&request, task, pos, path);
+                                                  if (folder) folder_download(&request, task, pos, path);
+                                                  else file_download(&request, task, pos, path);
                                               });
             };
             task->m_retry_prepare();
@@ -794,7 +797,7 @@ namespace
                 if (!accepted) return true;
                 if (state->m_session != clipboard->session || clipboard->session->clearing)
                 {
-                    persistent->m_dialog->error("帳戶已變更，請重新剪下或複製");
+                    persistent->m_dialog->error("空間已變更，請重新剪下或複製");
                     return false;
                 }
                 if (!persistent->m_clipboard || persistent->m_clipboard->session != clipboard->session ||
@@ -833,7 +836,7 @@ namespace
                 if (accepted)
                 {
                     if (state->m_session != session || session->clearing)
-                    { persistent->m_dialog->error("帳戶已變更，請取消並重新操作"); return false; }
+                    { persistent->m_dialog->error("空間已變更，請取消並重新操作"); return false; }
                     begin_directory_task(state, session, "directory-delete", source, entry, {}, entry.at("name").get<std::string>());
                 }
                 return true;
@@ -876,7 +879,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                if (session)
                                    request.m_account_context = session->account;
                                request.control_set(control);
-                               auto entries = list_folder_content(request, &target);
+                               auto entries = list_folder_content(request, &target, session.get());
                                auto path = nlohmann::json::array();
                                std::set<std::string> visited;
                                auto ancestor{target};
@@ -886,14 +889,15 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                {
                                    if (!visited.insert(ancestor).second)
                                        throw std::runtime_error{"資料夾的父目錄形成循環"};
+                                   session->bind(request,ancestor);
                                    const auto data = blob_get_run(request, ancestor, "name");
                                    const auto metadata = nlohmann::json::parse(data.at("name").get<std::string>());
+                                   session->observe(ancestor,metadata);
                                    path.push_back({{"id", ancestor}, {"name", metadata.at("name")}});
                                    ancestor = metadata.at("parent").get<std::string>();
                                }
                                if (session && ancestor == session->root)
-                                   path.push_back({{"id", session->root}, {"name", session->oauth ?
-                                       std::string{"根目錄"} : session->address.substr(0, session->address.find('@'))}});
+                                   path.push_back({{"id", session->root}, {"name", session->address}});
                                std::reverse(path.begin(), path.end());
                                return nlohmann::json{{"entries", std::move(entries)}, {"path", std::move(path)}};
                            })};
@@ -1067,7 +1071,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             lgo::depth_range_t{.16f, .17f}, lgo::pos_2D{}, "", lgo::std_white, lgo::size_1D{400}));
     auto change_page = [persistent](int delta)
     {
-        const auto count{(load_easy_count + persistent->m_diagnostics_page_size - 1) /
+        const auto count{(std::max(std::size_t{1},persistent->m_easy_status.size()) + persistent->m_diagnostics_page_size - 1) /
                          persistent->m_diagnostics_page_size};
         persistent->m_diagnostics_page = (persistent->m_diagnostics_page + count + delta) % count;
         persistent->show_diagnostics(persistent->m_diagnostics_visible);
@@ -1207,11 +1211,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 const auto settings{load_state->m_settings};
                 persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
                     engine, state->get_depth_tracker(), "設定",
-                    std::vector<std::string>{"設定立即生效；進行中的傳輸繼續使用原帳戶。"},
+                    std::vector<std::string>{"設定立即生效；進行中的傳輸繼續使用原空間。"},
                     std::vector<std::pair<std::string, std::string>>{
                         {"日誌資料夾", settings.logfile_path},
                         {"字型檔案", settings.font_path},
-                        {"帳戶檔案", settings.account_path},
+                        {"Google 使用者用戶端設定", settings.account_path},
                         {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
@@ -1264,12 +1268,12 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         persistent->m_dialog_queue.push_back(
             [=]
             {
-                const bool appdata = session->account->appdata();
                 persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
-                    engine, state->get_depth_tracker(), appdata ? "清除應用程式資料" : "清除全部 Drive 檔案",
-                    std::vector<std::string>{"帳戶：" + session->address,
-                        appdata ? "將永久刪除此應用程式的全部雲端資料，並取消此資料空間的傳輸。" :
-                                  "將永久刪除此帳戶的全部 Drive 檔案，並取消此帳戶的傳輸。",
+                    engine, state->get_depth_tracker(), "清除空間全部檔案",
+                    std::vector<std::string>{"空間：" + session->address,
+                        "將永久刪除所有關聯服務帳戶中的全部 Drive 檔案。",
+                        "包含預備與未連結的 blob；共用帳戶的其他空間檔案也可能被清除。",
+                        "將取消所有使用這些服務帳戶的傳輸。",
                                              "此操作無法復原。請輸入「清除」以確認。"},
                     std::vector<std::pair<std::string, std::string>>{{"確認文字", ""}}, "清除全部");
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
@@ -1288,7 +1292,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                     }
                     if (session != load_state->m_session)
                     {
-                        persistent->m_dialog->error("帳戶已變更，請重新開啟清除對話框");
+                        persistent->m_dialog->error("空間已變更，請重新開啟清除對話框");
                         return false;
                     }
                     if (persistent->m_clear_account)
@@ -1306,8 +1310,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         {
             if (load_state->m_session)
             {
-                load_state->m_session->account->retry();
-                load_state->m_session->queue->retry();
+                for (const auto& [address,queue] : load_state->m_session->queues) queue->retry();
             }
             persistent->m_refresh();
         },
@@ -1331,7 +1334,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     persistent->m_login_button = identity->add_object_ghost_shared<lgo::button_text_t<lgo::text_line_std_t>>(
         storage_content_depth,[persistent]
         { persistent->m_deferred.push_back(persistent->m_toggle_accounts); },
-        "登入",lgo::std_white,lgo::size_1D{32});
+        "空間",lgo::std_white,lgo::size_1D{32});
     persistent->m_login_button->set_size({32,32});
     persistent->m_close_accounts = [persistent]
     {
@@ -1347,27 +1350,12 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         persistent->m_layout_accounts = {};
         persistent->m_account_menu.reset();
     };
-    persistent->m_open_accounts = [engine,state,persistent,load_state](bool cloud)
+    persistent->m_open_accounts = [engine,state,persistent](bool)
     {
         if (persistent->m_switching || persistent->m_dialog) return;
         persistent->m_close_accounts();
-        persistent->m_cloud_accounts = cloud;
-        struct account_row_t
-        {
-            std::string address, portrait;
-            std::optional<service_account_file_t> service;
-        };
-        std::vector<account_row_t> accounts;
-        try
-        {
-            if (cloud && persistent->m_cloud_users)
-                for (const auto& user : persistent->m_cloud_users())
-                    accounts.push_back({user.address,user.portrait,{}});
-            else if (!cloud && persistent->m_service_accounts)
-                for (const auto& account : persistent->m_service_accounts())
-                    accounts.push_back({account.address,{},account});
-        }
-        catch (const std::exception&) { persistent->m_directory_status->set_text(cloud ? "無法讀取 Google 使用者列表" : "無法讀取服務帳戶列表"); }
+        const auto accounts = persistent->m_space_menu_rows ? persistent->m_space_menu_rows() :
+            std::vector<GUI_persistent_t::menu_row_t>{};
         auto menu = std::make_unique<lgo::state_t>(engine,state->get_depth_tracker());
         // An independent overlay avoids toolbar clipping. Modal dialogs remain
         // in front; the full-window click area prevents clicks reaching files.
@@ -1376,7 +1364,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             lgo::depth_range_t{.159f,.159f},lgo::pos_2D{},engine->get_window_size(),
             []{},[](auto){},[](auto){},[](auto){},[persistent]
             { persistent->m_deferred.push_back(persistent->m_close_accounts); });
-        const auto width = std::min<std::int64_t>(560,engine->get_window_size().x-16);
+        const auto width = std::min<std::int64_t>(640,engine->get_window_size().x-16);
         auto panel = menu->add_object_shared<lgo::divy_soft_t>(content,lgo::pos_2D{},
             lgo::size_2D{width,0},lgo::size_1D{8},
             lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top});
@@ -1395,46 +1383,33 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         auto defer = [persistent](std::function<void()> action)
         {
             persistent->m_deferred.push_back([persistent,action=std::move(action)]
-            { persistent->m_close_accounts(); if (action) action(); });
+            {
+                persistent->m_close_accounts();
+                try { if (action) action(); }
+                catch (const std::exception& error) { persistent->m_directory_status->set_text(error.what()); }
+            });
         };
         for (const auto& account : accounts)
         {
             auto row = rows->add_object_shared<lgo::divx_soft_t>(content,
                 lgo::size_2D{row_width,48},lgo::size_1D{8},
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
-            if (cloud)
+            if (account.photo)
             {
                 auto photo = row->add_object_shared<profile_image_t>(content,lgo::size_2D{32,32});
                 photo->picture(account.portrait);
                 row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
             }
-            // Cloud users have a portrait; service accounts keep a text-only row.
-            const auto photo_width = cloud ? 32+lgo::std_line_size.x+2*8 : 0;
-            row->add_object<lgo::text_line_scroll_std_t>(content,account.address,lgo::std_white,
-                lgo::size_1D{row_width-2*32-2*lgo::std_line_size.x-4*8-photo_width},false);
-            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
-            row->add_object<progress_button_t>(content,[persistent,defer,account,cloud]
-                {
-                    defer([persistent,account,cloud]
-                    {
-                        if (cloud) { if (persistent->m_use_cloud_user) persistent->m_use_cloud_user(account.address); }
-                        else if (persistent->m_select_service_account) persistent->m_select_service_account(*account.service);
-                    });
-                },
-                cloud ? "使用" : "登入",lgo::std_blue_light,lgo::size_1D{32});
-            const bool signed_in = persistent->m_account_signed_in ?
-                persistent->m_account_signed_in(account.address,false) :
-                load_state->m_session && !load_state->m_session->oauth &&
-                    load_state->m_session->address==account.address;
-            row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_blue_light);
-            auto logout = row->add_object_shared<progress_button_t>(content,[persistent,defer,account,cloud]
-                { defer([persistent,email=account.address,cloud]
-                    {
-                        if (cloud) { if (persistent->m_remove_cloud_user) persistent->m_remove_cloud_user(email); }
-                        else if (persistent->m_logout_account) persistent->m_logout_account(email,false);
-                    }); },
-                cloud ? "移除" : "登出",lgo::std_blue_light,lgo::size_1D{32});
-            logout->set_enabled(cloud || signed_in);
+            const auto photo_width = account.photo ? 32+lgo::std_line_size.x+2*8 : 0;
+            const auto actions_width = static_cast<std::int64_t>(account.actions.size())*(32+lgo::std_line_size.x+16);
+            row->add_object<lgo::text_line_scroll_std_t>(content,account.text,lgo::std_white,
+                lgo::size_1D{std::max<std::int64_t>(32,row_width-actions_width-photo_width-8)},false);
+            for (const auto& [label,action] : account.actions)
+            {
+                row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
+                row->add_object<progress_button_t>(content,[defer,action] { defer(action); },
+                    label,lgo::std_blue_light,lgo::size_1D{32});
+            }
         }
         // Include the soft div's gaps between rows in the viewport height.
         // Counting only row heights adds a scrollbar even when all rows fit.
@@ -1444,15 +1419,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         auto footer = panel->add_object_shared<lgo::divx_soft_t>(content,
             lgo::size_2D{width-16,32},lgo::size_1D{8},
             lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
-        footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer,cloud]
-            { defer([persistent,cloud]
-                {
-                    if (cloud) { if (persistent->m_cloud_login) persistent->m_cloud_login(); }
-                    else persistent->m_open_accounts(true);
-                }); },"新增帳戶");
-        if (!cloud && (persistent->m_has_signed_in_accounts ? persistent->m_has_signed_in_accounts() : bool(load_state->m_session)))
-            footer->add_object<lgo::button_classic_std_t>(content,[persistent,defer]
-                { defer(persistent->m_logout); },"登出所有");
+        if (persistent->m_space_menu_actions)
+            for (const auto& [label,action] : persistent->m_space_menu_actions())
+                footer->add_object<lgo::button_classic_std_t>(content,[defer,action] { defer(action); },label);
         persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
         {
             const auto window = engine->get_window_size();
@@ -1481,11 +1450,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         if (persistent->m_account_menu) persistent->m_close_accounts();
         else persistent->m_open_accounts(false);
     };
-    persistent->m_account_status = [login=std::weak_ptr{persistent->m_login_button}](bool signed_in)
+    persistent->m_account_status = [login=std::weak_ptr{persistent->m_login_button}](bool)
     {
         if (auto button = login.lock())
         {
-            button->set_text(signed_in ? "帳戶" : "登入");
+            button->set_text("空間");
             button->show();
         }
     };

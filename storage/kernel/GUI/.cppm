@@ -25,6 +25,14 @@ export {
 
     struct GUI_persistent_t
     {
+        struct menu_row_t
+        {
+            std::string text, portrait;
+            bool photo{};
+            std::vector<std::pair<std::string,std::function<void()>>> actions;
+        };
+        std::function<std::vector<menu_row_t>()> m_space_menu_rows;
+        std::function<std::vector<std::pair<std::string,std::function<void()>>>()> m_space_menu_actions;
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
         std::vector<std::unique_ptr<lgo::font_face_t>> m_directory_header_faces;
         lgo::font_preference_t m_directory_header_font;
@@ -37,21 +45,8 @@ export {
         std::function<void()> m_reset_view;
         std::function<void(storage_settings_t)> m_apply_settings;
         std::function<void()> m_clear_account;
-        std::function<void()> m_login;
-        bool m_cloud_accounts{};
         std::function<void(bool)> m_open_accounts;
-        std::function<std::vector<oauth_saved_account_t>()> m_cloud_users;
-        std::function<void()> m_cloud_login;
-        std::function<void(const std::string&)> m_use_cloud_user, m_remove_cloud_user;
-        std::function<std::vector<service_account_file_t>()> m_service_accounts;
-        std::function<void(const service_account_file_t&)> m_select_service_account;
-        std::function<std::vector<oauth_saved_account_t>()> m_saved_accounts;
-        std::function<void(const std::string&)> m_select_account, m_remove_account;
-        // The bool distinguishes OAuth users from service accounts with the same email.
-        std::function<bool(const std::string&,bool)> m_account_signed_in;
-        std::function<void(const std::string&,bool)> m_logout_account;
-        std::function<bool()> m_has_signed_in_accounts;
-        std::function<void()> m_logout, m_toggle_accounts, m_close_accounts, m_layout_accounts;
+        std::function<void()> m_toggle_accounts, m_close_accounts, m_layout_accounts;
         std::unique_ptr<lgo::state_t> m_account_menu;
         lgo::engine_t::callback_key_t* m_account_menu_key{};
         std::function<void(bool)> m_account_status;

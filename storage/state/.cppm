@@ -10,26 +10,22 @@ export {
     auto storage_read(const std::filesystem::path& path) -> std::string;
     auto storage_digest(std::string_view content) -> std::string;
 
-    struct storage_account_login_t
+    struct storage_space_t
     {
-        // Credentials stay in their original files/vault; this is only identity and location.
-        std::string address, account_path, root_directory;
-        bool oauth{};
+        std::string id, name;
+        std::vector<std::string> accounts;
+        bool signed_in{};
     };
-    using storage_account_logins_t = std::map<std::string,storage_account_login_t>;
 
     struct storage_settings_t
     {
         std::string logfile_path{"logfile"};
         std::string font_path{"font/NotoSansTC-VariableFont_wght.ttf"};
-        std::string account_path{"key.json"};
-        // Directory containing one root ID file per storage identity.
+        std::string account_path{"client.json"};
+        // Directory containing one account/ID root record per space.
         std::string root_path{"root"};
-        // Keep sign-out per service identity so another login cannot resume it.
-        std::set<std::string> signed_out_service_accounts;
-        // Absence means legacy settings. An empty map explicitly means all signed out.
-        std::optional<storage_account_logins_t> signed_in_accounts;
-        std::string selected_account;
+        std::vector<storage_space_t> spaces;
+        std::string selected_space;
         int network_retries{-1};
         // Empty disables request/response diagnostics, including batch subrequests.
         std::string http_log_codes;
@@ -68,11 +64,15 @@ export {
         mutable std::mutex m_mutex;
         nlohmann::json m_data;
         bool m_finished{};
+        bool m_dirty{};
         auto save_locked() -> void;
 
       public:
         task_journal_t(std::filesystem::path path, nlohmann::json intent);
         auto data() const -> nlohmann::json;
+        auto field(std::string_view key) const -> std::optional<nlohmann::json>;
+        auto record_routing(const std::vector<std::string>& ids, const std::string& address,
+                            const std::string& type) -> void;
         auto path() const -> const std::filesystem::path& { return m_path; }
         auto set(std::string key, nlohmann::json value) -> void;
         auto allocate(std::string key, std::size_t count,

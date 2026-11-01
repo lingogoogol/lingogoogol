@@ -18,7 +18,10 @@ import storage.google;
 //  "name": the name of the file (str),
 //  "size": the size of the file (int),
 //  "parent": the directory id this file belongs to (str),
-//  "next": the id of next file blob of the same file (str)
+//  "next": the id of next file blob of the same file (str),
+//  "parent_account": owner of parent folder main blob,
+//  "next_account": owner of next file page,
+//  "account": one owner for all chunk IDs in this page
 //}
 
 //Structure of a file blob's description:
@@ -28,7 +31,9 @@ import storage.google;
 
 //Structure of a file chunk blob's name:
 //{
-//  "parent": the file blob id this chunk belongs to (str)
+//  "parent": the file main blob id this chunk belongs to (str),
+//  "parent_account": owner of parent file main blob,
+//  "account": one owner for all content IDs in this chunk
 //}
 
 //Structure of a chunk blob's description:
@@ -38,7 +43,8 @@ import storage.google;
 
 //Structure of a file content blob's name:
 //{
-//  "parent": the chunk blob id this content belongs to (str)
+//  "parent": the chunk blob id this content belongs to (str),
+//  "parent_account": owner of parent chunk
 //}
 
 //A file content blob's description contains base64 encoding of some file content.
@@ -47,7 +53,9 @@ import storage.google;
 //{
 //  "name": the name of the folder (str),
 //  "parent": the directory id this file belongs to (str),
-//  "next": the id of next folder blob of the same file (str)
+//  "next": the id of next folder blob of the same folder (str),
+//  "parent_account": owner of parent folder main blob,
+//  "next_account": owner of next folder page
 //}
 
 //Structure of a folder blob's description:
@@ -55,6 +63,7 @@ import storage.google;
 //  up to 100
 //  {
 //      "id": the id of the entity blob (str),
+//      "account": owner of that entity main blob (str),
 //      "type": "file" or "folder" (str),
 //      "name": the name of the entity (str),
 //      "size": size of the file. This field is only present in the links to files, not folders. (int)
@@ -82,11 +91,27 @@ export
         std::shared_ptr<blob_queue_t> queue;
         std::string account_path;
         std::string address;
-        // Scope/client-specific storage identity; address remains the user's email.
+        // Space ID; address is the display name shown in the browser.
         std::string storage_id;
         std::string root_path;
         std::string root;
         bool clearing{};
+        // A space owns identities, while queues remain shared per service account.
+        std::string root_account;
+        std::map<std::string,std::shared_ptr<google_account_t>> accounts;
+        std::map<std::string,std::shared_ptr<blob_queue_t>> queues;
+        mutable std::mutex routing_mutex;
+        std::map<std::string,std::string> owners, kinds;
+        std::map<std::string,std::uint64_t> project_units, account_units;
+        auto remember(const std::string& id, const std::string& owner, std::string kind = {}) -> void;
+        auto owner(const std::string& id) const -> std::string;
+        auto kind(const std::string& id) const -> std::string;
+        auto bind(curl_easy_t& request, const std::string& id) const -> void;
+        auto observe(const std::string& id, const nlohmann::json& name,
+                     const nlohmann::json& content = nullptr) -> void;
+        auto choose(std::uint64_t units) -> std::string;
+        auto routing() const -> nlohmann::json;
+        auto restore_routing(const nlohmann::json& saved) -> void;
     };
 
     struct load_state_t
@@ -259,6 +284,8 @@ export
     {
         // Each description appends exactly one part to a shared-pool batch.
         std::function<void(google_batch_t&)> configure;
+        std::function<void(google_easy_t&)> single;
+        std::string account;
         std::promise<std::string> response;
         bool allow_missing{};
     };
@@ -363,7 +390,7 @@ export
     auto finish_task(load_task_t& task, task_result_t result, std::string text) -> void;
     auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> void;
 
-    auto list_folder_content(google_easy_t& easy, std::string* pos) -> nlohmann::json;
+    auto list_folder_content(google_easy_t& easy, std::string* pos, storage_session_t* session = nullptr) -> nlohmann::json;
 
     auto file_upload
     (
@@ -412,11 +439,15 @@ export
     (
         google_easy_t& easy,
         std::string pos,
-        nlohmann::json entity
+        nlohmann::json entity,
+        storage_session_t* session = nullptr
     )
     -> void;
 
     auto folder_root_create(google_easy_t& easy) -> std::string;
+    auto task_owner(load_task_t& task, const std::string& key, std::uint64_t units = 100) -> std::string;
+    auto task_reserve(load_task_t& task, const std::string& key, std::size_t count = 1,
+                      std::string owner = {}, std::string kind = {}) -> std::vector<std::string>;
     auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t&& easy, blob_queue_t* blob_queue) -> bool;
     auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> void;
 

@@ -9,6 +9,7 @@ target_sources(
     PRIVATE
         .cpp
         directory.cpp
+        space.cpp
 )
 
 target_link_libraries(

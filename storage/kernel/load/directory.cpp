@@ -14,14 +14,18 @@ namespace
     class directory_io_t
     {
         directory_task_t& task;
-        auto submit(std::function<void(google_batch_t&)> configure, bool allow_missing = false) -> response_t
+        auto submit(const std::string& id, std::function<void(google_easy_t&)> single,
+                    std::function<void(google_batch_t&)> batch, bool allow_missing = false) -> response_t
         {
             if (task.m_control->cancelled) throw std::runtime_error{"操作已中止"};
-            auto request{std::make_shared<directory_request_t>()};
-            request->configure = std::move(configure);
+            auto request = std::make_shared<directory_request_t>();
+            request->account = task.m_session->owner(id);
+            // Folder blobs always use a direct request, including discovery,
+            // parent updates, cloning and deletion. Only file blobs are batched.
+            request->configure = std::move(batch);
             request->allow_missing = allow_missing;
-            auto result{request->response.get_future()};
-            std::unique_lock lock{task.m_requests_mutex};
+            auto result = request->response.get_future();
+            std::lock_guard lock{task.m_requests_mutex};
             task.m_requests.push_back(std::move(request));
             return result;
         }
@@ -37,15 +41,28 @@ namespace
         }
         auto get_async(std::string id, std::string fields) -> response_t
         {
-            return submit([id = std::move(id), fields = std::move(fields)](auto& easy)
-                { blob_get(easy,id,fields); });
+            return submit(id,[id,fields](auto& request) { blob_get(request,id,fields); },
+                             [id,fields](auto& request) { blob_get(request,id,fields); });
         }
         auto get(std::string id, std::string fields) -> nlohmann::json
-        { return nlohmann::json::parse(wait(get_async(std::move(id),std::move(fields)))); }
+        {
+            const auto value = nlohmann::json::parse(wait(get_async(id,std::move(fields))));
+            if (value.contains("name"))
+            {
+                const auto name = nlohmann::json::parse(value.at("name").get<std::string>());
+                const auto content = value.contains("description") && task.m_session->kind(id)!="data" ?
+                    nlohmann::json::parse(value.at("description").get<std::string>()) : nlohmann::json{};
+                task.m_session->observe(id,name,content);
+            }
+            return value;
+        }
         auto get_name(std::string id) -> std::string
         { return get(std::move(id),"name").at("name").get<std::string>(); }
         auto update_async(blob_str_opt_t blob) -> response_t
-        { return submit([blob = std::move(blob)](auto& easy) { blob_update(easy,blob); }); }
+        {
+            return submit(blob.m_id,[blob](auto& request) { blob_update(request,blob); },
+                                    [blob](auto& request) { blob_update(request,blob); });
+        }
         auto update(blob_str_opt_t blob) -> void { wait(update_async(std::move(blob))); }
         auto update_name(std::string id, std::string name) -> void
         { update({std::move(id),std::move(name),std::nullopt}); }
@@ -53,9 +70,11 @@ namespace
         { update({std::move(id),std::nullopt,std::move(content)}); }
         auto remove(std::string id) -> response_t
         {
-            return submit([id = std::move(id)](auto& easy)
+            return submit(id,[id](auto& request)
+                { request.clear(); request.path_set("/drive/v3/files/"+id); request.method_delete(); },
+                [id](auto& batch)
                 {
-                    auto& request{easy.request_add_handle()};
+                    auto& request = batch.request_add_handle();
                     request.path_set("/drive/v3/files/"+id);
                     request.method_set("DELETE");
                 },true);
@@ -63,7 +82,8 @@ namespace
     };
 
     // Each physical pool request carries up to 100 independent logical jobs.
-    // Bound the window to 64 batches, including a data GET followed by PATCH.
+    // Bound queued logical jobs to the configured physical request capacity,
+    // including a data GET followed by PATCH.
     // Consume whichever finishes first, not just the first submitted.
     // Discovery can grow size() as new metadata links arrive.
     // Complete may return a follow-up future for the same job (a data PATCH
@@ -138,12 +158,7 @@ namespace
 
     auto reserve(directory_task_t& task, const std::string& key) -> std::string
     {
-        return task.m_journal
-            ->allocate(key, 1,
-                       [&](std::size_t count) {
-                           return task.m_session->queue->get(count, &task.m_control->cancelled);
-                       })
-            .front();
+        return task_reserve(task,key,1,{},"folder").front();
     }
 
     auto insert(directory_io_t& easy, directory_task_t& task, const std::string& parent,
@@ -167,8 +182,10 @@ namespace
             const auto id{reserve(task, "directory-page:" + parent)};
             auto name = last.name;
             name["next"] = "null";
+            name["next_account"] = "null";
             easy.update(blob_str_opt_t{id, name.dump(), nlohmann::json::array({entry}).dump()});
             last.name["next"] = id;
+            last.name["next_account"] = task.m_session->owner(id);
             easy.update_name(last.id, last.name.dump());
         }
     }
@@ -218,7 +235,9 @@ namespace
                 const auto node{nodes[i]};
                 const auto blob=nlohmann::json::parse(response);
                 const auto name=nlohmann::json::parse(blob.at("name").get<std::string>());
-                if (name.at("parent")!=node.parent)
+                const auto content_value = node.kind=="data" ? nlohmann::json{} : nlohmann::json::parse(blob.at("description").get<std::string>());
+                task.m_session->observe(node.id,name,content_value);
+                if (name.at("parent")!=node.parent || name.at("parent_account")!=task.m_session->owner(node.parent))
                     throw std::runtime_error{"索引的父資料夾不一致"};
                 ids.push_back(node.id);
                 if (node.kind=="data")
@@ -275,13 +294,14 @@ auto directory_execute(directory_task_t& task) -> void
         if (!saved.value("initialized", false))
         {
             const auto name =
-                nlohmann::json{{"name", task.m_name}, {"parent", task.m_source}, {"next", "null"}};
+                nlohmann::json{{"name", task.m_name}, {"parent", task.m_source},
+                    {"parent_account",task.m_session->owner(task.m_source)}, {"next", "null"},{"next_account","null"}};
             easy.update({id, name.dump(), "[]"});
             task.m_journal->set("initialized", true);
         }
         task.m_completed = 1;
         insert(easy, task, task.m_source,
-               nlohmann::json{{"type", "folder"}, {"id", id}, {"name", task.m_name}});
+               nlohmann::json{{"type", "folder"}, {"id", id}, {"account",task.m_session->owner(id)}, {"name", task.m_name}});
         task.m_completed = 2;
         return;
     }
@@ -317,6 +337,7 @@ auto directory_execute(directory_task_t& task) -> void
         for (auto& page : moved_pages)
         {
             page.name["parent"] = task.m_destination;
+            page.name["parent_account"] = task.m_session->owner(task.m_destination);
             easy.update_name(page.id, page.name.dump());
         }
         task.m_completed = 2;
@@ -341,22 +362,40 @@ auto directory_execute(directory_task_t& task) -> void
             // Only metadata goes in the manifest. Immutable data payloads are
             // streamed through the bounded window instead of loading the file.
             task.m_journal->response("directory-copy-manifest", snapshot.dump());
+            task.m_journal->set("routing",task.m_session->routing());
         }
-        std::vector<std::string> reserved;
-        reserved.reserve(snapshot.size());
-        // The queue replenishes only to 20,000 IDs. A reservation larger than
-        // that limit can never complete; journal bounded batches before use.
-        for (std::size_t offset{}; offset < snapshot.size(); offset += 100)
+        // Reserve whole sibling groups on one identity. Metadata itself may
+        // live elsewhere; folder entries carry each child's individual owner.
+        std::map<std::string,std::vector<std::string>> groups;
+        std::map<std::string,std::string> group_of, types;
+        for (const auto& node : snapshot)
         {
-            const auto batch{task.m_journal->allocate("copied-blobs:" + std::to_string(offset),
-                std::min<std::size_t>(100, snapshot.size() - offset), [&](std::size_t count) {
-                    return task.m_session->queue->get(count, &task.m_control->cancelled);
-                })};
-            reserved.insert(reserved.end(), batch.begin(), batch.end());
+            const auto old = node.at("id").get<std::string>();
+            types[old] = node.at("kind");
+            if (node.at("kind")=="file" || node.at("kind")=="chunk")
+                for (const auto& child : node.at("content")) group_of[child.get<std::string>()] = old;
         }
-        std::map<std::string, std::string> copies;
-        for (std::size_t i{}; i < snapshot.size(); ++i)
-            copies.emplace(snapshot.at(i).at("id").get<std::string>(), reserved.at(i));
+        for (const auto& node : snapshot)
+        {
+            const auto old = node.at("id").get<std::string>();
+            groups[group_of.contains(old) ? group_of.at(old) : "self:"+old].push_back(old);
+        }
+        std::map<std::string,std::string> copies;
+        for (const auto& [group,originals] : groups)
+        {
+            const auto address = task_owner(task,"copy-group:"+group,originals.size());
+            for (std::size_t offset{}; offset<originals.size(); offset+=100)
+            {
+                const auto count = std::min<std::size_t>(100,originals.size()-offset);
+                const auto ids = task_reserve(task,"copy:"+group+":"+std::to_string(offset),count,address);
+                for (std::size_t i{};i<count;++i)
+                {
+                    copies[originals[offset+i]] = ids[i];
+                    task.m_session->remember(ids[i],address,types.at(originals[offset+i]));
+                }
+            }
+        }
+        task.m_journal->set("routing",task.m_session->routing());
         task.m_total = snapshot.size() + 1;
         const auto begin{saved.value("copy_index", std::size_t{})};
         task.m_completed = begin;
@@ -369,8 +408,17 @@ auto directory_execute(directory_task_t& task) -> void
             auto name=node.at("name");
             const auto parent{name.at("parent").get<std::string>()};
             name["parent"]=copies.contains(parent) ? copies.at(parent) : task.m_destination;
-            if (name.contains("next") && name.at("next")!="null")
-                name["next"]=copies.at(name.at("next").get<std::string>());
+            name["parent_account"]=task.m_session->owner(name.at("parent"));
+            if (name.contains("next"))
+            {
+                if (name.at("next")!="null") name["next"]=copies.at(name.at("next").get<std::string>());
+                name["next_account"]=task.m_session->owner(name.at("next"));
+            }
+            if (node.at("kind")=="file" || node.at("kind")=="chunk")
+            {
+                const auto& links = node.at("content");
+                name["account"] = links.empty() ? "null" : task.m_session->owner(copies.at(links.front().get<std::string>()));
+            }
             return easy.update_async({copies.at(node.at("id").get<std::string>()),name.dump(),std::move(content)});
         };
         parallel(task,begin,[&] { return snapshot.size(); },
@@ -382,7 +430,10 @@ auto directory_execute(directory_task_t& task) -> void
                 auto links=node.at("content");
                 for (auto& link : links)
                     if (node.at("kind")=="folder")
+                    {
                         link["id"]=copies.at(link.at("id").get<std::string>());
+                        link["account"]=task.m_session->owner(link.at("id"));
+                    }
                     else link=copies.at(link.get<std::string>());
                 writing[i]=true;
                 return clone(i,links.dump());
@@ -405,6 +456,7 @@ auto directory_execute(directory_task_t& task) -> void
             });
         auto entry = task.m_entity;
         entry["id"] = copies.at(id);
+        entry["account"] = task.m_session->owner(entry.at("id"));
         // Publish only after every cloned page/chunk/data blob has succeeded.
         // Stable reserved IDs make an interrupted PATCH or publication replayable.
         insert(easy, task, task.m_destination, entry);
@@ -421,6 +473,7 @@ auto directory_execute(directory_task_t& task) -> void
         verify_entry(easy, task.m_source, task.m_entity);
         std::set<std::string> seen;
         collect(task, easy, task.m_entity, task.m_source, seen, ids);
+        task.m_journal->set("routing",task.m_session->routing());
         task.m_journal->set("delete_ids", ids); // Durable before unlinking the only visible entry.
     }
     unlink(easy, task.m_source, id);
@@ -452,64 +505,83 @@ auto directory_notify_unlinked(directory_task_t& task) -> void
         state.m_on_directory_changed(task);
 }
 
+namespace
+{
+    class directory_easy_t : public google_easy_t
+    {
+      public:
+        explicit directory_easy_t(curl_easy_t&& request) : google_easy_t{std::move(request)} {}
+        auto valid() -> bool override
+        { return curl_easy_multi_access_t::response_code_get(*this)==404 || google_easy_t::valid(); }
+    };
+}
 auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi,
                               curl_easy_t&& easy) -> bool
 {
     std::vector<std::shared_ptr<directory_request_t>> requests;
     {
-        std::unique_lock lock{task.m_requests_mutex};
+        std::lock_guard lock{task.m_requests_mutex};
         if (task.m_requests.empty()) return false;
-        while (!task.m_requests.empty() && requests.size()<google_batch_t::part_count_max())
+        const auto first = task.m_requests.front();
+        if (first->single)
+        { requests.push_back(first); task.m_requests.pop_front(); }
+        else
         {
-            requests.push_back(std::move(task.m_requests.front()));
-            task.m_requests.pop_front();
+            // Pull only this account's file jobs, preserving other identities
+            // for the next physical request. Never mix users in a batch.
+            for (auto i=task.m_requests.begin(); i!=task.m_requests.end() && requests.size()<100;)
+                if (!(*i)->single && (*i)->account==first->account)
+                { requests.push_back(*i); i=task.m_requests.erase(i); }
+                else ++i;
         }
     }
-    // Check after dequeuing: the coordinator publishes unlinking before
-    // enqueueing DELETEs, but can do so after this frame's earlier GUI poll.
-    // Retire controls before dispatch, even if the directory refresh is offline.
     directory_notify_unlinked(task);
+    easy.m_account_context = task.m_session->accounts.at(requests.front()->account);
+    easy.m_journal.reset();
+    auto* key = easy.interface_get();
+    if (requests.front()->single)
+    {
+        directory_easy_t operation{std::move(easy)};
+        const auto request = requests.front();
+        try
+        {
+            request->single(operation);
+            task.m_state->m_end.emplace(key,[request](auto& result)
+            {
+                if (curl_easy_multi_access_t::response_code_get(*result)==404 && !request->allow_missing)
+                    request->response.set_exception(std::make_exception_ptr(std::runtime_error{"項目或資料夾已不存在，請重新整理"}));
+                else request->response.set_value(result->payload());
+            });
+        }
+        catch (...)
+        { request->response.set_exception(std::current_exception()); easy=std::move(operation); return false; }
+        multi.add(std::move(operation));
+        return true;
+    }
     google_batch_t operation{std::move(easy)};
-    operation.m_journal.reset(); // Mutable directory reads must never be replayed from a cache.
-    auto* key{operation.interface_get()};
     try
     {
         operation.clear();
         operation.path_set("/drive/v3");
-        for (std::size_t i{}; i<requests.size(); ++i)
-        {
-            requests[i]->configure(operation);
-            if (operation.part_count()!=i+1)
-                throw std::logic_error{"Directory request must append exactly one batch part."};
-            // Missing reads must reach the coordinator as errors rather than
-            // retry forever; missing DELETEs are successful idempotent replays.
-            operation.response_allow_missing(i);
-        }
+        for (std::size_t i{};i<requests.size();++i)
+        { requests[i]->configure(operation); operation.response_allow_missing(i); }
         operation.method_post();
-        task.m_state->m_end.emplace(key,[requests](std::unique_ptr<curl_easy_t>& result)
+        task.m_state->m_end.emplace(key,[requests](auto& result)
         {
-            auto& batch{dynamic_cast<google_batch_t&>(*result)};
-            for (std::size_t i{}; i<requests.size(); ++i)
-            {
-                auto& response{batch.response_get(i)};
-                if (response.status_code_get()=="404" && !requests[i]->allow_missing)
-                    requests[i]->response.set_exception(std::make_exception_ptr(
-                        std::runtime_error{"項目或資料夾已不存在，請重新整理"}));
-                else requests[i]->response.set_value(response.body_get());
-            }
+            auto& batch = dynamic_cast<google_batch_t&>(*result);
+            for (std::size_t i{};i<requests.size();++i)
+                if (batch.response_get(i).status_code_get()=="404" && !requests[i]->allow_missing)
+                    requests[i]->response.set_exception(std::make_exception_ptr(std::runtime_error{"項目或資料夾已不存在，請重新整理"}));
+                else requests[i]->response.set_value(batch.response_get(i).body_get());
         });
     }
     catch (...)
     {
         task.m_state->m_end.erase(key);
-        for (const auto& request : requests)
-            request->response.set_exception(std::current_exception());
-        // Restore the pool slot if request construction failed.
+        for (const auto& request : requests) request->response.set_exception(std::current_exception());
         easy=std::move(operation);
         return false;
     }
-    // Submission failures are worker failures, as for upload/download. Let the
-    // caller unwind rather than returning an already-transferred empty slot.
     multi.add(std::move(operation));
     return true;
 }

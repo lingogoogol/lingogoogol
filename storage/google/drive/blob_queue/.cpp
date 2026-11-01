@@ -89,6 +89,7 @@ auto blob_queue_t::process() -> void
             }
             batch.method_post();
             multi.add(std::move(batch));
+            m_planned_creations.fetch_add(100,std::memory_order_relaxed);
         }
     }
     return;

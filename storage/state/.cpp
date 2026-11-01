@@ -9,6 +9,7 @@ import std;
 namespace
 {
     std::mutex index_mutex;
+
     auto update_index(const std::string& id, bool present) -> void
     {
         std::lock_guard lock{index_mutex};
@@ -110,22 +111,10 @@ auto storage_settings_t::load() -> storage_settings_t
     result.font_path = data.value("font_path", result.font_path);
     result.account_path = data.value("account_path", result.account_path);
     result.root_path = data.value("root_path", result.root_path);
-    result.signed_out_service_accounts = data.value("signed_out_service_accounts", result.signed_out_service_accounts);
-    if (data.contains("signed_in_accounts"))
-    {
-        result.signed_in_accounts.emplace();
-        const auto& accounts = data.at("signed_in_accounts");
-        if (!accounts.is_object()) throw std::runtime_error{"Invalid saved account login list."};
-        for (const auto& [id,account] : accounts.items())
-            result.signed_in_accounts->emplace(id,storage_account_login_t{
-                account.at("address").get<std::string>(),account.at("account_path").get<std::string>(),
-                account.at("root_directory").get<std::string>(),account.at("oauth").get<bool>()});
-        result.selected_account = data.value("selected_account",std::string{});
-    }
-    // An intermediate layout saved the old default filename as root/root.
-    // root_path now names a directory; keep that default from nesting again.
-    if (std::filesystem::path{result.root_path}.lexically_normal()==std::filesystem::path{"root/root"})
-        result.root_path = "root";
+    for (const auto& space : data.value("spaces", nlohmann::json::array()))
+        result.spaces.push_back({space.at("id"),space.at("name"),
+            space.at("accounts").get<std::vector<std::string>>(),space.at("signed_in")});
+    result.selected_space = data.value("selected_space",std::string{});
     result.http_log_codes = data.value("http_log_codes", std::string{});
     parse_http_log_codes(result.http_log_codes);
     result.network_retries = data.value("network_retries", -1);
@@ -141,17 +130,12 @@ auto storage_settings_t::save() const -> void
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},
-                                                         {"signed_out_service_accounts", signed_out_service_accounts},
                                                          {"network_retries", network_retries}};
-    if (signed_in_accounts)
-    {
-        auto accounts = nlohmann::json::object();
-        for (const auto& [id,account] : *signed_in_accounts)
-            accounts[id] = {{"address",account.address},{"account_path",account.account_path},
-                            {"root_directory",account.root_directory},{"oauth",account.oauth}};
-        data["signed_in_accounts"] = std::move(accounts);
-        data["selected_account"] = selected_account;
-    }
+    data["spaces"] = nlohmann::json::array();
+    for (const auto& space : spaces)
+        data["spaces"].push_back({{"id",space.id},{"name",space.name},
+            {"accounts",space.accounts},{"signed_in",space.signed_in}});
+    data["selected_space"] = selected_space;
     storage_atomic_write("settings.json",data.dump(2));
 }
 auto request_control_t::fail(std::string reason) -> void
@@ -180,19 +164,45 @@ task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent
 auto task_journal_t::save_locked() -> void
 {
     storage_atomic_write(m_path / "state", m_data.dump());
+    m_dirty=false;
 }
 auto task_journal_t::data() const -> nlohmann::json
 {
     std::lock_guard lock{m_mutex};
     return m_data;
 }
+auto task_journal_t::field(std::string_view key) const -> std::optional<nlohmann::json>
+{
+    std::lock_guard lock{m_mutex};
+    const auto found=m_data.find(std::string{key});
+    return found==m_data.end() ? std::nullopt : std::optional<nlohmann::json>{*found};
+}
+auto task_journal_t::record_routing(const std::vector<std::string>& ids, const std::string& address,
+                                   const std::string& type) -> void
+{
+    std::lock_guard lock{m_mutex};
+    if (m_finished) return;
+    for (const auto& id : ids)
+    {
+        auto& owner=m_data["routing"]["owners"][id];
+        if (owner!=address) { owner=address; m_dirty=true; }
+        if (!type.empty())
+        {
+            auto& kind=m_data["routing"]["kinds"][id];
+            if (kind!=type) { kind=type; m_dirty=true; }
+        }
+    }
+    if (m_dirty) save_locked();
+}
 auto task_journal_t::set(std::string key, nlohmann::json value) -> void
 {
     std::lock_guard lock{m_mutex};
     if (m_finished)
         return;
-    m_data[std::move(key)] = std::move(value);
-    save_locked();
+    const auto found=m_data.find(key);
+    if (found==m_data.end() || *found!=value)
+    { m_data[std::move(key)] = std::move(value); m_dirty=true; }
+    if (m_dirty) save_locked();
 }
 auto task_journal_t::allocate(std::string key, std::size_t count,
                               const std::function<std::vector<std::string>(std::size_t)>& reserve)
@@ -207,10 +217,12 @@ auto task_journal_t::allocate(std::string key, std::size_t count,
         auto result{entries.at(key).get<std::vector<std::string>>()};
         if (result.size() != count)
             throw std::runtime_error{"Upload source changed since the saved task."};
+        if (m_dirty) save_locked();
         return result;
     }
     auto result{reserve(count)};
     entries[std::move(key)] = result;
+    m_dirty=true;
     save_locked();
     return result;
 }

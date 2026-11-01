@@ -20,6 +20,9 @@ export {
         google_account_t* m_account{};
         const std::atomic_bool* m_close{};
         std::atomic_bool m_stopped{false};
+        // Cumulative logical creates scheduled by this queue, including work
+        // still in flight. Transport retries reuse those logical requests.
+        std::atomic_uint64_t m_planned_creations{};
         bool m_clearing{false};
         bool m_cleared{false};
         std::deque<std::chrono::steady_clock::time_point> m_cycle_time{};
@@ -44,6 +47,10 @@ export {
         auto get(std::uint64_t count, const std::atomic_bool* cancelled = nullptr)
             -> std::vector<std::string>;
         auto count() -> std::uint64_t;
+        auto planned_creations() const -> std::uint64_t
+        {
+            return m_planned_creations.load(std::memory_order_relaxed);
+        };
         auto cycle_rate() const -> std::uint64_t;
 
         auto clear_begin() -> void;
