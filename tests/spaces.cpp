@@ -138,7 +138,7 @@ int main(int argc,char** argv)
         check(progress==total && entries(session->root).empty(),"Space clear did not finish.");
         const auto root=json::parse(storage_read(session->root_path));
         check(root.at("id")==session->root && root.at("account")==session->root_account,"Root identity was not saved together.");
-        std::println("PASS: managed identities, interleaved projects/users, crash replay, cross-account upload/download/copy/move/delete, space clear.");
+        std::println("PASS: managed identities, interleaved projects/users, crash replay, cross-account upload/download/copy/move/delete, folder singles and space clear.");
         engine.flush(); gui.clear_state();
     }
     catch (const std::exception& error) { std::println("FAIL: {}",error.what()); return 1; }

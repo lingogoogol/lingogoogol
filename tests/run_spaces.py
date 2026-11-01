@@ -98,6 +98,7 @@ class Handler(BaseHTTPRequestHandler):
                 old = self.server.blobs.get(identifier)
                 metadata = json.loads(value.get('name', (old or {}).get('name', '{}')))
                 blob_kind = kind(metadata) if metadata else None
+                assert not (batch and blob_kind == 'folder'), 'Folder blob sent inside batch: ' + identifier
                 self.server.counts[method, batch] += 1
                 if batch and method not in self.server.injected:
                     self.server.injected.add(method)
@@ -284,7 +285,7 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-') as directory:
         assert all(identifier == 'not-linked' or value.get('description') == '[]' or not value.get('name')
                    for identifier, value in server.blobs.items()), 'Clear retained account data'
         for method in ('GET', 'PATCH', 'DELETE'):
-            assert method=='DELETE' or server.counts[method, False] > 0, server.counts
+            assert server.counts[method, False] > 0, server.counts
             if '--direct' not in sys.argv: assert server.counts[method, True] > 0, server.counts
         assert server.injected == (set() if '--direct' in sys.argv else {'GET', 'PATCH', 'DELETE'})
         assert server.validations >= 3, 'Metadata account fields were not validated.'

@@ -22,7 +22,8 @@ namespace
             request->account = task.m_session->owner(id);
             // Folder blobs always use a direct request, including discovery,
             // parent updates, cloning and deletion. Only file blobs are batched.
-            request->configure = std::move(batch);
+            if (task.m_session->kind(id)=="folder") request->single = std::move(single);
+            else request->configure = std::move(batch);
             request->allow_missing = allow_missing;
             auto result = request->response.get_future();
             std::lock_guard lock{task.m_requests_mutex};
