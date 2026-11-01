@@ -10,6 +10,54 @@ namespace
 {
     std::mutex index_mutex;
 
+    // A single worker owns only paths, never task objects or GUI state. In
+    // particular, destroying a completed row must not join a per-task future
+    // and move a long directory deletion back onto the GUI thread.
+    class journal_cleanup_t
+    {
+        std::mutex m_mutex;
+        std::condition_variable_any m_ready;
+        std::deque<std::filesystem::path> m_paths;
+        // Declared last so jthread stops/joins before its queue and locks die.
+        // Drain queued paths on normal exit; an interrupted deletion only
+        // leaves unindexed cache files, never a resumable completed task.
+        std::jthread m_worker{[this](std::stop_token stop)
+        {
+            for (;;)
+            {
+                std::unique_lock lock{m_mutex};
+                m_ready.wait(lock,stop,[this] { return !m_paths.empty(); });
+                if (m_paths.empty()) return;
+                auto path=std::move(m_paths.front());
+                m_paths.pop_front();
+                lock.unlock();
+                std::error_code error;
+                std::filesystem::remove_all(path,error);
+                // A locked cache can remain orphaned. It must not turn an
+                // already durable successful transfer into a failed task.
+                if (error)
+                    OutputDebugStringW((L"Cannot remove completed task cache: "+path.wstring()+
+                                        L" (Windows error "+std::to_wstring(error.value())+L")\n").c_str());
+            }
+        }};
+
+      public:
+        auto add(std::filesystem::path path) -> void
+        {
+            {
+                std::lock_guard lock{m_mutex};
+                m_paths.push_back(std::move(path));
+            }
+            m_ready.notify_one();
+        }
+    };
+
+    auto journal_cleanup() -> journal_cleanup_t&
+    {
+        static journal_cleanup_t cleanup;
+        return cleanup;
+    }
+
     auto update_index(const std::string& id, bool present) -> void
     {
         std::lock_guard lock{index_mutex};
@@ -205,6 +253,7 @@ auto task_journal_t::field(std::string_view key) const -> std::optional<nlohmann
 auto task_journal_t::progress(std::string_view key) const -> std::optional<nlohmann::json>
 {
     std::lock_guard lock{m_mutex};
+    if (m_finished) return std::nullopt;
     const auto path=m_path/(storage_digest(key)+".progress");
     if (!std::filesystem::exists(path)) return std::nullopt;
     return nlohmann::json::parse(storage_read(path));
@@ -267,6 +316,7 @@ auto task_journal_t::allocate(std::string key, std::size_t count,
 auto task_journal_t::response(std::string_view key) const -> std::optional<std::string>
 {
     std::lock_guard lock{m_mutex};
+    if (m_finished) return std::nullopt;
     const auto path{m_path / (std::string{key} + ".response")};
     if (!std::filesystem::exists(path))
         return std::nullopt;
@@ -286,8 +336,11 @@ auto task_journal_t::finish() -> void
         return;
     update_index(m_path.filename().string(), false);
     m_finished = true;
-    // Keep orphan data until the index is durable; interrupted cleanup is harmless.
-    std::filesystem::remove_all(m_path);
+    // The small index must be durable before publishing completion. Removing
+    // tens of thousands of response files must not block input/rendering.
+    // m_finished and the journal mutex prevent late writers from recreating
+    // files while the independent worker deletes them.
+    journal_cleanup().add(std::filesystem::absolute(m_path));
 }
 auto task_journal_t::create(nlohmann::json intent) -> std::shared_ptr<task_journal_t>
 {

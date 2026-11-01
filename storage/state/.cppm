@@ -85,6 +85,7 @@ export {
             -> std::vector<std::string>;
         auto response(std::string_view key) const -> std::optional<std::string>;
         auto response(std::string_view key, std::string_view value) -> void;
+        // Durably remove from the task index, then delete caches in background.
         auto finish() -> void;
         static auto restore() -> std::vector<std::shared_ptr<task_journal_t>>;
         static auto create(nlohmann::json intent) -> std::shared_ptr<task_journal_t>;
