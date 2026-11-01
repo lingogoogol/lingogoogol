@@ -349,7 +349,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
 
     auto& easy_idle_arr{persistent->m_easy_idle};
     auto& load_easy_status_map{persistent->m_easy_status};
-    const auto slot_limit = load_state->m_settings.batch_request ? transfer_slot_count : 6400;
+    const auto slot_limit = load_state->m_settings.worker_count;
     persistent->m_worker_limit = slot_limit;
     const auto parts = load_state->m_settings.batch_request ? google_batch_t::part_count_max() : 1;
     const auto max_window = std::numeric_limits<std::size_t>::max();
@@ -1232,7 +1232,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"根目錄 ID 資料夾", settings.root_path},
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
-                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes}},
+                        {"記錄 HTTP 錯誤碼（如 403,500；留空停用）", settings.http_log_codes},
+                        {"worker 數量（正整數）", std::to_string(settings.worker_count)}},
                     "確定", std::vector<std::pair<std::string,bool>>{{"batch_request",settings.batch_request}});
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
@@ -1260,7 +1261,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                                 throw std::runtime_error{"重試次數必須是非負整數或無限"};
                             settings.network_retries = count;
                         }
-                        settings.batch_request = values[6]=="true";
+                        settings.worker_count = storage_settings_t::parse_worker_count(values[6]);
+                        settings.batch_request = values[7]=="true";
                         settings.http_log_codes = values[5];
                         storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)

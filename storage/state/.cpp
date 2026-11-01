@@ -110,6 +110,15 @@ auto storage_settings_t::parse_http_log_codes(std::string_view text) -> std::set
     }
     return codes;
 }
+auto storage_settings_t::parse_worker_count(std::string_view text) -> std::size_t
+{
+    std::size_t count{};
+    const auto [end,error] = std::from_chars(text.data(),text.data()+text.size(),count);
+    if (error!=std::errc{} || end!=text.data()+text.size() || !count)
+        throw std::runtime_error{"worker 數量必須是有效的正整數"};
+    return count;
+}
+
 auto storage_settings_t::load() -> storage_settings_t
 {
     storage_settings_t result;
@@ -127,6 +136,9 @@ auto storage_settings_t::load() -> storage_settings_t
     result.http_log_codes = data.value("http_log_codes", std::string{});
     parse_http_log_codes(result.http_log_codes);
     result.batch_request = data.value("batch_request", true);
+    // Parse the JSON representation as an integer too: typed JSON conversion
+    // to size_t would silently wrap negative values and truncate decimals.
+    result.worker_count = parse_worker_count(data.value("worker_count",nlohmann::json(64)).dump());
     result.network_retries = data.value("network_retries", -1);
     if (result.network_retries < -1)
         throw std::runtime_error{"Network retries must be nonnegative or -1 (unlimited)."};
@@ -135,13 +147,15 @@ auto storage_settings_t::load() -> storage_settings_t
 auto storage_settings_t::save() const -> void
 {
     parse_http_log_codes(http_log_codes);
+    if (!worker_count) throw std::runtime_error{"worker 數量必須大於零"};
     auto data = nlohmann::json{{"logfile_path", logfile_path},
                                                          {"http_log_codes", http_log_codes},
                                                          {"font_path", font_path},
                                                          {"account_path", account_path},
                                                          {"root_path", root_path},
                                                          {"network_retries", network_retries},
-                                                         {"batch_request", batch_request}};
+                                                         {"batch_request", batch_request},
+                                                         {"worker_count", worker_count}};
     data["spaces"] = nlohmann::json::array();
     for (const auto& space : spaces)
         data["spaces"].push_back({{"id",space.id},{"name",space.name},
