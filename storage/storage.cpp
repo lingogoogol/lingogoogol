@@ -555,6 +555,7 @@ auto app() -> void
                                        {
                                            if (upload->m_prepared.valid())
                                                upload->m_prepared.wait();
+                                           if (upload->m_allocation.valid()) upload->m_allocation.wait();
                                            if (upload->m_linked.valid())
                                                upload->m_linked.wait();
                                        }

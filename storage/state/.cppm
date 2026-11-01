@@ -71,6 +71,8 @@ export {
         task_journal_t(std::filesystem::path path, nlohmann::json intent);
         auto data() const -> nlohmann::json;
         auto field(std::string_view key) const -> std::optional<nlohmann::json>;
+        auto progress(std::string_view key) const -> std::optional<nlohmann::json>;
+        auto progress(std::string_view key, const nlohmann::json& value) -> void;
         auto record_routing(const std::vector<std::string>& ids, const std::string& address,
                             const std::string& type) -> void;
         auto path() const -> const std::filesystem::path& { return m_path; }

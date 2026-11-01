@@ -203,6 +203,7 @@ export
         upload_folder_t* m_parent{};
         std::string m_type{};
         std::string m_name{};
+        std::string m_path_local{};
         std::size_t m_self_i{};
     };
 
@@ -216,13 +217,21 @@ export
         bool m_transfer_end{ false };
         bool m_load_end{ false };
         bool m_link_end{ false };
+        // In-flight work is transient: restore only confirmed completion flags.
+        bool m_transfer_started{}, m_load_started{};
+    };
+
+    struct upload_page_t
+    {
+        std::string id, next;
+        std::size_t begin{}, count{};
+        bool complete{}, started{};
     };
 
     struct upload_file_t: public upload_entity_t
     {
         std::string m_main_id{};
         std::string m_next_id{};
-        std::string m_path_local{};
         //The total size in bytes of the file.
         std::uint64_t m_size{};
         //The total size in bytes that is covered by chunks that began loading.
@@ -240,6 +249,7 @@ export
         std::vector<upload_chunk_t> m_chunk_arr{};
         //Also required for empty files, whose chunk counters are always zero.
         bool m_load_end{ false };
+        std::vector<upload_page_t> m_pages;
     };
 
     struct upload_folder_t: public upload_entity_t
@@ -254,6 +264,7 @@ export
         std::vector<bool> m_entity_load_end{};
         //An empty folder still needs a successful metadata response.
         bool m_load_end{ false };
+        std::vector<upload_page_t> m_pages;
     };
 
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
@@ -262,10 +273,14 @@ export
         ~upload_task_t() override
         {
             // Preparation captures this task and writes its containers. Join before member destruction.
+            m_control->cancel();
             if (m_prepared.valid()) m_prepared.wait();
+            if (m_allocation.valid()) m_allocation.wait();
         }
         std::string m_name{};
         std::future<void> m_prepared{};
+        // Queue refill may wait on Google. Reserve IDs off the GUI thread.
+        std::future<void> m_allocation{};
         std::uint64_t m_size{ 0 };
         //The total size in bytes of chunks that has finished transferring to the cloud.
         std::uint64_t m_progress{ 0 };
@@ -327,6 +342,8 @@ export
         std::vector<std::string> m_content_id{};
         std::vector<std::string> m_content{};
         bool m_loaded{ false };
+        bool m_received{};
+        std::string m_response_key;
     };
 
     struct download_file_t
@@ -335,9 +352,9 @@ export
         download_task_t* m_task{};
         std::string m_name{};
         std::string m_path_local{};
+        std::string m_source_id{};
         std::uint64_t m_size{};
         std::uint64_t m_written{};
-        std::uint64_t m_resume_written{};
         //`m_idle` means this file can send more requests for now.
         //If `m_idle` is false, the file must wait for a response from the server before it can send more requests.
         //Specifically, m_idle does not mean that the file is not running tranfers.
@@ -382,6 +399,7 @@ export
         //The total size in bytes of chunks that has finished writing to local filesystem.
         std::uint64_t m_progress{ 0 };
         std::vector<download_file_t> m_file_arr{};
+        std::vector<std::string> m_directories;
         std::size_t m_files_remaining{};
         //The first file that can send more requests.
         std::vector<download_file_t>::iterator m_idle_first{};
@@ -528,6 +546,17 @@ export
     -> void;
     auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void;
     auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_file_t* file, std::size_t chunk_i) -> void;
+    auto upload_progress_save(upload_entity_t& entity) -> void;
+    auto upload_progress_restore(upload_entity_t& entity) -> void;
+    auto upload_progress_ready(upload_task_t& task) -> void;
+    auto upload_finished(const upload_entity_t& entity) -> bool;
+    auto download_progress_save(download_file_t& file) -> void;
+    auto download_progress_restore(download_file_t& file) -> bool;
+    auto download_manifest_restore(google_easy_t& easy, download_task_t& task) -> bool;
+    auto download_manifest_save(download_task_t& task) -> void;
+    auto download_write_ready(download_file_t& file) -> void;
+    auto download_complete(download_file_t& file) -> void;
+    auto task_progress_save(load_task_t& task) -> void;
 
     constexpr std::uint64_t content_size_max{ 25000 };
     constexpr std::uint64_t content_size_max_base64{ 18750 };

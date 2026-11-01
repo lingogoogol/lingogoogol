@@ -177,6 +177,18 @@ auto task_journal_t::field(std::string_view key) const -> std::optional<nlohmann
     const auto found=m_data.find(std::string{key});
     return found==m_data.end() ? std::nullopt : std::optional<nlohmann::json>{*found};
 }
+auto task_journal_t::progress(std::string_view key) const -> std::optional<nlohmann::json>
+{
+    std::lock_guard lock{m_mutex};
+    const auto path=m_path/(storage_digest(key)+".progress");
+    if (!std::filesystem::exists(path)) return std::nullopt;
+    return nlohmann::json::parse(storage_read(path));
+}
+auto task_journal_t::progress(std::string_view key, const nlohmann::json& value) -> void
+{
+    std::lock_guard lock{m_mutex};
+    if (!m_finished) storage_atomic_write(m_path/(storage_digest(key)+".progress"),value.dump());
+}
 auto task_journal_t::record_routing(const std::vector<std::string>& ids, const std::string& address,
                                    const std::string& type) -> void
 {

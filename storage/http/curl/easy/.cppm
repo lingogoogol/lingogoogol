@@ -118,6 +118,7 @@ export
         std::chrono::steady_clock::time_point m_retry_at{};
 
       public:
+        auto checkpoint_key() const -> const std::string& { return m_cache_key; }
       protected:
         auto configure_transport() -> void;
         static auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void*) -> int;

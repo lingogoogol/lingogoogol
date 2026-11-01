@@ -456,21 +456,14 @@ namespace
         auto text{preparing ? "準備" + label : std::move(label)};
         if (task->m_journal)
         {
-            const auto saved = task->m_journal->data();
-            task->m_saved_progress = saved.value("progress", std::uint64_t{});
-            task->m_control->user_paused = saved.value("user_paused", false);
+            const auto saved=task->m_journal->progress("task");
+            task->m_saved_progress=saved ? saved->value("progress",std::uint64_t{}) : 0;
+            task->m_control->user_paused=task->m_journal->field("user_paused").value_or(false).get<bool>();
             if (task->m_saved_progress)
                 text = "續傳：" + std::to_string(task->m_saved_progress) + "B " + text;
             if (task->m_control->user_paused)
-                text = saved.value("paused_text", text);
+                text = task->m_journal->field("paused_text").value_or(text).get<std::string>();
         }
-        // Older task checkpoints used English operation prefixes. Preserve
-        // the filename and byte counts while normalizing only those prefixes.
-        for (const auto& [old, translated] : {std::pair{"upload：", "上傳："},
-                                             std::pair{"download：", "下載："},
-                                             std::pair{"upload: ", "上傳："},
-                                             std::pair{"download: ", "下載："}})
-            if (text.starts_with(old)) text.replace(0, std::string_view{old}.size(), translated);
         task->m_paused_text = text;
         task->m_control->retry_limit = state->m_settings.network_retries;
         task->m_progress_div = state->m_progress_column->add_object<lgo::divy_flex_soft_t>(
@@ -631,8 +624,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                    folder_upload(queue, task, path, &task->m_pos);
                                else
                                    file_upload(queue, task, path, &task->m_pos);
-                               task->m_begin_progress = task->m_entity_arr.begin();
-                               task->m_end_progress = task->m_entity_arr.begin();
+                               upload_progress_ready(*task);
                            });
         };
         task->m_retry_prepare();
@@ -659,6 +651,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
             {
                 task->m_error.clear();
                 task->m_file_arr.clear();
+                task->m_directories.clear();
                 task->m_size = 0;
                 task->m_progress = 0;
                 task->m_progress = 0;
@@ -682,8 +675,12 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                       if (task->m_journal)
                                                           task->m_journal->set("destination_ready", true);
                                                   }
-                                                  if (folder) folder_download(&request, task, pos, path);
-                                                  else file_download(&request, task, pos, path);
+                                                  if (!download_manifest_restore(request,*task))
+                                                  {
+                                                      if (folder) folder_download(&request, task, pos, path);
+                                                      else file_download(&request, task, pos, path);
+                                                      download_manifest_save(*task);
+                                                  }
                                               });
             };
             task->m_retry_prepare();

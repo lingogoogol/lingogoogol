@@ -10,6 +10,7 @@ target_sources(
         .cpp
         directory.cpp
         space.cpp
+        progress.cpp
 )
 
 target_link_libraries(

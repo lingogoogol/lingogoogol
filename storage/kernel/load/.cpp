@@ -185,13 +185,14 @@ auto file_upload
         const auto stamp = nlohmann::json{
             {"size", file->m_size},
             {"mtime", std::filesystem::last_write_time(path_local).time_since_epoch().count()}};
-        const auto saved = task->m_journal->data();
-        if (saved.contains(key) && saved.at(key) != stamp)
+        const auto saved = task->m_journal->field(key);
+        if (saved && *saved != stamp)
             throw std::runtime_error{"Upload source changed since the saved task: " + path_local.string()};
         task->m_journal->set(key, stamp);
     }
     task->m_size += file->m_size;
     file->m_self_i = task->m_entity_arr.size();
+    upload_progress_restore(*file);
     task->m_entity_arr.emplace_back(file);
     return file->m_self_i;
 }
@@ -210,6 +211,7 @@ auto folder_upload
 	folder->m_parent = parent;
 	folder->m_type = "folder";
 	folder->m_name = path_local.filename().string();
+    folder->m_path_local=path_local.string();
     folder->m_main_id = task_ids(task, blob_queue, "folder:" + path_local.string()).front();
     folder->m_next_id = folder->m_main_id;
 	folder->m_self_i = task->m_entity_arr.size();
@@ -224,8 +226,8 @@ auto folder_upload
         for (const auto& child : children)
             names.push_back(child.filename().string());
         const auto key{"children:" + path_local.string()};
-        const auto saved = task->m_journal->data();
-        if (saved.contains(key) && saved.at(key) != names)
+        const auto saved = task->m_journal->field(key);
+        if (saved && *saved != names)
             throw std::runtime_error{"Upload directory changed since the saved task."};
         task->m_journal->set(key, names);
     }
@@ -237,6 +239,7 @@ auto folder_upload
             folder->m_entity_arr.push_back(folder_upload(blob_queue, task, child, folder.get()));
     }
     folder->m_entity_load_end.resize(folder->m_entity_arr.size());
+    upload_progress_restore(*folder);
     return folder->m_self_i;
 }
 
@@ -253,19 +256,24 @@ auto file_download
 	file.m_task = task;
 	file.m_name = path_local.string();
     file.m_path_local = path_local.string();
-    if (task->m_session) task->m_session->bind(*easy,pos);
-	file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
-	file.m_next_id = pos;
-    if (task->m_journal)
+    file.m_source_id=pos;
+    const bool restored=download_progress_restore(file);
+    if (!restored)
     {
-        const auto saved = task->m_journal->data();
-        file.m_resume_written = saved.value("written:" + path_local.string(), std::uint64_t{});
+        if (task->m_session) task->m_session->bind(*easy,pos);
+        file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
+        file.m_next_id = pos;
     }
-    if (file.m_resume_written)
+    if (restored && file.m_complete)
     {
-        if (std::filesystem::file_size(path_local) < file.m_resume_written)
+        if (std::filesystem::file_size(path_local)!=file.m_size)
+            throw std::runtime_error{"Completed download size differs from its checkpoint."};
+    }
+    else if (file.m_written)
+    {
+        if (std::filesystem::file_size(path_local) < file.m_written)
             throw std::runtime_error{"Saved download is shorter than its checkpoint."};
-        std::filesystem::resize_file(path_local, file.m_resume_written);
+        std::filesystem::resize_file(path_local, file.m_written);
     }
     else
     {
@@ -274,7 +282,8 @@ auto file_download
             throw std::runtime_error{"Cannot create download file: " + path_local.string()};
     }
     task->m_size += file.m_size;
-    task->m_file_arr.emplace_back(file);
+    task->m_progress += file.m_written;
+    task->m_file_arr.emplace_back(std::move(file));
     return;
 }
 
@@ -290,6 +299,7 @@ auto folder_download
     // json's initializer_list constructor would wrap the returned array in another array.
     nlohmann::json obj_list = list_folder_content(*easy, &pos, task->m_session.get());
 	std::filesystem::create_directories(path_local);
+    task->m_directories.push_back(path_local.string());
 	for (auto i : obj_list)
 	{
 		if (i["type"] == "folder")
@@ -580,37 +590,96 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                 // 0B/size now, before waiting for the first successful chunk.
                 task_progress(*upload_task_ptr, upload_task_ptr->m_progress,
                               upload_task_ptr->m_size, upload_task_ptr->m_name);
+                if (upload_task_ptr->m_end_progress==upload_task_ptr->m_entity_arr.end())
+                {
+                    upload_complete(upload_task_ptr->m_entity_arr.front().get());
+                    continue;
+                }
             }
             // Downloads consume no reserved blobs. Apply the upload reserve only here.
+
             auto entity_i{ upload_task_ptr->m_begin_progress };
             if (entity_i == upload_task_ptr->m_entity_arr.end())
             {
                 continue;
             }
+            if (upload_finished(**entity_i))
+            { ++upload_task_ptr->m_begin_progress; continue; }
+            // Preflight only ID allocation on a worker. The actual request is
+            // still dispatched through the shared foreground pool on this thread.
+            // Journal allocation is idempotent, so the dispatch below reuses the
+            // same IDs without waiting on a depleted per-account queue.
+            std::function<void()> allocate;
+            auto* task=upload_task_ptr.get();
+            if (auto* file=dynamic_cast<upload_file_t*>(entity_i->get()))
+            {
+                const auto pending=std::ranges::find_if(file->m_chunk_arr,[](const auto& c)
+                    { return !c.m_transfer_end && !c.m_transfer_started; });
+                if (pending==file->m_chunk_arr.end() && file->m_chunk_cover_progress<file->m_size)
+                {
+                    const auto group="chunk-group:"+file->m_main_id+":"+std::to_string(file->m_chunk_arr.size()/100);
+                    const auto key="chunk:"+file->m_main_id+":"+std::to_string(file->m_chunk_cover_progress);
+                    const auto size=std::min(file->m_size-file->m_chunk_cover_progress,content_size_max_base64*100);
+                    const auto count=(size+content_size_max_base64-1)/content_size_max_base64;
+                    allocate=[task,group,key,count]
+                    {
+                        const auto owner=task_owner(*task,group,100);
+                        const auto chunk=task_reserve(*task,key,1,owner,"chunk").front();
+                        task_reserve(*task,"content:"+chunk,count,{},"data");
+                    };
+                }
+                else if (file->m_chunk_cover_progress==file->m_size &&
+                         std::ranges::none_of(file->m_chunk_arr,[](const auto& c) { return !c.m_load_end && !c.m_load_started; }) &&
+                         file->m_chunk_arr.size()-file->m_file_load_begin_progress>100)
+                {
+                    const auto key="file-page:"+file->m_next_id;
+                    allocate=[task,key] { task_reserve(*task,key,1,{},"file"); };
+                }
+            }
+            else if (auto* folder=dynamic_cast<upload_folder_t*>(entity_i->get()); folder && folder->m_next_id!="null")
+            {
+                // A final page's unused reserve remains an ordinary unlinked
+                // blob; preallocating avoids blocking if its size limit is hit.
+                const auto key="folder-page:"+folder->m_next_id;
+                allocate=[task,key] { task_reserve(*task,key,1,{},"folder"); };
+            }
+            if (allocate)
+            {
+                if (!task->m_allocation.valid()) task->m_allocation=std::async(std::launch::async,std::move(allocate));
+                if (task->m_allocation.wait_for(0s)!=std::future_status::ready) continue;
+                try { task->m_allocation.get(); }
+                catch (const std::exception& error) { task->m_control->fail(error.what()); continue; }
+            }
             if ((*entity_i)->m_type == "file")
             {
                 auto file_ptr{ dynamic_cast<upload_file_t*>(entity_i->get()) };
-                if (file_ptr->m_chunk_cover_progress < file_ptr->m_size)
+                if (file_ptr->m_chunk_cover_progress < file_ptr->m_size ||
+                    std::ranges::any_of(file_ptr->m_chunk_arr,[](const auto& c) { return !c.m_transfer_end && !c.m_transfer_started; }))
                 {
                     upload_chunk_transfer_begin(multi, std::move(easy), blob_queue, file_ptr);
                 }
-                else if (file_ptr->m_chunk_arr.size() > file_ptr->m_chunk_load_begin_progress)
+                else if (std::ranges::any_of(file_ptr->m_chunk_arr,[](const auto& c) { return !c.m_load_end && !c.m_load_started; }))
                 {
                     upload_chunk_load_begin(multi, std::move(easy), file_ptr);
                 }
-                else if (file_ptr->m_next_id != "null")
+                else if (file_ptr->m_next_id != "null" ||
+                    std::ranges::any_of(file_ptr->m_pages,[](const auto& p) { return !p.complete && !p.started; }))
                 {
                     upload_file_load_begin(multi, std::move(easy), blob_queue, file_ptr);
                 }
                 else
                 {
-                    throw;
+                    ++upload_task_ptr->m_begin_progress;
+                    continue;
                 }
             }
             else if ((*entity_i)->m_type == "folder")
             {
                 auto folder_ptr{ dynamic_cast<upload_folder_t*>(entity_i->get()) };
-                upload_folder_load_begin(multi, std::move(easy), blob_queue, folder_ptr);
+                if (folder_ptr->m_next_id!="null" ||
+                    std::ranges::any_of(folder_ptr->m_pages,[](const auto& p) { return !p.complete && !p.started; }))
+                    upload_folder_load_begin(multi, std::move(easy), blob_queue, folder_ptr);
+                else { ++upload_task_ptr->m_begin_progress; continue; }
             }
             else
             {
@@ -639,7 +708,9 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                     continue;
                 }
                 download_task_ptr->m_idle_first = download_task_ptr->m_file_arr.begin();
-                download_task_ptr->m_files_remaining = download_task_ptr->m_file_arr.size();
+                download_task_ptr->m_files_remaining=std::ranges::count_if(download_task_ptr->m_file_arr,[](const auto& f) { return !f.m_complete; });
+                for (auto& f:download_task_ptr->m_file_arr)
+                    for (auto& c:f.m_chunk_arr) c.m_file=&f;
                 task_progress(*download_task_ptr, download_task_ptr->m_progress,
                               download_task_ptr->m_size, download_task_ptr->m_name);
                 if (!download_task_ptr->m_files_remaining)
@@ -648,6 +719,14 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
                     finish_task(*download_task_ptr, task_result_t::completed, "已完成：下載 " + download_task_ptr->m_name);
                     return false;
                 }
+                for (auto& f:download_task_ptr->m_file_arr)
+                    if (!f.m_complete)
+                    {
+                        download_write_ready(f);
+                        download_complete(f);
+                    }
+                if (download_task_ptr->m_result!=task_result_t::active) return false;
+                download_idle_update(download_task_ptr->m_file_arr.begin());
             }
             if (!download_task_ptr->m_error.empty()) continue;
             auto file_i{ download_task_ptr->m_idle_first };
@@ -698,7 +777,7 @@ auto transfer_end(load_state_t* state, std::unique_ptr<curl_easy_t>& easy) -> vo
     if (callback.empty()) throw std::logic_error{"Missing transfer completion callback."};
     if (!easy->cancelled() && (easy->m_suspended || (easy->m_control && easy->m_control->user_paused)))
     {
-        // Transfer the detached physical handle back to the 64-slot pool. The
+        // Transfer the detached physical handle back to the foreground pool. The
         // parked object retains batch state, account, IDs, retries and callback.
         auto idle{std::make_unique<google_easy_t>(curl_easy_t{easy->take_transport()})};
         state->m_parked.push_back({std::move(easy), std::move(callback.mapped())});
@@ -758,6 +837,7 @@ auto upload_complete(upload_entity_t* entity) -> void
         }
     }
 
+    task_progress_save(*task);
     if (task->m_end_progress == task->m_entity_arr.end())
     {
         auto root{ task->m_entity_arr.front().get() };
@@ -813,20 +893,25 @@ auto upload_file_load_begin
 )
 -> void
 {
+	auto pending=std::ranges::find_if(file->m_pages,[](const auto& p) { return !p.complete && !p.started; });
+    const bool replay=pending!=file->m_pages.end();
+    const auto begin=replay ? pending->begin : file->m_file_load_begin_progress;
 	blob_opt_t blob
     {
-        .m_id{ file->m_next_id }
+		.m_id{ replay ? pending->id : file->m_next_id }
     };
     std::size_t chunk_count{};
-    if (file->m_chunk_arr.size() - file->m_file_load_begin_progress > 100)
+    std::string next;
+    if (replay) { chunk_count=pending->count; next=pending->next; }
+    else if (file->m_chunk_arr.size() - begin > 100)
     {
-        file->m_next_id = task_ids(file->m_task, blob_queue, "file-page:" + blob.m_id).front();
+        next = task_ids(file->m_task, blob_queue, "file-page:" + blob.m_id).front();
         chunk_count = 100;
     }
     else
     {
-        file->m_next_id = "null";
-        chunk_count = file->m_chunk_arr.size() - file->m_file_load_begin_progress;
+        next = "null";
+        chunk_count = file->m_chunk_arr.size() - begin;
     }
 	blob.m_name =
 		nlohmann::json
@@ -834,18 +919,18 @@ auto upload_file_load_begin
 			{ "name", std::filesystem::path{ file->m_path_local }.filename().string() },
 			{ "size", file->m_size },
 			{ "parent", file->m_parent->m_main_id },
-			{ "next", file->m_next_id }
+			{ "next", next }
 		};
 	blob.m_content = nlohmann::json::array();
     for (std::size_t i{ 0 }; i < chunk_count; ++i)
     {
-        blob.m_content->push_back(file->m_chunk_arr[file->m_file_load_begin_progress + i].m_id);
+        blob.m_content->push_back(file->m_chunk_arr[begin + i].m_id);
     }
     if (auto session = file->m_task->m_session)
     {
         (*blob.m_name)["parent_account"] = session->owner(file->m_parent->m_main_id);
-        (*blob.m_name)["next_account"] = session->owner(file->m_next_id);
-        (*blob.m_name)["account"] = chunk_count ? session->owner(file->m_chunk_arr[file->m_file_load_begin_progress].m_id) : "null";
+        (*blob.m_name)["next_account"] = session->owner(next);
+        (*blob.m_name)["account"] = chunk_count ? session->owner(file->m_chunk_arr[begin].m_id) : "null";
         session->bind(easy,blob.m_id);
     }
     google_easy_t easy_google{ std::move(easy) };
@@ -853,10 +938,17 @@ auto upload_file_load_begin
 	blob_update(easy_google, blob);
     //Get the key to `m_state->m_end` first before `easy_google` is moved.
     CURL* key{ easy_google.interface_get() };
+    if (replay) pending->started=true;
+    else
+    {
+        file->m_pages.push_back({blob.m_id,next,begin,chunk_count,false,true});
+        file->m_next_id=next;
+        file->m_file_load_begin_progress+=chunk_count;
+    }
+    upload_progress_save(*file); // Durable page identity before remote mutation.
     multi.add(std::move(easy_google));
     
-    file->m_file_load_begin_progress += chunk_count;
-    if (file->m_file_load_begin_progress == file->m_chunk_arr.size())
+    if (file->m_next_id=="null" && std::ranges::none_of(file->m_pages,[](const auto& p) { return !p.complete && !p.started; }))
     {
         ++file->m_task->m_begin_progress;
     }
@@ -868,7 +960,7 @@ auto upload_file_load_begin
             upload_file_load_end,
             std::placeholders::_1,
             file,
-            file->m_file_load_begin_progress - chunk_count,
+            begin,
             chunk_count
         )
     );
@@ -900,19 +992,27 @@ auto upload_file_load_end
     {
         file->m_load_end = true;
     }
+    for (auto& p:file->m_pages) if (p.begin==begin_i) p.complete=true;
+    upload_progress_save(*file);
+    task_progress_save(*file->m_task);
     upload_complete(file);
     return;
 }
 
 auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upload_file_t* file) -> void
 {
-    file->m_task->m_session->bind(easy,file->m_chunk_arr[file->m_chunk_load_begin_progress].m_id);
+    const auto first=std::ranges::find_if(file->m_chunk_arr,[](const auto& c) { return !c.m_load_end && !c.m_load_started; });
+    const auto begin=static_cast<std::size_t>(first-file->m_chunk_arr.begin());
+    file->m_task->m_session->bind(easy,first->m_id);
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
-    std::uint64_t chunk_count{ std::min<std::uint64_t>(file->m_chunk_arr.size() - file->m_chunk_load_begin_progress, 100-file->m_chunk_load_begin_progress%100) };
+    std::size_t chunk_count{};
+    while (begin+chunk_count<file->m_chunk_arr.size() && chunk_count<100-begin%100 &&
+           !file->m_chunk_arr[begin+chunk_count].m_load_end && !file->m_chunk_arr[begin+chunk_count].m_load_started)
+        ++chunk_count;
     for (std::uint64_t i{ 0 }; i < chunk_count; ++i)
     {
-        upload_chunk_t& chunk{ file->m_chunk_arr[file->m_chunk_load_begin_progress + i] };
+        upload_chunk_t& chunk{ file->m_chunk_arr[begin + i] };
         nlohmann::json id_array = nlohmann::json::array();
         for (std::uint64_t j{ 0 }; j < chunk.m_content_id.size(); ++j)
         {
@@ -933,11 +1033,11 @@ auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upl
             .m_content{ id_array }
         };
         blob_update(batch, blob);
+        chunk.m_load_started=true;
     }
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
     CURL* key{ batch.interface_get() };
-    multi.add(std::move(batch));
 
     file->m_task->m_state->m_end.emplace
     (
@@ -947,11 +1047,12 @@ auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upl
             upload_chunk_load_end,
             std::placeholders::_1,
             file,
-            file->m_chunk_load_begin_progress,
+            begin,
             chunk_count
         )
     );
-    file->m_chunk_load_begin_progress += chunk_count;
+    file->m_chunk_load_begin_progress = begin+chunk_count;
+    multi.add(std::move(batch));
     return;
 }
 
@@ -976,6 +1077,8 @@ auto upload_chunk_load_end
     {
         ++file->m_chunk_load_end_progress;
     }
+    upload_progress_save(*file);
+    task_progress_save(*file->m_task);
     upload_complete(file);
     return;
 }
@@ -984,25 +1087,32 @@ auto upload_chunk_transfer_begin
 (
     curl_multi_worker_t& multi,
     curl_easy_t&& easy,
-    blob_queue_t* blob_queue,
+    blob_queue_t*,
     upload_file_t* file
 )
 -> void
 {
-    const auto group="chunk-group:"+file->m_main_id+":"+std::to_string(file->m_chunk_arr.size()/100);
-    const auto reservation_key="chunk:"+file->m_main_id+":"+std::to_string(file->m_chunk_cover_progress);
-    const auto owner=task_owner(*file->m_task,group);
-    auto& chunk=file->m_chunk_arr.emplace_back(upload_chunk_t{
-        .m_file=file,.m_id=task_reserve(*file->m_task,reservation_key,1,owner,"chunk").front()});
-    std::uint64_t batch_size{std::min(file->m_size-file->m_chunk_cover_progress,content_size_max_base64*100)};
-    std::uint64_t content_count{(batch_size+content_size_max_base64-1)/content_size_max_base64};
-    chunk.m_content_id=task_reserve(*file->m_task,"content:"+chunk.m_id,content_count,{},"data");
+    auto first=std::ranges::find_if(file->m_chunk_arr,[](const auto& c) { return !c.m_transfer_end && !c.m_transfer_started; });
+    const bool existing=first!=file->m_chunk_arr.end();
+    const auto index=static_cast<std::size_t>(first-file->m_chunk_arr.begin());
+    if (!existing)
+    {
+        const auto group="chunk-group:"+file->m_main_id+":"+std::to_string(index/100);
+        const auto key="chunk:"+file->m_main_id+":"+std::to_string(file->m_chunk_cover_progress);
+        const auto owner=task_owner(*file->m_task,group);
+        file->m_chunk_arr.push_back({.m_file=file,.m_id=task_reserve(*file->m_task,key,1,owner,"chunk").front()});
+    }
+    auto& chunk=file->m_chunk_arr[index];
+    std::uint64_t batch_size{ existing ? chunk.m_size : std::min(file->m_size - file->m_chunk_cover_progress, content_size_max_base64 * 100) };
+    //Divide and round up.
+    std::uint64_t content_count{ (batch_size + content_size_max_base64 - 1) / content_size_max_base64 };
+    if (chunk.m_content_id.empty()) chunk.m_content_id = task_reserve(*file->m_task,"content:"+chunk.m_id,content_count,{},"data");
     file->m_task->m_session->bind(easy,chunk.m_content_id.front());
     chunk.m_size = batch_size;
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
     std::ifstream stream{ lgo::create_ifstream(file->m_path_local) };
-    stream.seekg(static_cast<std::uint64_t>(file->m_chunk_cover_progress));
+    stream.seekg(static_cast<std::uint64_t>(index*content_size_max_base64*100));
     for (std::uint64_t i{ 0 }; i < content_count; ++i)
     {
         std::uint64_t size{};
@@ -1039,14 +1149,16 @@ auto upload_chunk_transfer_begin
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
     CURL* key{ batch.interface_get() };
-    multi.add(std::move(batch));
+    chunk.m_transfer_started=true;
+    if (!existing) file->m_chunk_cover_progress += batch_size;
+    upload_progress_save(*file);
 
     file->m_task->m_state->m_end.emplace
     (
         key,
-        std::bind(upload_chunk_transfer_end, std::placeholders::_1, file, file->m_chunk_arr.size() - 1)
+        std::bind(upload_chunk_transfer_end, std::placeholders::_1, file, index)
     );
-    file->m_chunk_cover_progress += batch_size;
+    multi.add(std::move(batch));
     return;
 }
 
@@ -1064,8 +1176,8 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
         ++file->m_chunk_transfer_end_progress;
     }
     task->m_progress += chunk.m_size;
-    if (task->m_journal)
-        task->m_journal->set("progress", std::max(task->m_saved_progress, task->m_progress));
+    upload_progress_save(*file);
+    task_progress_save(*task);
     task_progress(*task, task->m_progress, task->m_size, task->m_name);
     upload_complete(file);
     return;
@@ -1080,15 +1192,20 @@ auto upload_folder_load_begin
 )
 -> void
 {
+	auto pending=std::ranges::find_if(folder->m_pages,[](const auto& p) { return !p.complete && !p.started; });
+    const bool replay=pending!=folder->m_pages.end();
+    const auto begin=replay ? pending->begin : folder->m_folder_load_begin_progress;
+    auto cursor=begin;
+    const auto end=replay ? begin+pending->count : folder->m_entity_arr.size();
+    std::string next=replay ? pending->next : "null";
 	blob_opt_t blob
     {
-        .m_id{ folder->m_next_id }
+        .m_id{ replay ? pending->id : folder->m_next_id }
     };
     blob.m_content = nlohmann::json::array();
-    folder->m_next_id = "null";
-    while (folder->m_folder_load_begin_progress < folder->m_entity_arr.size())
+    while (cursor < end)
     {
-        std::size_t element_entity_i{ folder->m_entity_arr[folder->m_folder_load_begin_progress] };
+        std::size_t element_entity_i{ folder->m_entity_arr[cursor] };
         upload_entity_t* element_entity{ folder->m_task->m_entity_arr[element_entity_i].get() };
         if (element_entity->m_type == "file")
         {
@@ -1123,13 +1240,13 @@ auto upload_folder_load_begin
         {
             throw;
         }
-        if (blob.m_content.value().size() == 100 || blob.m_content.value().dump().size() > content_size_max)
+        if (!replay && (blob.m_content.value().size() == 100 || blob.m_content.value().dump().size() > content_size_max))
         {
             blob.m_content.value().erase(blob.m_content.value().end() - 1);
-            folder->m_next_id = task_ids(folder->m_task, blob_queue, "folder-page:" + blob.m_id).front();
+            next = task_ids(folder->m_task, blob_queue, "folder-page:" + blob.m_id).front();
             break;
         }
-        ++folder->m_folder_load_begin_progress;
+        ++cursor;
     }
     //Modify `m_name` after `m_content` here because it needs `folder->m_next_id`,
     // which get updated during the evaluation of `m_content`.
@@ -1138,12 +1255,12 @@ auto upload_folder_load_begin
 		{
 			{ "name", folder->m_name },
 			{ "parent", folder->m_parent->m_main_id },
-			{ "next", folder->m_next_id }
+			{ "next", next }
 		};
     if (auto session = folder->m_task->m_session)
     {
         (*blob.m_name)["parent_account"] = session->owner(folder->m_parent->m_main_id);
-        (*blob.m_name)["next_account"] = session->owner(folder->m_next_id);
+        (*blob.m_name)["next_account"] = session->owner(next);
         session->bind(easy,blob.m_id);
     }
     google_easy_t easy_google{ std::move(easy) };
@@ -1151,9 +1268,17 @@ auto upload_folder_load_begin
 	blob_update(easy_google, blob);
     //Get the key to `m_state->m_end` first before `easy_google` is moved.
     CURL* key{ easy_google.interface_get() };
+    if (replay) pending->started=true;
+    else
+    {
+        folder->m_pages.push_back({blob.m_id,next,begin,cursor-begin,false,true});
+        folder->m_folder_load_begin_progress=cursor;
+        folder->m_next_id=next;
+    }
+    upload_progress_save(*folder);
     multi.add(std::move(easy_google));
     
-    if (folder->m_folder_load_begin_progress == folder->m_entity_arr.size())
+    if (folder->m_next_id=="null" && std::ranges::none_of(folder->m_pages,[](const auto& p) { return !p.complete && !p.started; }))
     {
         ++folder->m_task->m_begin_progress;
     }
@@ -1165,7 +1290,7 @@ auto upload_folder_load_begin
             upload_folder_load_end,
             std::placeholders::_1,
             folder,
-            folder->m_folder_load_begin_progress - blob.m_content.value().size(),
+            begin,
             blob.m_content.value().size()
         )
     );
@@ -1197,6 +1322,9 @@ auto upload_folder_load_end
     {
         folder->m_load_end = true;
     }
+    for (auto& p:folder->m_pages) if (p.begin==begin_i) p.complete=true;
+    upload_progress_save(*folder);
+    task_progress_save(*folder->m_task);
     upload_complete(folder);
     return;
 }
@@ -1213,6 +1341,7 @@ auto download_complete(download_file_t& file) -> void
     if (file.m_written != file.m_size)
         throw std::runtime_error{ "Downloaded size differs from the declared size: " + file.m_path_local };
     file.m_complete = true;
+    download_progress_save(file);
     auto& task{ *file.m_task };
     if (--task.m_files_remaining == 0)
     {
@@ -1232,9 +1361,9 @@ auto download_idle_update(std::vector<download_file_t>::iterator file_i) -> void
     {
         if
         (
-            (!file_i->m_file_loading && file_i->m_next_id != "null") ||
+            !file_i->m_complete && ((!file_i->m_file_loading && file_i->m_next_id != "null") ||
             file_i->m_chunk_load_begin_progress < file_i->m_chunk_arr.size() ||
-            file_i->m_chunk_transfer_begin_progress < file_i->m_chunk_load_end_progress
+            file_i->m_chunk_transfer_begin_progress < file_i->m_chunk_load_end_progress)
         )
         {
             file_i->m_idle = true;
@@ -1281,7 +1410,8 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
     nlohmann::json blob_content = nlohmann::json::parse(payload["description"].get<std::string>());
     if (!blob_content.is_array() || blob_content.size() > 100)
         throw std::runtime_error{ "File chunk index must be an array of at most 100 IDs." };
-    if (file_i->m_task->m_session) file_i->m_task->m_session->observe(file_i->m_next_id,blob_name,blob_content);
+    if (file_i->m_task->m_session)
+        file_i->m_task->m_session->observe(file_i->m_next_id,blob_name,blob_content);
     file_i->m_next_id = blob_name["next"];
     for (const auto& i : blob_content)
     {
@@ -1294,7 +1424,12 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
             }
         );
     }
+    while (file_i->m_chunk_load_begin_progress<file_i->m_chunk_arr.size() && file_i->m_chunk_arr[file_i->m_chunk_load_begin_progress].m_loaded)
+        ++file_i->m_chunk_load_begin_progress;
+    file_i->m_chunk_load_end_progress=std::max(file_i->m_chunk_load_end_progress,file_i->m_filesystem_progress);
+    file_i->m_chunk_transfer_begin_progress=std::max(file_i->m_chunk_transfer_begin_progress,file_i->m_filesystem_progress);
     file_i->m_file_loading = false;
+    download_progress_save(*file_i);
 
     // An empty file has no chunk work to schedule. Skip it while preserving
     // earlier files whose responses may also have made them runnable.
@@ -1311,15 +1446,19 @@ auto download_chunk_load_begin
 )
 -> void
 {
-    if (file_i->m_task->m_session) file_i->m_task->m_session->bind(easy,file_i->m_chunk_arr[file_i->m_chunk_load_begin_progress].m_id);
+    if (file_i->m_task->m_session)
+        file_i->m_task->m_session->bind(easy,file_i->m_chunk_arr[file_i->m_chunk_load_begin_progress].m_id);
     google_batch_t batch{ std::move(easy) };
     batch.path_set("/drive/v3");
     std::size_t i_begin{ file_i->m_chunk_load_begin_progress };
     std::size_t i_end{ std::min(i_begin + 100, file_i->m_chunk_arr.size()) };
-    if (auto session=file_i->m_task->m_session)
+    if (auto session = file_i->m_task->m_session)
         for (auto i=i_begin+1;i<i_end;++i)
-            if (session->owner(file_i->m_chunk_arr[i].m_id)!=session->owner(file_i->m_chunk_arr[i_begin].m_id))
+            if (file_i->m_chunk_arr[i].m_loaded ||
+                session->owner(file_i->m_chunk_arr[i].m_id)!=session->owner(file_i->m_chunk_arr[i_begin].m_id))
             { i_end=i; break; }
+    for (auto i=i_begin+1;i<i_end;++i)
+        if (file_i->m_chunk_arr[i].m_loaded) { i_end=i; break; }
     for (std::size_t i{ i_begin }; i < i_end; ++i)
     {
         blob_get(batch, file_i->m_chunk_arr[i].m_id, "name,description");
@@ -1327,9 +1466,11 @@ auto download_chunk_load_begin
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
     CURL* key{ batch.interface_get() };
-    multi.add(std::move(batch));
 
     file_i->m_chunk_load_begin_progress = i_end;
+    while (file_i->m_chunk_load_begin_progress<file_i->m_chunk_arr.size() &&
+           file_i->m_chunk_arr[file_i->m_chunk_load_begin_progress].m_loaded)
+        ++file_i->m_chunk_load_begin_progress;
     download_on_end
     (
         *file_i->m_task,
@@ -1337,6 +1478,7 @@ auto download_chunk_load_begin
         std::bind(download_chunk_load_end, std::placeholders::_1, file_i, i_begin)
     );
     download_idle_update(file_i);
+    multi.add(std::move(batch));
     return;
 }
 
@@ -1357,7 +1499,8 @@ auto download_chunk_load_end
         if (!content_id_arr.is_array() || content_id_arr.empty() || content_id_arr.size() > 100)
             throw std::runtime_error{ "Chunk content index must contain 1 to 100 IDs." };
         if (file_i->m_task->m_session)
-            file_i->m_task->m_session->observe(chunk.m_id,nlohmann::json::parse(payload.at("name").get<std::string>()),content_id_arr);
+            file_i->m_task->m_session->observe(chunk.m_id,
+                nlohmann::json::parse(payload.at("name").get<std::string>()),content_id_arr);
         chunk.m_content_id.resize(content_id_arr.size());
         std::ranges::copy(content_id_arr, chunk.m_content_id.begin());
         chunk.m_loaded = true;
@@ -1378,6 +1521,7 @@ auto download_chunk_load_end
             ++file_i->m_chunk_load_end_progress;
         }
     }
+    download_progress_save(*file_i);
 
     // A later index batch may finish before the first pending batch. It does
     // not make content runnable until the contiguous loaded prefix advances.
@@ -1399,9 +1543,11 @@ auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& eas
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
     CURL* key{ batch.interface_get() };
-    multi.add(std::move(batch));
 
     ++chunk.m_file->m_chunk_transfer_begin_progress;
+    while (chunk.m_file->m_chunk_transfer_begin_progress<chunk.m_file->m_chunk_arr.size() &&
+           chunk.m_file->m_chunk_arr[chunk.m_file->m_chunk_transfer_begin_progress].m_received)
+        ++chunk.m_file->m_chunk_transfer_begin_progress;
     download_on_end
     (
         *chunk.m_file->m_task,
@@ -1413,6 +1559,7 @@ auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& eas
         chunk.m_file->m_task->m_file_arr.begin() +
         (chunk.m_file - chunk.m_file->m_task->m_file_arr.data())
     );
+    multi.add(std::move(batch));
     return;
 }
 
@@ -1427,23 +1574,31 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
     {
         chunk.m_content[i] = nlohmann::json::parse(batch.response_get(i).body_get())["description"];
     }
-    if (chunk.m_file->m_filesystem_progress < chunk_i)
-    {
-        return;
-    }
+    chunk.m_received=true;
+    chunk.m_response_key=easy->checkpoint_key();
+    download_progress_save(*file);
+    download_write_ready(*file);
+    download_complete(*file);
+}
 
-    std::ofstream content_stream{ lgo::create_ofstream_preserve(chunk.m_file->m_path_local) };
-    if (!content_stream) throw std::runtime_error{ "Cannot write download file: " + chunk.m_file->m_path_local };
+auto download_write_ready(download_file_t& target) -> void
+{
+    auto* file=&target;
+    if (file->m_filesystem_progress>=file->m_chunk_arr.size() ||
+        file->m_chunk_arr[file->m_filesystem_progress].m_content.empty()) return;
+
+    std::ofstream content_stream{ lgo::create_ofstream_preserve(file->m_path_local) };
+    if (!content_stream) throw std::runtime_error{ "Cannot write download file: " + file->m_path_local };
     content_stream.seekp(0, std::ios_base::end);
     std::uint64_t filesystem_size{};
     while (true)
     {
-        if (chunk.m_file->m_filesystem_progress == chunk.m_file->m_chunk_arr.size())
+        if (file->m_filesystem_progress == file->m_chunk_arr.size())
         {
             break;
         }
         //This chunk is going to be written to local filesystem.
-        download_chunk_t& chunk_filesystem{ chunk.m_file->m_chunk_arr[chunk.m_file->m_filesystem_progress] };
+        download_chunk_t& chunk_filesystem{ file->m_chunk_arr[file->m_filesystem_progress] };
         if (chunk_filesystem.m_content.empty())
         {
             break;
@@ -1451,17 +1606,13 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
         for (std::uint64_t i{ 0 }; i < chunk_filesystem.m_content.size(); ++i)
         {
             chunk_filesystem.m_content[i] = base64url_decode(chunk_filesystem.m_content[i]);
-            const auto offset{file->m_written + filesystem_size};
-            if (offset >= file->m_resume_written)
-                content_stream.write(chunk_filesystem.m_content[i].data(),
-                                     chunk_filesystem.m_content[i].size());
-            else if (offset + chunk_filesystem.m_content[i].size() > file->m_resume_written)
-                throw std::runtime_error{"Invalid saved download boundary."};
+            content_stream.write(chunk_filesystem.m_content[i].data(),
+                                 chunk_filesystem.m_content[i].size());
             filesystem_size += chunk_filesystem.m_content[i].size();
             chunk_filesystem.m_content[i].clear();
             chunk_filesystem.m_content[i].shrink_to_fit();
         }
-        ++chunk_filesystem.m_file->m_filesystem_progress;
+        ++file->m_filesystem_progress;
     }
 
     // Finish the write before publishing progress or removing the last task owner.
@@ -1473,16 +1624,13 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
         // FlushFileBuffers is also needed for the output, before publishing its
         // prefix in task state. Atomic checkpoint writes alone cannot flush it.
         storage_flush_file(file->m_path_local);
-        file->m_task->m_journal->set("written:" + file->m_path_local, file->m_written);
+        download_progress_save(*file);
     }
     // Update progress.
-    download_task_t& task{*chunk.m_file->m_task};
+    download_task_t& task{*file->m_task};
     task.m_progress += filesystem_size;
-    if (task.m_journal)
-        task.m_journal->set("progress", std::max(task.m_saved_progress, task.m_progress));
+    task_progress_save(task);
     task_progress(task, task.m_progress, task.m_size, task.m_name);
-
-    download_complete(*file);
 
     return;
 }
