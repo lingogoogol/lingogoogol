@@ -137,7 +137,7 @@ observation = r'''
             auto value=nlohmann::json{{"toolbar",point(*persistent.m_login_button)},
                 {"label",persistent.m_login_button->get_text()},{"menu",bool(persistent.m_account_menu)},
                 {"dialog",bool(persistent.m_dialog)},{"switching",persistent.m_switching},
-                {"log_path",lgo::get_logfile_path()},
+                {"log_path",lgo::get_logfile_path()},{"workers",load_state.m_settings.worker_count},
                 {"rows",rows},{"footer",footer},{"page",static_cast<int>(menu_page)},
                 {"session",load_state.m_session ? load_state.m_session->storage_id : ""},
                 {"root",load_state.m_session ? load_state.m_session->root : ""},
@@ -167,6 +167,7 @@ def wait(predicate, message, timeout=30):
 def click(at): command('mousemove','--window',window,at['x'],at['y'],'click','1'); time.sleep(.12)
 def ready(page):
     value=wait(lambda: snapshot() if snapshot()['menu'] and snapshot()['page']==page and not snapshot()['switching'] else None,'Missing menu '+str(page))
+    assert value['log_path']==session_log,'Space operation split the session log'
     return value
 def footer(label): click(next(item for item in snapshot()['footer'] if item['text']==label))
 def action(label,row=0): click(next(item for item in snapshot()['rows'][row]['actions'] if item['text']==label))
@@ -198,6 +199,44 @@ try:
     command('windowfocus','--sync',window)
     assert snapshot()['label']=='空間' and not snapshot()['session']
     session_log=snapshot()['log_path']
+    def logfile(value):return Path(value.replace('\\','/'))
+    original_log=logfile(session_log)
+    def emit(marker):
+        Path('emit-log.next').write_text(marker)
+        Path('emit-log.next').replace('emit-log')
+        wait(lambda:marker in logfile(snapshot()['log_path']).read_text(),'Log marker was not written')
+    def open_settings():
+        Path('open-settings').touch()
+        return wait(lambda:snapshot() if snapshot()['dialog'] else None,'Settings did not open')
+    def settings_field(s,index,value):
+        left=(s['window_w']-720)//2;top=(s['window_h']-692)//2
+        click({'x':left+200,'y':top+124+68*index});paste(value)
+    def finish_settings(s,accepted,workers=None):
+        left=(s['window_w']-720)//2;top=(s['window_h']-692)//2
+        click({'x':left+(640 if accepted else 520),'y':top+660})
+        wait(lambda:not snapshot()['dialog'] and not snapshot()['switching'] and
+             (workers is None or snapshot()['workers']==workers),'Settings did not finish')
+        time.sleep(.2) # Include the deferred-menu turn after settings completion.
+        if snapshot()['menu']:command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu stayed open')
+    emit('session-log-before-settings')
+    initial_files=set(original_log.parent.glob('*.txt'))
+    s=open_settings();finish_settings(s,False)
+    assert not Path('settings.json').exists(),'Cancel unexpectedly saved settings'
+    time.sleep(1.1) # Cross a filename timestamp boundary to detect log rotation.
+    s=open_settings();settings_field(s,6,'17');finish_settings(s,True,17)
+    assert snapshot()['log_path']==session_log and set(original_log.parent.glob('*.txt'))==initial_files
+    emit('session-log-after-settings')
+    open_menu();s=open_settings();finish_settings(s,False)
+    s=open_settings();settings_field(s,0,'changed-logfile');finish_settings(s,True,17)
+    changed_log=logfile(snapshot()['log_path'])
+    assert changed_log.parent==Path('changed-logfile') and changed_log.name==original_log.name
+    emit('session-log-in-changed-directory')
+    assert 'session-log-before-settings' in original_log.read_text()
+    s=open_settings();settings_field(s,0,'logfile');finish_settings(s,True,17)
+    assert snapshot()['log_path']==session_log and set(original_log.parent.glob('*.txt'))==initial_files
+    emit('session-log-returned-to-original')
+    assert 'session-log-after-settings' in original_log.read_text()
+    assert set(changed_log.parent.glob('*.txt'))=={changed_log}
     menu=open_menu();assert not menu['rows']
     footer('新增空間');dialog('');assert snapshot()['dialog'],'Empty space name accepted'
     dialog('My Space');closed();ready(0)
