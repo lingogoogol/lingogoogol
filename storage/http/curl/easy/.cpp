@@ -89,7 +89,12 @@ auto curl_easy_t::log_http_response() const -> void
         response += std::string{header->name} + ": " + header->value + "\r\n";
     response += "\r\n" + m_write->m_payload;
     log_http_error_exchange(m_response_code, request, response,
-        "interface=" + std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface)));
+        error_context());
+}
+
+auto curl_easy_t::error_context() const -> std::string
+{
+    return "interface=" + std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface));
 }
 
 auto curl_easy_t::get() -> curl_easy_t&
@@ -364,18 +369,17 @@ auto curl_easy_t::run() -> void
         {
             break;
         }
+        const auto reason = failure_reason();
         lgo::log_file
         (
             "A transfer failed in curl_easy_t::run:"
             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
-            "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(m_interface)) +
+            "  " + error_context() +
             // Detailed diagnostics are opt-in and redact credential fields.
-            "  response_code: " + std::to_string(m_response_code) + "\n"
+            "  response_code: " + std::to_string(m_response_code) + "\n" + reason + "\n"
         );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
         //folder publication retries send an empty body after the first attempt.
-        const auto reason = failure_reason();
-        lgo::log_file(reason + "\n");
         failed(reason);
         }
 	return;
@@ -410,6 +414,8 @@ auto curl_easy_t::run_try() -> void
             }
             catch (const std::exception &error)
             {
+                lgo::log_file("Request preparation failed: " + std::string{error.what()} +
+                    " " + error_context() + "\n");
                 if (!m_control)
                     throw;
                 m_control->fail(error.what());
@@ -493,7 +499,7 @@ auto curl_easy_t::run_try() -> void
         }
         catch (lgo::error_t error)
         {
-            lgo::log_file(std::string{ error.what() } + "\n");
+            lgo::log_file(std::string{ error.what() } + " " + error_context() + "\n");
             //A connection failure can also leave a partially consumed request body.
             failed("Network connection failed.");
             continue;

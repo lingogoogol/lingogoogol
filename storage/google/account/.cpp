@@ -35,6 +35,10 @@ namespace
         {
             api_curl(curl_easy_setopt(interface_get(), CURLOPT_VERBOSE, 0L));
         }
+        auto error_context() const -> std::string override
+        {
+            return curl_easy_t::error_context() + " account=" + m_address;
+        }
         auto prepare() -> bool override
         {
             if (std::chrono::steady_clock::now() < m_retry_at) return false;

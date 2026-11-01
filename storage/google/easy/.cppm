@@ -16,6 +16,7 @@ export
         google_easy_t(curl_easy_t&& in);
         auto clear() -> void override;
         auto prepare() -> bool override;
+        auto error_context() const -> std::string override;
         auto resume() -> void override;
         auto authentication_failure() const -> bool override;
         auto manual_retry() -> void override;

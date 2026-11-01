@@ -36,6 +36,12 @@ auto google_easy_t::prepare() -> bool {
     curl_easy_t::method(); return true;
 }
 auto google_easy_t::resume() -> void { curl_easy_t::resume(); }
+
+auto google_easy_t::error_context() const -> std::string {
+    auto context = curl_easy_t::error_context();
+    if (m_account_context) context += " account="+std::static_pointer_cast<google_account_t>(m_account_context)->address();
+    return context;
+}
 auto google_easy_t::authorization_rejected() const -> bool { return false; }
 
 auto google_easy_t::authentication_failure() const -> bool { return false; }

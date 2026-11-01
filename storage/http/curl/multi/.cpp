@@ -130,6 +130,8 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
         }
         catch (const std::exception &error)
         {
+            lgo::log_file("Request preparation failed: " + std::string{error.what()} +
+                " " + easy.error_context() + "\n");
             if (!easy.m_control)
                 throw;
             easy.m_control->fail(error.what());
@@ -195,7 +197,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                         {
                             curl_multi_remove_handle(m_interface, message->easy_handle);
                         }
-                        lgo::log_file(e.message() + "\n");
+                        lgo::log_file(e.message() + " " + easy_ptr->error_context() + "\n");
                     }
                     if (cancelled && cancelled->load()) return failed_count;
                     m_active.erase(message->easy_handle);
@@ -217,15 +219,15 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                     }
                     else
                     {
+                        const auto reason = successful ? easy_ptr->failure_reason() : "Network connection failed.";
                         lgo::log_file
                         (
                             "A transfer failed in curl_multi_t::run:\n"
                             "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
-                            "  interface: " + std::format("{:016x}", reinterpret_cast<std::uint64_t>(message->easy_handle)) +
-                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) + "\n"
+                            "  " + easy_ptr->error_context() +
+                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) +
+                            "\n" + reason + "\n"
                         );
-                        const auto reason = successful ? easy_ptr->failure_reason() : "Network connection failed.";
-                        lgo::log_file(reason + "\n");
                         easy_ptr->failed(reason);
                         m_waiting.emplace(message->easy_handle);
                         ++failed_count;

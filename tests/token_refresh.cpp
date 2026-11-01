@@ -373,9 +373,13 @@ auto http_logging(lgo::engine_t& engine) -> void
     auto unselected = attempt("/diagnostic/unselected", "unselected-request");
     unselected.run_try();
 
-    auto batch = [&](std::string prefix)
+    const auto key = lgo::get_file_str("fixture.key");
+    auto first_account = std::make_shared<google_account_t>("log-a@fixture.invalid",key);
+    auto second_account = std::make_shared<google_account_t>("log-b@fixture.invalid",key);
+    auto batch = [&](std::string prefix, const std::shared_ptr<google_account_t>& account)
     {
         google_batch_t value;
+        value.m_account_context = account;
         value.host_set(host);
         value.path_set("/drive/v3");
         value.boundary_set("fixture");
@@ -385,13 +389,13 @@ auto http_logging(lgo::engine_t& engine) -> void
         quiet(value);
         return value;
     };
-    auto synchronous = batch("sync-");
+    auto synchronous = batch("sync-",first_account);
     synchronous.run();
     check(synchronous.valid(), "Diagnostic logging changed synchronous batch retries.");
     curl_multi_worker_t worker;
     auto control = std::make_shared<request_control_t>();
     control->retry_limit = 3;
-    auto background = batch("bg-");
+    auto background = batch("bg-",second_account);
     background.control_set(control);
     worker.add(std::move(background));
     const auto deadline = std::chrono::steady_clock::now() + 12s;
@@ -419,10 +423,73 @@ auto http_logging(lgo::engine_t& engine) -> void
     direct_control->cancel();
     multi.run();
 
+    auto reused = request("/diagnostic/account-first");
+    reused.m_account_context = first_account;
+    reused.run_try();
+    reused.clear();
+    reused.m_account_context = second_account;
+    reused.host_set(host);
+    reused.path_set("/diagnostic/account-rebound");
+    reused.method_get();
+    reused.run_try();
+
     http_error_log_codes_set({});
     auto off = attempt("/diagnostic/off", "off-request");
     off.run_try();
+    auto background_failure = [&](std::string path)
+    {
+        curl_multi_t failing;
+        auto failure_control = std::make_shared<request_control_t>();
+        failure_control->retry_limit = 0;
+        auto value = request(path);
+        value.m_account_context = second_account;
+        value.control_set(failure_control);
+        failing.add(std::move(value));
+        while (!failure_control->paused)
+        {
+            failing.run();
+            check(std::chrono::steady_clock::now() < deadline, "Account diagnostic request stalled.");
+            pump(engine);
+        }
+        failure_control->cancel();
+        failing.run();
+        return failure_control->reason();
+    };
+    const auto disabled_begin = logs().size();
+    background_failure("/diagnostic/account-off");
+    check(background_failure("/diagnostic/connection-reset") == "Network connection failed.",
+          "Fixture did not exercise account attribution for connection errors.");
     const auto text = logs();
+    const auto disabled_text = text.substr(disabled_begin);
+    check(disabled_text.find("HTTP error exchange:") == std::string::npos,
+          "Disabled body logging still recorded an exchange.");
+    check(disabled_text.find("account=log-b@fixture.invalid") != std::string::npos,
+          "Default error summaries lost the service account.");
+    std::map<std::string,std::size_t> attributed;
+    std::size_t position{};
+    while ((position = text.find("HTTP error exchange:",position)) != std::string::npos)
+    {
+        const auto end = text.find("--- end HTTP error exchange ---",position);
+        check(end != std::string::npos,"Incomplete diagnostic log record.");
+        const auto exchange = text.substr(position,end-position);
+        for (const auto& [marker,address] : std::map<std::string,std::string>{
+            {"/files/sync-rate","log-a@fixture.invalid"},
+            {"/files/bg-rate","log-b@fixture.invalid"},
+            {"/diagnostic/account-first","log-a@fixture.invalid"},
+            {"/diagnostic/account-rebound","log-b@fixture.invalid"}})
+            if (exchange.find(marker) != std::string::npos)
+            {
+                check(exchange.find("account="+address) != std::string::npos,
+                      "Error exchange attributed to the wrong service account.");
+                check(exchange.find("local-test@example.invalid") == std::string::npos,
+                      "Error exchange incorrectly used the global default account.");
+                ++attributed[marker];
+            }
+        position = end+1;
+    }
+    check(attributed["/files/sync-rate"]==2 && attributed["/files/bg-rate"]==2 &&
+          attributed["/diagnostic/account-first"]==1 && attributed["/diagnostic/account-rebound"]==1,
+          "Missing account-attributed direct or retried batch errors.");
     for (const auto* marker : {"sync-body", "form-body", "background-body", "diagnostic-message",
                                "X-Diagnostic-Id", "Content-ID=1", "status=403", "status=503",
                                "batch-sync-rate-1", "batch-sync-rate-2", "batch-bg-rate-1", "batch-bg-rate-2"})
@@ -433,7 +500,7 @@ auto http_logging(lgo::engine_t& engine) -> void
                                "disabled-request", "unselected-request", "off-request", "batch-sync-internal-1",
                                "batch-bg-missing-1", "/files/sync-ok", "/files/bg-ok"})
         check(text.find(secret) == std::string::npos, "Unselected HTTP details or credentials leaked to logs.");
-    std::println("PASS: HTTP error settings, sync/multi/batch filtering, retry pairing, live disable and credential redaction");
+    std::println("PASS: HTTP error settings, sync/multi/batch filtering, retry pairing, service-account attribution, handle rebinding, connection errors, live disable and credential redaction");
 }
 
 int main(int argc, char** argv)

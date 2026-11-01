@@ -220,8 +220,7 @@ auto google_batch_t::parse() -> void
         for (const auto& [id, raw] : diagnostics)
             log_http_error_exchange(std::stol(parsed.at(id).status_code_get()),
                 m_part.at(id).m_request.to_str(), raw,
-                "batch=" + m_host + m_path + " interface=" +
-                std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface)) +
+                "batch=" + m_host + m_path + " " + error_context() +
                 " Content-ID=" + std::to_string(id));
         std::map<std::string, std::size_t> failures;
         for (auto& [id, response] : parsed)
@@ -251,7 +250,7 @@ auto google_batch_t::parse() -> void
         // Leave pending parts invalid so the existing retry path resends them.
         // Responses from earlier successful attempts remain available.
         m_failure = std::string{"Invalid Google batch response: "} + error.what();
-        lgo::log_file(m_failure + "\n");
+        lgo::log_file(m_failure + " " + error_context() + "\n");
     }
 }
 

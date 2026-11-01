@@ -46,6 +46,14 @@ auto google_easy_t::prepare() -> bool
 
 auto google_easy_t::authorization_rejected() const -> bool { return m_response_code == 401; }
 
+auto google_easy_t::error_context() const -> std::string
+{
+    auto context = curl_easy_t::error_context();
+    if (m_account_context)
+        context += " account=" + std::static_pointer_cast<google_account_t>(m_account_context)->address();
+    return context;
+}
+
 auto google_easy_t::resume() -> void
 {
     if (authorization_rejected())

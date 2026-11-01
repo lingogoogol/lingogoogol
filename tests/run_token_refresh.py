@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test production OAuth signing/cache/retries with synthetic keys and local HTTP fixtures."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -36,6 +37,7 @@ class State:
         self.done = threading.Event()
         self.violations = []
         self.diagnostic_counts = {}
+        self.token_accounts = {}
 
     def report(self):
         return {key: getattr(self, key) for key in
@@ -97,10 +99,18 @@ class Handler(BaseHTTPRequestHandler):
             form = urllib.parse.parse_qs(body, strict_parsing=True)
             valid_grant = form.get('grant_type') == ['urn:ietf:params:oauth:grant-type:jwt-bearer']
             valid_assertion = len(form.get('assertion', [])) == 1 and bool(form['assertion'][0])
+            issuer = None
+            if valid_assertion:
+                try:
+                    claims = form['assertion'][0].split('.')[1]
+                    issuer = json.loads(base64.urlsafe_b64decode(claims + '=' * (-len(claims) % 4)))['iss']
+                except (ValueError, KeyError, IndexError):
+                    valid_assertion = False
             with state.lock:
                 state.tokens += 1
                 issued = state.tokens
                 state.required = max(state.required, issued)
+                state.token_accounts[f'fixture-token-{issued}'] = issuer
                 if self.command != 'POST' or not valid_grant or not valid_assertion:
                     state.violations.append('Invalid token request.')
             if not valid_grant:
@@ -124,7 +134,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(200, {'access_token': f'fixture-token-{issued}',
                                      'expires_in': 2 if state.mode == 'recovery' and issued == 1 else 3600})
 
+        if state.mode == 'http-logging':
+            expected_account = {
+                '/diagnostic/account-first': 'log-a@fixture.invalid',
+                '/diagnostic/account-rebound': 'log-b@fixture.invalid',
+                '/diagnostic/account-off': 'log-b@fixture.invalid',
+                '/diagnostic/connection-reset': 'log-b@fixture.invalid',
+            }.get(path)
+            if path.startswith('/batch'):
+                expected_account = 'log-a@fixture.invalid' if '/files/sync-' in body else 'log-b@fixture.invalid'
+            if expected_account:
+                token = self.headers.get('Authorization', '').removeprefix('Bearer ')
+                with state.lock:
+                    if state.token_accounts.get(token) != expected_account:
+                        state.violations.append('Request used the wrong service-account token.')
+
         if path.startswith('/diagnostic/'):
+            if path.endswith('/connection-reset'):
+                self.close_connection = True
+                return
             status = 500 if path.endswith('/unselected') else 403
             return self.respond(status, {'error': {'message': 'diagnostic-message'},
                                         'access_token': 'access-secret', 'refresh_token': 'refresh-secret',
@@ -299,10 +327,12 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
                     raise RuntimeError(f'{mode} failed with exit {result.returncode}.')
                 report = server.state.report()
                 assert not report['violations'], report['violations']
-                expected = 0 if mode == 'retry-backoff' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable') else 1
+                expected = 0 if mode == 'retry-backoff' else 2 if mode == 'http-logging' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable') else 1
                 assert report['tokens'] == expected, (mode, report['tokens'], expected)
                 log = (test / 'logfile/token-refresh.txt').read_text(errors='replace')
                 assert 'finished_all!' in log and 'uncaught exception:' not in log
+                if mode in ('invalid', 'queue-error', 'temporary', 'unavailable'):
+                    assert 'account=local-test@example.invalid' in log, 'OAuth failure lost its service account.'
                 if mode == 'http-logging':
                     assert all(server.state.diagnostic_counts[prefix + name] == count
                                for prefix in ('sync-', 'bg-')
