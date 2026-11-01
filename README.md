@@ -287,7 +287,7 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `python3 tests/run_spaces.py`使用四個合成服務帳戶、兩個專案、兩個共用帳戶的空間及本機 Drive 模擬服務，檢查每服務帳戶的佇列、專案／帳戶交錯配置、上傳程序中斷與續傳、下載內容相同、遞迴複製後刪除來源、搬移、跨頁目錄、101 個 chunk／100 個 content 的索引複製與帳戶欄位，以及清除全部關聯帳戶檔案與中斷接續。伺服器拒絕混合服務帳戶的 batch、超過 100 個子請求及任何放入 batch 的 folder blob，另注入反序子回應與 GET／PATCH／DELETE 的部分 503 失敗。未關聯帳戶的資料須保留；關聯帳戶中 root 以外的資料也須清除。
 
-`python3 tests/run_progress_resume.py` 實際中斷上下載程序，驗證恢復時跳過完成內容、空檔案與空目錄、亂序結果與截掉未保存的輸出尾端；使用暫存合成資料，不接觸真實雲端。
+`python3 tests/run_progress_resume.py` 實際中斷上下載程序，恢復時移除不再需要的成功回應快取，並由伺服器拒絕再次處理已保存完成的 content、chunk 及 file／folder 索引。測試也涵蓋空檔案與空目錄、下載亂序完成但尚未寫入的內容，以及截掉未保存的輸出尾端。`python3 tests/run_checkpoint_recovery.py` 檢查短暫的 Windows 讀取占用，以及含 60,000 個 content 路由和 576 個檔案的大型準備流程不重寫相同的任務狀態；兩者都使用暫存合成資料，不接觸真實雲端。
 
 `python3 tests/run_spaces_gui.py` 使用 `xdotool` 實際點擊正式程式入口的空間選單與名稱／確認視窗，驗證空間、使用者照片與 email、專案 ID／狀態篩選、具名建立專案、服務帳戶名稱驗證、只列程式建立的帳戶、關聯、登入／登出及重啟保存；兩種移除都檢查錯誤確認文字、取消與正確確認，並驗證移除不刪除 Cloud 資源或私鑰。也開啟並取消清除警告；OAuth 協定沿用本機 PKCE／DPoP／nonce 模擬服務，僅在測試副本替換 Wine 尚不支援的 Windows CNG KSP。原生 Windows KSP 與真實 Google 授權仍需在 Windows 上驗證。這兩組測試只使用一次性設定、金鑰與佇列，不讀正式憑證或呼叫 Google。
 

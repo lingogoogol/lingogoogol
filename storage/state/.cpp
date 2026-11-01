@@ -68,9 +68,18 @@ auto storage_atomic_write(const std::filesystem::path& path, std::string_view co
     if (ok)
         ok = FlushFileBuffers(handle);
     CloseHandle(handle);
-    if (!ok ||
-        !MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        throw std::runtime_error{"Cannot save checkpoint: " + path.string()};
+    if (!ok) throw std::runtime_error{"Cannot flush checkpoint: " + path.string()};
+    // External readers may omit FILE_SHARE_DELETE. Keep the old checkpoint
+    // intact and tolerate short sharing/antivirus locks during atomic replace.
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds{2};
+    while (!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        const auto error=GetLastError();
+        if ((error!=ERROR_SHARING_VIOLATION && error!=ERROR_LOCK_VIOLATION && error!=ERROR_ACCESS_DENIED) ||
+            std::chrono::steady_clock::now()>=deadline)
+            throw std::runtime_error{"Cannot save checkpoint: "+path.string()+" (Windows error "+std::to_string(error)+")"};
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
 }
 auto storage_digest(std::string_view content) -> std::string
 {
@@ -214,6 +223,7 @@ auto task_journal_t::set(std::string key, nlohmann::json value) -> void
     const auto found=m_data.find(key);
     if (found==m_data.end() || *found!=value)
     { m_data[std::move(key)] = std::move(value); m_dirty=true; }
+    // A failed flush must remain dirty even if a retry supplies the same value.
     if (m_dirty) save_locked();
 }
 auto task_journal_t::allocate(std::string key, std::size_t count,
