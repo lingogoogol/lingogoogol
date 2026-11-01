@@ -19,7 +19,9 @@ auto blob_queue_t::process() -> void
 
     auto &multi{m_worker};
     // A array of easy handle that is currently not used.
-    std::vector<google_batch_t> batch_idle_arr(64);
+    constexpr std::size_t batch_size{100}, batch_limit{64}, reserve_target{20000};
+    std::vector<google_batch_t> batch_idle_arr(batch_limit);
+    std::size_t in_flight{};
     for (auto& batch : batch_idle_arr)
     {
         batch = google_batch_t{ curl_easy_t{} };
@@ -52,6 +54,7 @@ auto blob_queue_t::process() -> void
             }
             auto response{multi.ready_get_unique()};
             google_batch_t batch{std::move(dynamic_cast<google_batch_t &>(*response))};
+            --in_flight;
             std::unique_lock lock{ m_mutex };
             if (m_stopped)
                 return;
@@ -72,24 +75,31 @@ auto blob_queue_t::process() -> void
         }
 
         std::unique_lock lock{ m_mutex };
-        if (m_clearing || m_id.size() >= 20000)
+        // Pending creates already cover part of the reserve. Counting only
+        // completed IDs would keep replenishing the same gap while requests
+        // are slow or retrying and overshoot the target by thousands of IDs.
+        const auto projected=m_id.size()+in_flight*batch_size;
+        if (m_clearing || projected>=reserve_target)
         {
             continue;
         }
+        const auto needed=(reserve_target-projected+batch_size-1)/batch_size;
+        const auto submit_count=std::min({batch_limit,batch_idle_arr.size(),needed});
         lock.unlock();
-        while (batch_idle_arr.size())
+        for (std::size_t submitted{};submitted<submit_count;++submitted)
         {
             google_batch_t batch{ std::move(batch_idle_arr.back()) };
             batch_idle_arr.pop_back();
 
             batch.path_set("/drive/v3");
-            for (std::uint64_t i{ 0 }; i < 100; ++i)
+            for (std::size_t i{};i<batch_size;++i)
             {
                 blob_upload(batch, "", "");
             }
             batch.method_post();
             multi.add(std::move(batch));
-            m_planned_creations.fetch_add(100,std::memory_order_relaxed);
+            ++in_flight;
+            m_planned_creations.fetch_add(batch_size,std::memory_order_relaxed);
         }
     }
     return;
