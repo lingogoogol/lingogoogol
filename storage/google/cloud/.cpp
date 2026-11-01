@@ -29,6 +29,13 @@ namespace
         return result;
     }
 
+    auto known_projects_path(const std::shared_ptr<google_oauth_user_t>& user) -> std::filesystem::path
+    {
+        // storage_id includes the OAuth client and Google identity. Remember
+        // only IDs; names, permissions and lifecycle state must come from GET.
+        return std::filesystem::path{"cloud_project/known"}/storage_digest(user->storage_id());
+    }
+
     auto response_value(const oauth_response_t& response,
                         const std::string& method, const std::string& url) -> json
     {
@@ -122,6 +129,28 @@ auto google_cloud_projects(const std::shared_ptr<google_oauth_user_t>& user,
         }
         token = result.value("nextPageToken","");
     } while (!token.empty());
+    const auto known_path = known_projects_path(user);
+    if (std::filesystem::exists(known_path))
+    {
+        const auto known = json::parse(storage_read(known_path));
+        check(known.is_object(),"已保存的專案清單格式無效");
+        for (const auto& [id,unused] : known.items())
+        {
+            check(id.starts_with("storage-ai") && id.size()<=30 && id.back()!='-' &&
+                id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-")==std::string::npos,
+                "已保存的專案 ID 無效");
+            if (std::ranges::find(projects,id,&cloud_project_t::id)!=projects.end()) continue;
+            // Projects.search is eventually consistent, including after a
+            // process restart. Resolve known IDs that have not been indexed.
+            const auto url = std::string{resources}+"projects/"+id;
+            const auto response = user->cloud_request("GET",url,"",control);
+            if (response.status==403 || response.status==404) continue;
+            const auto metadata = response_value(response,"GET",url);
+            check(metadata.at("projectId")==id,"Google Cloud 傳回非預期的專案 ID");
+            if (metadata.value("state","")=="ACTIVE")
+                projects.push_back({id,metadata.at("displayName")});
+        }
+    }
     std::ranges::sort(projects,{},&cloud_project_t::id);
     return projects;
 }
@@ -165,6 +194,11 @@ auto google_cloud_create_project(const std::shared_ptr<google_oauth_user_t>& use
     if (saved.contains("operation")) operation(user,control,resources,saved.at("operation"));
     const auto metadata = call(user,control,"GET",std::string{resources}+"projects/"+project);
     check(metadata.value("state","")=="ACTIVE","專案尚未啟用");
+    const auto known_path = known_projects_path(user);
+    auto known = std::filesystem::exists(known_path) ? json::parse(storage_read(known_path)) : json::object();
+    check(known.is_object(),"已保存的專案清單格式無效");
+    known[project] = true;
+    storage_atomic_write(known_path,known.dump());
     std::filesystem::remove(record);
     return project;
 }

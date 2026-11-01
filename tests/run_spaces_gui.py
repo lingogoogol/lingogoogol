@@ -39,7 +39,10 @@ class Handler(fixture['Handler']):
                         {'projectId': 'storage-ai-deleted', 'displayName': 'Deleted', 'state': 'DELETE_REQUESTED'}],
                         'nextPageToken': 'next-page'})
                 assert query['pageToken'] == ['next-page']
-                return self.reply(200, {'projects': list(self.server.projects.values())})
+                # Keep new projects absent from search even across restarts.
+                # Only a later scenario makes the search index catch up.
+                return self.reply(200, {'projects': list(self.server.projects.values())
+                    if (self.server.directory/'projects-indexed').exists() else []})
             if path == '/resource/v3/projects' and method == 'POST':
                 assert value['displayName'] == 'My Project'
                 assert re.fullmatch(r'storage-ai-[a-f0-9]{16}', value['projectId'])
@@ -53,7 +56,11 @@ class Handler(fixture['Handler']):
                 return self.reply(200, {'name': 'operations/project-create'})
             if path.startswith('/resource/v3/projects/'):
                 project = path.rsplit('/', 1)[-1]
-                return self.reply(200, self.server.projects[project]) if project in self.server.projects else self.reply(403, {})
+                override = self.server.directory/'project-lookup.json'
+                lookup = json.loads(override.read_text()) if override.exists() else {}
+                if lookup.get('status', 200) != 200:
+                    return self.reply(lookup['status'], {})
+                return self.reply(200, {**self.server.projects[project], **lookup}) if project in self.server.projects else self.reply(403, {})
             if path in ('/resource/v3/operations/project-create', '/services/v1/operations/enable'):
                 if path == '/resource/v3/operations/project-create' and self.server.project_operation_failure:
                     self.server.project_operation_failure = False
@@ -265,6 +272,25 @@ try:
     restart();open_menu();action('編輯');ready(1);footer('新增帳戶');ready(2);action('使用');ready(3)
     footer('新增專案');dialog('My Project');closed();ready(3)
     assert [r['text'] for r in snapshot()['rows']]==['My Project']
+    restart();open_menu();action('編輯');ready(1);footer('新增帳戶');ready(2);action('使用');ready(3)
+    assert [r['text'] for r in snapshot()['rows']]==['My Project'], 'Restart lost the unindexed project'
+    def refresh_projects():
+        footer('返回');ready(2);action('使用');ready(3)
+    # Resolve current metadata rather than displaying stale cached names or
+    # inaccessible/deleted projects. A transient GET failure is still an error.
+    override=Path('project-lookup.json')
+    override.write_text(json.dumps({'displayName':'Renamed Project'}));refresh_projects()
+    assert [r['text'] for r in snapshot()['rows']]==['Renamed Project']
+    for lookup in ({'status':403}, {'status':404}, {'state':'DELETE_REQUESTED'}):
+        override.write_text(json.dumps(lookup));refresh_projects()
+        assert not snapshot()['rows'], 'Unavailable project was shown from local history'
+    override.write_text(json.dumps({'status':503}))
+    footer('返回');ready(2);action('使用');ready(2)
+    assert 'HTTP 503' in snapshot()['cloud_task']
+    override.unlink();action('使用');ready(3)
+    assert [r['text'] for r in snapshot()['rows']]==['My Project']
+    Path('projects-indexed').touch();refresh_projects()
+    assert [r['text'] for r in snapshot()['rows']]==['My Project'], 'Indexed project was duplicated'
     action('使用');ready(4);assert not snapshot()['rows'],'External IAM account was listed'
     footer('新增帳戶');dialog('BAD');assert snapshot()['dialog'],'Invalid service name accepted'
     dialog('my-service');closed();ready(4)
