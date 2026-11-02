@@ -20,7 +20,8 @@ build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
 modes = ('http-logging', 'batch-headers', 'retry-backoff', 'batch-errors', 'recovery', 'temporary', 'invalid',
-         'malformed', 'missing', 'lifetime', 'unavailable', 'transport', 'queue-error', 'shutdown')
+         'malformed', 'missing', 'lifetime', 'unavailable', 'transport', 'queue-error', 'shutdown',
+         'retry-zero', 'retry-one', 'retry-four', 'retry-unlimited', 'retry-live', 'retry-manual')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
 args = parser.parse_args()
@@ -38,6 +39,7 @@ class State:
         self.violations = []
         self.diagnostic_counts = {}
         self.token_accounts = {}
+        self.jwt_issued = []
 
     def report(self):
         return {key: getattr(self, key) for key in
@@ -94,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
             with state.lock:
                 if path in ('/control/revoke', '/control/revoke-sync-multi'):
                     state.required = state.tokens + 1
+                if path == '/control/limit-lowered':
+                    state.barrier.set()
                 return self.respond(200, state.report())
         if path == '/token':
             form = urllib.parse.parse_qs(body, strict_parsing=True)
@@ -103,7 +107,8 @@ class Handler(BaseHTTPRequestHandler):
             if valid_assertion:
                 try:
                     claims = form['assertion'][0].split('.')[1]
-                    issuer = json.loads(base64.urlsafe_b64decode(claims + '=' * (-len(claims) % 4)))['iss']
+                    claims = json.loads(base64.urlsafe_b64decode(claims + '=' * (-len(claims) % 4)))
+                    issuer = claims['iss']
                 except (ValueError, KeyError, IndexError):
                     valid_assertion = False
             with state.lock:
@@ -113,6 +118,13 @@ class Handler(BaseHTTPRequestHandler):
                 state.token_accounts[f'fixture-token-{issued}'] = issuer
                 if self.command != 'POST' or not valid_grant or not valid_assertion:
                     state.violations.append('Invalid token request.')
+                if state.mode.startswith('retry-') and valid_assertion:
+                    # A manual restart can begin in the same second; automatic
+                    # retries wait at least two seconds and must have a new iat.
+                    if (state.jwt_issued and not (state.mode == 'retry-manual' and issued == 3)
+                            and claims['iat'] <= state.jwt_issued[-1]):
+                        state.violations.append('OAuth retry reused an old JWT.')
+                    state.jwt_issued.append(claims['iat'])
             if not valid_grant:
                 return self.respond(400, {'error': 'unsupported_grant_type'})
             if not valid_assertion:
@@ -123,6 +135,13 @@ class Handler(BaseHTTPRequestHandler):
             if state.mode == 'transport':
                 self.close_connection = True
                 return
+            if state.mode == 'retry-live' and issued == 4:
+                if not state.barrier.wait(5):
+                    state.violations.append('Live retry setting was not applied.')
+            if (state.mode in ('retry-zero', 'retry-one', 'retry-four', 'retry-live') or
+                    (state.mode == 'retry-unlimited' and issued <= 4) or
+                    (state.mode == 'retry-manual' and issued <= 3)):
+                return self.respond(503, {'error': 'unavailable'})
             if state.mode in ('invalid', 'queue-error'):
                 return self.respond(400, {'error': 'invalid_grant', 'error_description': 'sensitive-response-marker'})
             if state.mode == 'unavailable' or (state.mode == 'temporary' and issued < 3):
@@ -319,6 +338,9 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
         env = {**os.environ, 'WINEDEBUG': '-all'}
         for mode in args.modes:
             server.state = State(mode)
+            limits = {'unavailable': 2, 'transport': 2, 'retry-zero': 0,
+                      'retry-one': 1, 'retry-four': 4, 'retry-manual': 1}
+            (test / 'settings.json').write_text(json.dumps({'network_retries': limits.get(mode, -1)}))
             (test / 'test-queue').write_text('[]')
             (test / 'logfile/token-refresh.txt').unlink(missing_ok=True)
             try:
@@ -332,13 +354,15 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
                 report = server.state.report()
                 assert not report['violations'], report['violations']
                 expected = 0 if mode == 'retry-backoff' else 2 if mode == 'http-logging' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable', 'transport') else 1
+                expected = {'retry-zero': 1, 'retry-one': 2, 'retry-four': 5,
+                            'retry-unlimited': 5, 'retry-live': 4, 'retry-manual': 4}.get(mode, expected)
                 assert report['tokens'] == expected, (mode, report['tokens'], expected)
                 log = (test / 'logfile/token-refresh.txt').read_text(errors='replace')
                 assert 'finished_all!' in log and 'uncaught exception:' not in log
                 if mode in ('invalid', 'queue-error', 'temporary', 'unavailable', 'transport'):
                     assert 'account=local-test@example.invalid' in log, 'OAuth failure lost its service account.'
-                if mode in ('unavailable', 'transport'):
-                    cause = 'HTTP request failed (status 503).' if mode == 'unavailable' else 'Network connection failed (curl 52:'
+                if mode in ('unavailable', 'transport', 'retry-zero', 'retry-one', 'retry-four', 'retry-live', 'retry-manual'):
+                    cause = 'Network connection failed (curl 52:' if mode == 'transport' else 'HTTP request failed (status 503).'
                     summaries = [line for line in log.splitlines() if 'Request preparation failed:' in line]
                     assert summaries, 'Missing propagated OAuth failure.'
                     assert all('Last failure: ' + cause in line and

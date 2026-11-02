@@ -14,6 +14,9 @@ export
         static auto default_get() -> google_account_t&;
         static auto default_shared() -> std::shared_ptr<google_account_t>;
         static auto default_shared_set(std::shared_ptr<google_account_t> account) -> void;
+        // Shared refreshes serve multiple tasks/accounts and use the current
+        // application setting, independently of any single task's pause state.
+        static auto token_retry_limit_set(int limit) -> void;
 
         google_account_t();
         google_account_t(std::string address, std::string_view key);

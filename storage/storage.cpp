@@ -43,6 +43,7 @@ auto app() -> void
     };
     lgo::init_logfile(log_path(settings));
     http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
+    google_account_t::token_retry_limit_set(settings.network_retries);
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
     lgo::font_face_t::freetype_set(&freetype);
@@ -643,6 +644,7 @@ auto app() -> void
                 const auto next_log_path = log_path(result.settings);
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
+                google_account_t::token_retry_limit_set(result.settings.network_retries);
                 const bool changed_location{!result.session || !load_state.m_session ||
                     result.session->storage_id != load_state.m_session->storage_id ||
                     result.settings.root_path != settings.root_path ||

@@ -51,9 +51,10 @@ auto pump(lgo::engine_t& engine) -> void
     if (frames % 40 == 0) glfwSetWindowSize(engine.window_get(), 800 + (frames % 80), 600);
     std::this_thread::sleep_for(1ms);
 }
-auto receive(curl_multi_worker_t& multi, lgo::engine_t& engine, std::size_t count) -> void
+auto receive(curl_multi_worker_t& multi, lgo::engine_t& engine, std::size_t count,
+             std::chrono::seconds timeout = 12s) -> void
 {
-    const auto deadline{ std::chrono::steady_clock::now() + 12s };
+    const auto deadline{ std::chrono::steady_clock::now() + timeout };
     while (count)
     {
         multi.run();
@@ -162,28 +163,41 @@ auto failure_case(lgo::engine_t& engine, std::string_view mode) -> void
 {
     curl_multi_worker_t multi;
     for (int i{}; i < 8; ++i) multi.add(request("/warm/" + std::to_string(i)));
-    if (mode == "temporary")
+    if (mode == "temporary" || mode == "retry-unlimited")
     {
-        receive(multi, engine, 8);
-        check(raw("/control/report")["tokens"] == 3, "Transient OAuth failures were not retried correctly.");
+        receive(multi, engine, 8, 25s);
+        check(raw("/control/report")["tokens"] == (mode == "temporary" ? 3 : 5),
+            "Transient/unlimited OAuth failures were not retried correctly.");
     }
     else
     {
         bool failed{};
-        const auto deadline{ std::chrono::steady_clock::now() + 12s };
+        bool lowered{};
+        const auto deadline{ std::chrono::steady_clock::now() + 25s };
         while (!failed)
         {
+            if (mode == "retry-live" && !lowered && frames % 40 == 0 && raw("/control/report")["tokens"] == 4)
+            {
+                google_account_t::token_retry_limit_set(0);
+                raw("/control/limit-lowered");
+                lowered = true;
+            }
             try { multi.run(); }
             catch (const std::runtime_error& error)
             {
                 check(std::string_view{ error.what() }.find("OAuth") != std::string_view::npos, "OAuth failure lost its context.");
-                if (mode == "unavailable" || mode == "transport")
+                if (mode == "unavailable" || mode == "transport" || mode.starts_with("retry-"))
                 {
-                    const std::string_view cause = mode == "unavailable" ?
-                        "Last failure: HTTP request failed (status 503)." :
-                        "Last failure: Network connection failed (curl 52:";
+                    const std::string_view cause = mode == "transport" ?
+                        "Last failure: Network connection failed (curl 52:" :
+                        "Last failure: HTTP request failed (status 503).";
                     check(std::string_view{error.what()}.find(cause) != std::string_view::npos,
                         "OAuth retry exhaustion lost its final HTTP/transport cause.");
+                    const auto retries = mode == "retry-zero" ? 0 :
+                        (mode == "retry-one" || mode == "retry-manual") ? 1 :
+                        mode == "retry-four" ? 4 : mode == "retry-live" ? 3 : 2;
+                    check(std::string_view{error.what()}.find("after " + std::to_string(retries) + " retries.") != std::string_view::npos,
+                        "OAuth retry exhaustion reported the wrong retry count.");
                 }
                 failed = true;
             }
@@ -192,6 +206,15 @@ auto failure_case(lgo::engine_t& engine, std::string_view mode) -> void
         }
     }
     multi.stop();
+    if (mode == "retry-manual")
+    {
+        google_account_t::default_get().retry();
+        curl_multi_worker_t resumed;
+        for (int i{}; i < 8; ++i) resumed.add(request("/warm/" + std::to_string(i)));
+        receive(resumed, engine, 8);
+        check(raw("/control/report")["tokens"] == 4, "Manual OAuth retry did not reset the retry budget.");
+        resumed.stop();
+    }
     std::println("PASS: OAuth response/transport failure policy; GUI frames={}", frames);
 }
 
@@ -555,6 +578,7 @@ int main(int argc, char** argv)
         const std::string_view mode{ argv[1] };
         curl_t curl;
         lgo::init_logfile("logfile/token-refresh.txt");
+        google_account_t::token_retry_limit_set(storage_settings_t::load().network_retries);
         google_account_t::default_get().init("local-test@example.invalid", lgo::get_file_str("fixture.key"));
         lgo::engine_t engine{ lgo::size_2D{ 800, 600 }, "Token refresh regression" };
         if (mode == "batch-headers") batch_headers(engine);

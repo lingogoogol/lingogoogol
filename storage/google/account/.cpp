@@ -14,6 +14,7 @@ import storage.google.oauth;
 namespace
 {
     constexpr auto token_endpoint{ "https://oauth2.googleapis.com/token" };
+    std::atomic_int token_retry_limit{-1};
 
     // Both signing and network I/O run on the OAuth worker, never under the
     // account mutex or while the GUI is constructing a Drive request.
@@ -21,7 +22,6 @@ namespace
     {
         std::string m_address;
         std::string m_key;
-        bool m_signed{};
         unsigned m_retries{};
         std::string m_last_failure;
         std::chrono::steady_clock::time_point m_retry_at{};
@@ -43,11 +43,8 @@ namespace
         auto prepare() -> bool override
         {
             if (std::chrono::steady_clock::now() < m_retry_at) return false;
-            if (m_signed)
-            {
-                m_attempt_started = std::chrono::steady_clock::now();
-                return true;
-            }
+            // Unlimited retries can outlive a JWT's one-hour validity. Sign
+            // each attempt on this background worker instead of reusing it.
             const auto now{ std::time(nullptr) };
             const auto header{ base64url_encode(R"({"alg":"RS256","typ":"JWT"})") };
             const auto claims{ base64url_encode(nlohmann::json{
@@ -57,13 +54,11 @@ namespace
             auto assertion{ header + "." + claims };
             try { assertion += "." + base64url_encode(sha256withrsa(assertion, m_key)); }
             catch (...) { throw std::runtime_error{ "Could not sign the OAuth token request." }; }
-            m_key.clear();
             host_set(token_endpoint);
             header_set("Content-Type", "application/x-www-form-urlencoded");
             // RFC 7523 uses the full grant-type URN; omitting "grant-type:"
             // makes the OAuth endpoint reject startup authentication with HTTP 400.
             method_post("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + assertion);
-            m_signed = true;
             m_attempt_started = std::chrono::steady_clock::now();
             return true;
         }
@@ -100,10 +95,14 @@ namespace
         {
             if (m_response_code >= 400 && m_response_code < 500)
                 throw std::runtime_error{ "OAuth token request rejected (HTTP " + std::to_string(m_response_code) + ")." };
-            if (++m_retries >= 3)
-                throw std::runtime_error{ "OAuth token request failed after three attempts. Last failure: " + m_last_failure };
+            const auto limit = token_retry_limit.load(std::memory_order_relaxed);
+            if (limit >= 0 && m_retries >= static_cast<unsigned>(limit))
+                throw std::runtime_error{ "OAuth token request failed after " + std::to_string(m_retries) +
+                    " retries. Last failure: " + m_last_failure };
+            if (m_retries < std::numeric_limits<unsigned>::max()) ++m_retries;
             curl_easy_t::resume();
-            m_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds{ m_retries };
+            m_retry_at = std::chrono::steady_clock::now() +
+                std::chrono::seconds{std::min(29u, m_retries) + 1};
         }
     };
 }
@@ -153,6 +152,11 @@ auto google_account_t::default_get() -> google_account_t &
 }
 
 google_account_t::google_account_t() : m_impl{ std::make_unique<implementation_t>() } {}
+auto google_account_t::token_retry_limit_set(int limit) -> void
+{
+    if (limit < -1) throw std::invalid_argument{"Invalid OAuth token retry limit."};
+    token_retry_limit.store(limit, std::memory_order_relaxed);
+}
 google_account_t::google_account_t(std::string address, std::string_view key) : google_account_t{}
 {
     init(std::move(address), key);
