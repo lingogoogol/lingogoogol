@@ -60,13 +60,10 @@ auto blob_queue_t::process() -> void
                 return;
             if (!m_cleared)
             {
-                std::uint64_t size_orig{ m_id.size() };
-                m_id.resize(size_orig + 100);
+                std::vector<std::string> ids;
                 for (std::uint64_t i{ 0 }; i < 100; ++i)
-                {
-                    m_id[size_orig + i] = nlohmann::json::parse(batch.response_get(i).body_get())["id"];
-                }
-                save_locked();
+                    ids.push_back(nlohmann::json::parse(batch.response_get(i).body_get())["id"]);
+                append_locked(ids);
                 m_condition_variable.notify_all();
             }
             batch.clear();
@@ -108,22 +105,7 @@ auto blob_queue_t::process() -> void
 blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close)
 : m_path{ path }, m_account{ account }, m_close{ close }
 {
-    if (std::filesystem::is_regular_file(path))
-    {
-        std::uint64_t size{ std::filesystem::file_size(path) };
-        std::string content{};
-        content.resize(size);
-        lgo::create_ifstream(path.string()).read(content.data(), size);
-        // Never unlink the last durable queue while the application is running.
-        // Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
-        // and wraps `expr` into a 1-element JSON array instead of copy/move-constructing the JSON value.
-        nlohmann::json arr = nlohmann::json::parse(content);
-        m_id.resize(arr.size());
-        for (std::uint64_t i{ 0 }; i < arr.size(); ++i)
-        {
-            m_id[i] = arr[i];
-        }
-    }
+    recover_locked();
     m_thread = std::thread{ [this]
     {
         try { process(); }
@@ -164,6 +146,7 @@ blob_queue_t::~blob_queue_t()
 auto blob_queue_t::get() -> std::string
 {
     std::unique_lock lock{m_mutex};
+    if (m_needs_recovery) recover_locked();
     while (!m_stopped && !m_error && !m_control->paused && (m_clearing || m_id.size() <= 1))
         m_condition_variable.wait_for(lock, std::chrono::milliseconds{50});
     if (m_stopped)
@@ -171,15 +154,15 @@ auto blob_queue_t::get() -> std::string
     if (m_error) std::rethrow_exception(m_error);
     if (m_control->paused)
         throw std::runtime_error{m_control->reason()};
-    auto result{m_id.front()};
-    m_id.pop_front();
-    save_locked();
+    auto result{m_id.back()};
+    trim_locked(1);
     return result;
 }
 
 auto blob_queue_t::get(std::uint64_t count, const std::atomic_bool *cancelled) -> std::vector<std::string>
 {
     std::unique_lock lock{ m_mutex };
+    if (m_needs_recovery) recover_locked();
     while (!m_stopped && !m_error && !m_control->paused && (m_clearing || m_id.size() < count))
     {
         if (cancelled && cancelled->load())
@@ -192,9 +175,8 @@ auto blob_queue_t::get(std::uint64_t count, const std::atomic_bool *cancelled) -
     if (m_error) std::rethrow_exception(m_error);
     if (m_control->paused)
         throw std::runtime_error{m_control->reason()};
-    std::vector<std::string> out{ m_id.begin(), m_id.begin() + count };
-    m_id.erase(m_id.begin(), m_id.begin() + count);
-    save_locked();
+    std::vector<std::string> out{ m_id.end()-count, m_id.end() };
+    trim_locked(count);
     return out;
 }
 
@@ -228,8 +210,8 @@ auto blob_queue_t::clear_begin() -> void
 auto blob_queue_t::clear_end() -> void
 {
     std::unique_lock lock{ m_mutex };
-    m_id.clear();
-    save_locked();
+    if (m_needs_recovery) recover_locked();
+    trim_locked(m_id.size());
     m_cleared = true;
     m_clearing = false;
     lock.unlock();
@@ -237,9 +219,55 @@ auto blob_queue_t::clear_end() -> void
     return;
 }
 
-auto blob_queue_t::save_locked() -> void
+auto blob_queue_t::recover_locked() -> void
 {
-    storage_atomic_write(m_path, nlohmann::json(m_id).dump());
+    auto journal=m_path; journal+=".tail";
+    if (std::filesystem::exists(journal))
+    {
+        const auto edit=nlohmann::json::parse(storage_read(journal));
+        storage_rewrite_tail(m_path,edit.at("offset"),edit.at("tail").get<std::string>());
+    }
+    if (!std::filesystem::exists(m_path)) storage_atomic_write(m_path,"[]");
+    const auto content=storage_read(m_path);
+    const auto ids=nlohmann::json::parse(content).get<std::deque<std::string>>();
+    m_file_size=content.size();
+    // Existing queues can contain whitespace. Canonicalize once at load;
+    // subsequent edits serialize only the IDs being appended or removed.
+    const auto canonical=nlohmann::json(ids).dump();
+    if (content!=canonical) write_tail_locked(0,canonical);
+    m_id=ids;
+    m_needs_recovery=false;
+}
+auto blob_queue_t::write_tail_locked(std::uint64_t offset, const std::string& tail) -> void
+{
+    auto journal=m_path; journal+=".tail";
+    m_needs_recovery=true;
+    // Keep the latest edit even after success: replay is idempotent. It also
+    // repairs a truncated/partially overwritten JSON suffix after termination.
+    // Replacing this small journal durably always precedes editing live bytes.
+    storage_atomic_write(journal,nlohmann::json{{"offset",offset},{"tail",tail}}.dump());
+    storage_rewrite_tail(m_path,offset,tail);
+    m_file_size=offset+tail.size();
+    m_needs_recovery=false;
+}
+auto blob_queue_t::append_locked(const std::vector<std::string>& ids) -> void
+{
+    if (m_needs_recovery) recover_locked();
+    if (ids.empty()) return;
+    auto tail=nlohmann::json(ids).dump().substr(1);
+    if (!m_id.empty()) tail.insert(tail.begin(),',');
+    write_tail_locked(m_file_size-1,tail);
+    m_id.insert(m_id.end(),ids.begin(),ids.end());
+}
+auto blob_queue_t::trim_locked(std::size_t count) -> void
+{
+    if (!count) return;
+    auto size=m_file_size;
+    for (auto entry=m_id.end()-count;entry!=m_id.end();++entry)
+        size-=nlohmann::json(*entry).dump().size()+1;
+    if (count==m_id.size()) size=2;
+    write_tail_locked(size-1,"]");
+    m_id.erase(m_id.end()-count,m_id.end());
 }
 
 auto blob_queue_t::retry() -> void

@@ -341,6 +341,7 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
             limits = {'unavailable': 2, 'transport': 2, 'retry-zero': 0,
                       'retry-one': 1, 'retry-four': 4, 'retry-manual': 1}
             (test / 'settings.json').write_text(json.dumps({'network_retries': limits.get(mode, -1)}))
+            (test / 'test-queue.tail').unlink(missing_ok=True)
             (test / 'test-queue').write_text('[]')
             (test / 'logfile/token-refresh.txt').unlink(missing_ok=True)
             try:

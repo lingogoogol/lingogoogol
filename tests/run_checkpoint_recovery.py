@@ -23,7 +23,8 @@ with tempfile.TemporaryDirectory(prefix='storage-checkpoint-') as directory:
     env = {**os.environ, 'WINEDEBUG': '-all', 'WINEPREFIX': str(test/'wine'),
            'STORAGE_GPU_TEST_PORT': '9'}
     try:
-        phases = sys.argv[1:] or ('sharing', 'resume', 'scale-256', 'scale-512', 'scale-1024', 'fresh')
+        phases = sys.argv[1:] or ('sharing', 'resume', 'queue-crash', 'queue-resume',
+                                 'scale-256', 'scale-512', 'scale-1024', 'fresh')
         for phase in phases:
             result = subprocess.run(['wine64', str(test/'test.exe'), phase], cwd=test,
                                     env=env, capture_output=True, text=True, timeout=90)

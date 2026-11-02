@@ -91,6 +91,28 @@ auto storage_read(const std::filesystem::path& path) -> std::string
         throw std::runtime_error{"Cannot read: " + path.string()};
     return {std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
 }
+auto storage_rewrite_tail(const std::filesystem::path& path, std::uint64_t offset,
+                          std::string_view tail) -> void
+{
+    const auto handle=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,
+                                 OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if (handle==INVALID_HANDLE_VALUE) throw std::runtime_error{"Cannot edit queue: "+path.string()};
+    struct close_t { HANDLE handle; ~close_t() { CloseHandle(handle); } } close{handle};
+    LARGE_INTEGER position;
+    position.QuadPart=static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(handle,position,nullptr,FILE_BEGIN))
+        throw std::runtime_error{"Cannot seek queue: "+path.string()};
+    while (!tail.empty())
+    {
+        DWORD written{};
+        const auto count=static_cast<DWORD>(std::min<std::size_t>(tail.size(),0x40000000));
+        if (!WriteFile(handle,tail.data(),count,&written,nullptr) || !written)
+            throw std::runtime_error{"Cannot write queue tail: "+path.string()};
+        tail.remove_prefix(written);
+    }
+    if (!SetEndOfFile(handle) || !FlushFileBuffers(handle))
+        throw std::runtime_error{"Cannot flush queue tail: "+path.string()};
+}
 auto storage_atomic_write(const std::filesystem::path& path, std::string_view content) -> void
 {
     if (path.has_parent_path())

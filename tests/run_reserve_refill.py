@@ -92,6 +92,8 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
         server.mode = mode
         server.attempts = server.active = server.maximum = 0
         server.part_counts = Counter()
+        # Each scenario replaces the complete queue, including its tail edit.
+        (test/'test-queue.tail').unlink(missing_ok=True)
         (test/'test-queue').write_text(json.dumps(['reserved']*initial))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:

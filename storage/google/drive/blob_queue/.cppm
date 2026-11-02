@@ -17,6 +17,8 @@ export {
         std::thread m_thread{};
         std::condition_variable m_condition_variable{};
         std::filesystem::path m_path{};
+        std::uint64_t m_file_size{2};
+        bool m_needs_recovery{};
         google_account_t* m_account{};
         const std::atomic_bool* m_close{};
         std::atomic_bool m_stopped{false};
@@ -29,7 +31,10 @@ export {
 
         curl_multi_worker_t m_worker;
         std::shared_ptr<request_control_t> m_control{std::make_shared<request_control_t>()};
-        auto save_locked() -> void;
+        auto recover_locked() -> void;
+        auto write_tail_locked(std::uint64_t offset, const std::string& tail) -> void;
+        auto append_locked(const std::vector<std::string>& ids) -> void;
+        auto trim_locked(std::size_t count) -> void;
         auto process() -> void;
 
       public:

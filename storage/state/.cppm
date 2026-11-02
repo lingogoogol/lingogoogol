@@ -7,6 +7,9 @@ export {
     // All snapshots are replaced atomically, after flushing their temporary file.
     auto storage_atomic_write(const std::filesystem::path& path, std::string_view content) -> void;
     auto storage_flush_file(const std::filesystem::path& path) -> void;
+    // Caller must durably journal this edit before changing the live file.
+    auto storage_rewrite_tail(const std::filesystem::path& path, std::uint64_t offset,
+                              std::string_view tail) -> void;
     auto storage_read(const std::filesystem::path& path) -> std::string;
     auto storage_digest(std::string_view content) -> std::string;
 

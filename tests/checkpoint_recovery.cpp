@@ -71,6 +71,48 @@ int main(int argc, char** argv)
             check(replay.allocate("file:a",1,reserve).front()=="id-a" && reservations==1,"Replay consumed another ID.");
             check(storage_read("dirty/state")==initial,"An entity update rewrote the initial snapshot.");
         }
+        else if (phase == "queue-crash")
+        {
+            storage_atomic_write("tail-queue",json::array({"quoted-\"-\\", "中文", "last"}).dump());
+            std::atomic_bool close{true};
+            google_account_t account;
+            blob_queue_t queue{"tail-queue",&account,&close};
+            check(queue.get(1).front()=="last","Queue did not reserve from its tail.");
+            queue.stop();
+            const auto before=storage_read("tail-queue");
+            // Simulate termination after journaling an append and writing only
+            // its comma. Recovery must repair the malformed live JSON first.
+            const auto offset=before.size()-1;
+            storage_atomic_write("tail-queue.tail",json{{"offset",offset},{"tail",",\"recovered\"]"}}.dump());
+            storage_rewrite_tail("tail-queue",offset,",");
+            std::_Exit(0);
+        }
+        else if (phase == "queue-resume")
+        {
+            std::atomic_bool close{true};
+            google_account_t account;
+            {
+                blob_queue_t queue{"tail-queue",&account,&close};
+                check(queue.get(1).front()=="recovered","Interrupted queue append did not recover.");
+                // A journal commit followed by a locked live file must not
+                // hand out an ID whose removal has not been flushed.
+                auto reader=CreateFileW(L"tail-queue",GENERIC_READ,FILE_SHARE_READ,
+                                        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                check(reader!=INVALID_HANDLE_VALUE,"Cannot lock live queue.");
+                bool failed{};
+                try { queue.get(1); } catch (const std::runtime_error&) { failed=true; }
+                CloseHandle(reader);
+                check(failed,"Queue handed out an ID after a failed live-file write.");
+                check(queue.get(1).front()=="quoted-\"-\\","Queue retried an ID removed by its durable edit.");
+                check(json::parse(storage_read("tail-queue")).empty(),"Queue did not truncate to an empty array.");
+                queue.stop();
+            }
+            {
+                blob_queue_t queue{"tail-queue",&account,&close};
+                check(queue.count()==0,"Empty queue recovery restored consumed IDs.");
+                queue.stop();
+            }
+        }
         else if (phase == "fresh" || phase.starts_with("scale-"))
         {
             const std::size_t files=phase=="fresh" ? 1945 : std::stoul(phase.substr(6));
@@ -78,6 +120,7 @@ int main(int argc, char** argv)
             const std::string address="fixture@storage-ai-fixture.iam.gserviceaccount.com";
             std::filesystem::remove_all("fresh-input");
             std::filesystem::remove_all("fresh-journal");
+            std::filesystem::remove("fresh-queue.tail");
             std::filesystem::create_directories("fresh-input/empty-folder");
             for (std::size_t i{};i<files;++i)
                 std::ofstream{std::filesystem::path{"fresh-input"}/std::format("file-{:04}.txt",i)} << "x";
