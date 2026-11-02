@@ -11,6 +11,7 @@ target_sources(
         directory.cpp
         space.cpp
         progress.cpp
+        preparation.cpp
         request.cpp
 )
 

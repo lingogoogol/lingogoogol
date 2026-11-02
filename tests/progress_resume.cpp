@@ -40,7 +40,28 @@ int main(int argc,char** argv)
             lgo::text_line_t::pending_load();
             for (const auto& t:loads.m_task_list) if (t->m_control->paused) throw std::runtime_error{t->m_control->reason()};
         };
-        if (phase=="upload-crash") begin_task(&loads,session,"upload-folder","input/tree",pos);
+        std::shared_ptr<upload_task_t> second;
+        if (phase=="concurrent")
+        {
+            begin_task(&loads,session,"upload-file","input/tree/payload.bin",pos);
+            const auto first=loads.m_task_list.front();
+            while (!multi.pending(first->m_control)) pump();
+            begin_task(&loads,session,"upload-folder","input/many",pos);
+            second=std::dynamic_pointer_cast<upload_task_t>(loads.m_task_list.back());
+            const auto start=std::chrono::steady_clock::now();
+            check(second->m_prepared.wait_for(60s)==std::future_status::ready,
+                  "Folder preparation waited for the preceding upload.");
+            second->m_prepared.get();
+            check(second->m_entity_arr.size()==1946 && second->m_size==1945,"Concurrent preparation lost files.");
+            check(first->m_result==task_result_t::active && multi.pending(first->m_control),
+                  "The preceding upload was not in flight during preparation.");
+            std::cout << "Concurrent preparation milliseconds: "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count() << '\n';
+            // This phase tests preparation, without transmitting its 1,945
+            // files. The first real upload continues through normal completion.
+            second->m_control->cancel();
+        }
+        else if (phase=="upload-crash") begin_task(&loads,session,"upload-folder","input/tree",pos);
         else if (phase=="download-crash")
             begin_task(&loads,session,"download-folder","output",nlohmann::json::parse(storage_read("fixture-tree")).get<std::string>());
         else restore_tasks(&loads,[&](const auto&) { return session; });
@@ -62,7 +83,14 @@ int main(int argc,char** argv)
                         std::_Exit(0);
             }
         }
-        for (const auto& t:loads.m_finished_tasks) check(t->m_result==task_result_t::completed,"Task failed.");
+        for (const auto& t:loads.m_finished_tasks)
+            check(t==second ? t->m_result==task_result_t::cancelled : t->m_result==task_result_t::completed,"Task failed.");
+        if (phase=="concurrent")
+        {
+            check(second->m_result==task_result_t::cancelled,"Prepared folder cancellation did not drain.");
+            std::cout << "PASS: concurrent preparation during an active upload\n";
+            return 0;
+        }
         check(!phase.ends_with("crash"),"Task completed before interruption checkpoint.");
         if (phase=="upload-resume")
         {

@@ -66,6 +66,9 @@ export {
         std::filesystem::path m_path;
         mutable std::mutex m_mutex;
         nlohmann::json m_data;
+        nlohmann::json m_pending=nlohmann::json::object();
+        std::uint64_t m_next_record{};
+        bool m_initial_saved{};
         bool m_finished{};
         bool m_dirty{};
         auto save_locked() -> void;
@@ -81,7 +84,9 @@ export {
         auto path() const -> const std::filesystem::path& { return m_path; }
         auto set(std::string key, nlohmann::json value) -> void;
         auto allocate(std::string key, std::size_t count,
-                      const std::function<std::vector<std::string>(std::size_t)>& reserve)
+                      const std::function<std::vector<std::string>(std::size_t)>& reserve,
+                      const nlohmann::json& fields=nlohmann::json::object(),
+                      const std::string& address={}, const std::string& type={})
             -> std::vector<std::string>;
         auto response(std::string_view key) const -> std::optional<std::string>;
         auto response(std::string_view key, std::string_view value) -> void;

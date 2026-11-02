@@ -233,10 +233,46 @@ auto request_control_t::reason() const -> std::string
 task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent)
     : m_path{std::move(path)}, m_data(std::move(intent))
 {
+    m_initial_saved=std::filesystem::exists(m_path/"state");
+    if (!m_initial_saved) return;
+    std::vector<std::filesystem::path> records;
+    for (const auto& entry : std::filesystem::directory_iterator{m_path})
+        if (entry.path().extension()==".record") records.push_back(entry.path());
+    std::ranges::sort(records);
+    for (const auto& record : records)
+    {
+        const auto stem=record.stem().string();
+        std::uint64_t sequence{};
+        const auto [end,error]=std::from_chars(stem.data(),stem.data()+stem.size(),sequence);
+        if (error!=std::errc{} || end!=stem.data()+stem.size() || sequence!=m_next_record)
+            throw std::runtime_error{"Invalid task record sequence: "+record.string()};
+        const auto changes=nlohmann::json::parse(storage_read(record));
+        if (changes.contains("fields"))
+            for (const auto& [key,value] : changes.at("fields").items()) m_data[key]=value;
+        if (changes.contains("allocations"))
+            for (const auto& [key,value] : changes.at("allocations").items()) m_data["allocations"][key]=value;
+        if (changes.contains("routing"))
+            for (const auto& [kind,entries] : changes.at("routing").items())
+                for (const auto& [id,value] : entries.items()) m_data["routing"][kind][id]=value;
+        ++m_next_record;
+    }
 }
 auto task_journal_t::save_locked() -> void
 {
-    storage_atomic_write(m_path / "state", m_data.dump());
+    if (!m_initial_saved)
+    {
+        storage_atomic_write(m_path/"state",m_data.dump());
+        m_initial_saved=true;
+    }
+    else
+    {
+        // Persist only this change, never the accumulated entity/routing table.
+        // Atomic files make interrupted writes ignorable (.tmp); the initial
+        // intent plus the ordered records reconstruct the in-memory snapshot.
+        storage_atomic_write(m_path/std::format("{:020}.record",m_next_record),m_pending.dump());
+        ++m_next_record;
+    }
+    m_pending=nlohmann::json::object();
     m_dirty=false;
 }
 auto task_journal_t::data() const -> nlohmann::json
@@ -271,11 +307,13 @@ auto task_journal_t::record_routing(const std::vector<std::string>& ids, const s
     for (const auto& id : ids)
     {
         auto& owner=m_data["routing"]["owners"][id];
-        if (owner!=address) { owner=address; m_dirty=true; }
+        if (owner!=address)
+        { owner=address; m_pending["routing"]["owners"][id]=address; m_dirty=true; }
         if (!type.empty())
         {
             auto& kind=m_data["routing"]["kinds"][id];
-            if (kind!=type) { kind=type; m_dirty=true; }
+            if (kind!=type)
+            { kind=type; m_pending["routing"]["kinds"][id]=type; m_dirty=true; }
         }
     }
     if (m_dirty) save_locked();
@@ -287,30 +325,49 @@ auto task_journal_t::set(std::string key, nlohmann::json value) -> void
         return;
     const auto found=m_data.find(key);
     if (found==m_data.end() || *found!=value)
-    { m_data[std::move(key)] = std::move(value); m_dirty=true; }
+    { m_pending["fields"][key]=value; m_data[std::move(key)] = std::move(value); m_dirty=true; }
     // A failed flush must remain dirty even if a retry supplies the same value.
     if (m_dirty) save_locked();
 }
 auto task_journal_t::allocate(std::string key, std::size_t count,
-                              const std::function<std::vector<std::string>(std::size_t)>& reserve)
+                              const std::function<std::vector<std::string>(std::size_t)>& reserve,
+                              const nlohmann::json& fields, const std::string& address, const std::string& type)
     -> std::vector<std::string>
 {
     std::lock_guard lock{m_mutex};
     if (m_finished)
         throw std::runtime_error{"Task cancelled."};
     auto& entries{m_data["allocations"]};
+    std::vector<std::string> result;
     if (entries.contains(key))
     {
-        auto result{entries.at(key).get<std::vector<std::string>>()};
+        result=entries.at(key).get<std::vector<std::string>>();
         if (result.size() != count)
             throw std::runtime_error{"Upload source changed since the saved task."};
-        if (m_dirty) save_locked();
-        return result;
     }
-    auto result{reserve(count)};
-    entries[std::move(key)] = result;
-    m_dirty=true;
-    save_locked();
+    else
+    {
+        result=reserve(count);
+        if (result.size()!=count) throw std::runtime_error{"Incomplete ID reservation."};
+        m_pending["allocations"][key]=result;
+        entries[std::move(key)]=result;
+        m_dirty=true;
+    }
+    for (const auto& [field,value] : fields.items())
+        if (!m_data.contains(field) || m_data.at(field)!=value)
+        { m_data[field]=value; m_pending["fields"][field]=value; m_dirty=true; }
+    if (!address.empty())
+        for (const auto& id : result)
+        {
+            for (const auto& [kind,value] : std::array<std::pair<std::string,std::string>,2>{{{"owners",address},{"kinds",type}}})
+            {
+                if (value.empty()) continue;
+                auto& stored=m_data["routing"][kind][id];
+                if (stored!=value)
+                { stored=value; m_pending["routing"][kind][id]=value; m_dirty=true; }
+            }
+        }
+    if (m_dirty) save_locked();
     return result;
 }
 auto task_journal_t::response(std::string_view key) const -> std::optional<std::string>

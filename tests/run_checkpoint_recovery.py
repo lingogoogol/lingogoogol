@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 source = Path(__file__).resolve().parents[1]
@@ -19,9 +20,11 @@ with tempfile.TemporaryDirectory(prefix='storage-checkpoint-') as directory:
     fixture['link'](test/'test.exe', test/'test.obj', test/'easy.obj')
     for dll in (fixture['runtime']/'bin').glob('*.dll'):
         shutil.copy2(dll, test/dll.name)
-    env = {**os.environ, 'WINEDEBUG': '-all', 'WINEPREFIX': str(test/'wine')}
+    env = {**os.environ, 'WINEDEBUG': '-all', 'WINEPREFIX': str(test/'wine'),
+           'STORAGE_GPU_TEST_PORT': '9'}
     try:
-        for phase in ('sharing', 'resume'):
+        phases = sys.argv[1:] or ('sharing', 'resume', 'scale-256', 'scale-512', 'scale-1024', 'fresh')
+        for phase in phases:
             result = subprocess.run(['wine64', str(test/'test.exe'), phase], cwd=test,
                                     env=env, capture_output=True, text=True, timeout=90)
             print(result.stdout, end='', flush=True)

@@ -56,10 +56,12 @@ with tempfile.TemporaryDirectory(prefix='storage-progress-') as directory:
     (tree/'empty-folder').mkdir()
     (tree/'payload.bin').write_bytes(bytes(range(256))*32000)
     for i in range(16):(tree/f'empty-{i:03}.txt').touch()
+    many=test/'input/many';many.mkdir()
+    for i in range(1945):(many/f'file-{i:04}.txt').write_text('x')
     threading.Thread(target=server.serve_forever,daemon=True).start()
     env={**os.environ,'WINEDEBUG':'-all','WINEPREFIX':str(base/'wine'), 'STORAGE_GPU_TEST_PORT':str(server.server_port)}
     try:
-        for phase in ('upload-crash','upload-resume','download-crash','download-resume'):
+        for phase in ('concurrent','upload-crash','upload-resume','download-crash','download-resume'):
             if phase=='upload-resume':
                 nodes=checkpoints(test);forbid_upload(server,nodes)
                 assert len(server.forbidden)>100,'Crash fixture did not persist completed work'

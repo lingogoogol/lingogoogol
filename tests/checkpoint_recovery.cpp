@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 import std;
 import storage.state;
+import storage.google;
 import storage.kernel;
 using nlohmann::json;
 using namespace std::chrono_literals;
@@ -32,18 +33,127 @@ int main(int argc, char** argv)
             check(storage_read("checkpoint")=="new","Replacement did not survive a short-lived reader.");
             storage_atomic_write("dirty/state",R"({"value":0})");
             task_journal_t journal{"dirty",{{"value",0}}};
-            reader=CreateFileW(L"dirty/state",GENERIC_READ,FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-            check(reader!=INVALID_HANDLE_VALUE,"Cannot lock original checkpoint.");
+            const auto initial=storage_read("dirty/state");
+            reader=CreateFileW(L"dirty/00000000000000000000.record.tmp",GENERIC_READ,FILE_SHARE_READ,
+                               nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            check(reader!=INVALID_HANDLE_VALUE,"Cannot lock next record.");
             bool failed{};
             try { journal.set("value",1); }
-            catch (const std::runtime_error& e) { failed=std::string{e.what()}.find("Windows error")!=std::string::npos; }
+            catch (const std::runtime_error&) { failed=true; }
             CloseHandle(reader);
-            check(failed && json::parse(storage_read("dirty/state")).at("value")==0,
-                  "Permanent lock did not preserve the previous checkpoint and error code.");
+            check(failed && storage_read("dirty/state")==initial,
+                  "Record failure changed the initial snapshot.");
             journal.set("value",1);
-            check(json::parse(storage_read("dirty/state")).at("value")==1,
-                  "Retry discarded a dirty value because its in-memory copy was unchanged.");
+            task_journal_t restored{"dirty",json::parse(initial)};
+            check(restored.field("value")==json(1),"Retry discarded an unchanged dirty field.");
+            reader=CreateFileW(L"dirty/00000000000000000001.record.tmp",GENERIC_READ,FILE_SHARE_READ,
+                               nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+            check(reader!=INVALID_HANDLE_VALUE,"Cannot lock entity record.");
+            int reservations{};
+            auto reserve=[&](std::size_t count)
+            {
+                ++reservations;
+                check(count==1,"Preparation reserved more than one entity.");
+                return std::vector<std::string>{"id-a"};
+            };
+            const auto fields=json{{"source:a",{{"size",1},{"mtime",2}}},{"owner:file:a","fixture"}};
+            failed=false;
+            try { journal.allocate("file:a",1,reserve,fields,"fixture","file"); }
+            catch (const std::runtime_error&) { failed=true; }
+            CloseHandle(reader);
+            check(failed,"Locked entity record did not report failure.");
+            check(journal.allocate("file:a",1,reserve,fields,"fixture","file")==std::vector<std::string>{"id-a"} && reservations==1,
+                  "Entity flush retry allocated a replacement ID.");
+            task_journal_t replay{"dirty",json::parse(storage_read("dirty/state"))};
+            const auto entity=replay.data();
+            check(entity.at("allocations").at("file:a").at(0)=="id-a" && entity.at("source:a").at("size")==1 &&
+                  entity.at("routing").at("owners").at("id-a")=="fixture","Entity replay lost metadata or ownership.");
+            check(replay.allocate("file:a",1,reserve).front()=="id-a" && reservations==1,"Replay consumed another ID.");
+            check(storage_read("dirty/state")==initial,"An entity update rewrote the initial snapshot.");
+        }
+        else if (phase == "fresh" || phase.starts_with("scale-"))
+        {
+            const std::size_t files=phase=="fresh" ? 1945 : std::stoul(phase.substr(6));
+            constexpr std::size_t reserve_count=30000;
+            const std::string address="fixture@storage-ai-fixture.iam.gserviceaccount.com";
+            std::filesystem::remove_all("fresh-input");
+            std::filesystem::remove_all("fresh-journal");
+            std::filesystem::create_directories("fresh-input/empty-folder");
+            for (std::size_t i{};i<files;++i)
+                std::ofstream{std::filesystem::path{"fresh-input"}/std::format("file-{:04}.txt",i)} << "x";
+            auto saved=json{{"routing",{{"owners",json::object()},{"kinds",json::object()}}}};
+            // A preceding upload may have populated the shared session's
+            // routing table before the new task's initial snapshot is taken.
+            for (int i{};i<60000;++i)
+            {
+                const auto id=std::format("previous-content-{:026}",i);
+                saved["routing"]["owners"][id]=address;
+                saved["routing"]["kinds"][id]="data";
+            }
+            auto initial=json::array();
+            for (std::size_t i{};i<reserve_count;++i) initial.push_back("main-"+std::to_string(i));
+            storage_atomic_write("fresh-queue",initial.dump());
+            std::atomic_bool close{};
+            auto account=std::make_shared<google_account_t>();
+            auto queue=std::make_shared<blob_queue_t>("fresh-queue",account.get(),&close);
+            auto session=std::make_shared<storage_session_t>();
+            session->accounts[address]=account;
+            session->queues[address]=queue;
+            session->restore_routing(saved.at("routing"));
+            storage_atomic_write("fresh-journal/state",saved.dump());
+            auto journal=std::make_shared<task_journal_t>("fresh-journal",std::move(saved));
+            // Simulate another transfer consuming the same reserve while the
+            // new folder prepares. All IDs must be distinct and durable.
+            auto previous=std::async(std::launch::async,[&]
+            {
+                std::vector<std::string> ids;
+                for (int i{};i<32;++i) ids.push_back(queue->get(1).front());
+                return ids;
+            });
+            upload_task_t task;
+            task.m_session=session; task.m_journal=journal;
+            const auto start=std::chrono::steady_clock::now();
+            folder_upload(queue.get(),&task,"fresh-input",nullptr);
+            const auto elapsed=std::chrono::steady_clock::now()-start;
+            const auto other=previous.get();
+            queue->stop();
+            check(task.m_entity_arr.size()==files+2 && task.m_size==files,"Fresh preparation lost entries.");
+            const auto initial_state=storage_read("fresh-journal/state");
+            task_journal_t reloaded{"fresh-journal",json::parse(initial_state)};
+            const auto durable=reloaded.data();
+            std::uint64_t record_bytes{};
+            std::size_t record_count{};
+            for (const auto& entry : std::filesystem::directory_iterator{"fresh-journal"})
+                if (entry.path().extension()==".record")
+                { ++record_count; record_bytes+=entry.file_size(); }
+            check(record_count==files+2,"Preparation did not save one record per entity.");
+            check(record_bytes<files*2048,"New entities rewrote the inherited routing table.");
+            std::set<std::string> allocated(other.begin(),other.end());
+            for (const auto& entity : task.m_entity_arr)
+            {
+                const auto key=entity->m_type+":"+entity->m_path_local;
+                const auto id=durable.at("allocations").at(key).at(0).get<std::string>();
+                check(allocated.insert(id).second,"Concurrent jobs reused an ID.");
+                check(durable.at("owner:"+key)==address && durable.at("routing").at("owners").at(id)==address,
+                      "Preparation did not durably record account ownership.");
+            }
+            const auto remaining=json::parse(storage_read("fresh-queue"));
+            check(remaining.size()+allocated.size()==reserve_count,"Queue consumption was not durable.");
+            for (const auto& id : remaining) check(!allocated.contains(id.get<std::string>()),"Reserved ID remained in queue.");
+            check(elapsed<60s,"Fresh entity preparation is too slow.");
+            // Reload from disk, with no usable queue: IDs and source stamps
+            // must replay without changing the checkpoint or touching network.
+            upload_task_t resumed;
+            resumed.m_session=session;
+            resumed.m_journal=std::make_shared<task_journal_t>("fresh-journal",json::parse(initial_state));
+            const auto stamp=std::filesystem::last_write_time("fresh-journal/state");
+            folder_upload(nullptr,&resumed,"fresh-input",nullptr);
+            check(std::filesystem::last_write_time("fresh-journal/state")==stamp,"Fresh task replay rewrote checkpoint.");
+            check(resumed.m_entity_arr.size()==task.m_entity_arr.size(),"Fresh replay lost entries.");
+            check(storage_read("fresh-journal/state")==initial_state,"Preparation rewrote its initial snapshot.");
+            std::cout << "Files: " << files << "; entity records: " << record_count << "; total bytes: " << record_bytes << '\n';
+            std::cout << "Fresh preparation milliseconds: "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << '\n';
         }
         else if (phase == "resume")
         {
