@@ -219,7 +219,11 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                     }
                     else
                     {
-                        const auto reason = successful ? easy_ptr->failure_reason() : "Network connection failed.";
+                        // curl's static error text contains no request data. Keep it
+                        // with the failure so nested OAuth retries retain the cause.
+                        const auto reason = successful ? easy_ptr->failure_reason() :
+                            std::format("Network connection failed (curl {}: {}).",
+                                static_cast<int>(message->data.result), curl_easy_strerror(message->data.result));
                         lgo::log_file
                         (
                             "A transfer failed in curl_multi_t::run:\n"

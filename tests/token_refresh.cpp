@@ -158,11 +158,11 @@ auto recovery(lgo::engine_t& engine) -> void
     std::println("PASS: asynchronous initial refresh, expiry, 16 concurrent/late 401s, PATCH/POST rewind, nested batch 401, synchronous easy/multi and permanent 401 limit; GUI frames={}", frames);
 }
 
-auto failure_case(lgo::engine_t& engine, bool temporary) -> void
+auto failure_case(lgo::engine_t& engine, std::string_view mode) -> void
 {
     curl_multi_worker_t multi;
     for (int i{}; i < 8; ++i) multi.add(request("/warm/" + std::to_string(i)));
-    if (temporary)
+    if (mode == "temporary")
     {
         receive(multi, engine, 8);
         check(raw("/control/report")["tokens"] == 3, "Transient OAuth failures were not retried correctly.");
@@ -177,6 +177,14 @@ auto failure_case(lgo::engine_t& engine, bool temporary) -> void
             catch (const std::runtime_error& error)
             {
                 check(std::string_view{ error.what() }.find("OAuth") != std::string_view::npos, "OAuth failure lost its context.");
+                if (mode == "unavailable" || mode == "transport")
+                {
+                    const std::string_view cause = mode == "unavailable" ?
+                        "Last failure: HTTP request failed (status 503)." :
+                        "Last failure: Network connection failed (curl 52:";
+                    check(std::string_view{error.what()}.find(cause) != std::string_view::npos,
+                        "OAuth retry exhaustion lost its final HTTP/transport cause.");
+                }
                 failed = true;
             }
             check(std::chrono::steady_clock::now() < deadline, "OAuth failure was retried indefinitely.");
@@ -462,7 +470,7 @@ auto http_logging(lgo::engine_t& engine) -> void
     };
     const auto disabled_begin = logs().size();
     background_failure("/diagnostic/account-off");
-    check(background_failure("/diagnostic/connection-reset") == "Network connection failed.",
+    check(background_failure("/diagnostic/connection-reset").starts_with("Network connection failed (curl 52:"),
           "Fixture did not exercise account attribution for connection errors.");
     const auto text = logs();
     const auto disabled_text = text.substr(disabled_begin);
@@ -555,7 +563,7 @@ int main(int argc, char** argv)
         else if (mode == "http-logging") http_logging(engine);
         else if (mode == "recovery") recovery(engine);
         else if (mode == "shutdown" || mode == "queue-error") queue_case(engine, mode == "shutdown");
-        else failure_case(engine, mode == "temporary");
+        else failure_case(engine, mode);
         google_account_t::default_get().stop();
         engine.flush();
         lgo::log_file("finished_all!\n");

@@ -23,6 +23,7 @@ namespace
         std::string m_key;
         bool m_signed{};
         unsigned m_retries{};
+        std::string m_last_failure;
         std::chrono::steady_clock::time_point m_retry_at{};
         std::chrono::steady_clock::time_point m_attempt_started{};
     public:
@@ -88,12 +89,19 @@ namespace
             }
             catch (...) { throw std::runtime_error{ "Invalid OAuth token response." }; }
         }
+        auto failed(std::string reason) -> void override
+        {
+            // Preserve the safe HTTP/transport summary before resume() rewinds
+            // the attempt. Never copy token response bodies into this exception.
+            m_last_failure = std::move(reason);
+            curl_easy_t::failed(m_last_failure);
+        }
         auto resume() -> void override
         {
             if (m_response_code >= 400 && m_response_code < 500)
                 throw std::runtime_error{ "OAuth token request rejected (HTTP " + std::to_string(m_response_code) + ")." };
             if (++m_retries >= 3)
-                throw std::runtime_error{ "OAuth token request failed after three attempts." };
+                throw std::runtime_error{ "OAuth token request failed after three attempts. Last failure: " + m_last_failure };
             curl_easy_t::resume();
             m_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds{ m_retries };
         }

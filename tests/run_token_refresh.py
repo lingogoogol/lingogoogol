@@ -20,7 +20,7 @@ build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
 modes = ('http-logging', 'batch-headers', 'retry-backoff', 'batch-errors', 'recovery', 'temporary', 'invalid',
-         'malformed', 'missing', 'lifetime', 'unavailable', 'queue-error', 'shutdown')
+         'malformed', 'missing', 'lifetime', 'unavailable', 'transport', 'queue-error', 'shutdown')
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', choices=modes, default=modes)
 args = parser.parse_args()
@@ -120,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
             if state.mode == 'shutdown':
                 state.done.wait(30)
                 return self.respond(500, {})
+            if state.mode == 'transport':
+                self.close_connection = True
+                return
             if state.mode in ('invalid', 'queue-error'):
                 return self.respond(400, {'error': 'invalid_grant', 'error_description': 'sensitive-response-marker'})
             if state.mode == 'unavailable' or (state.mode == 'temporary' and issued < 3):
@@ -328,12 +331,19 @@ with tempfile.TemporaryDirectory(prefix='storage-token-test-') as directory:
                     raise RuntimeError(f'{mode} failed with exit {result.returncode}.')
                 report = server.state.report()
                 assert not report['violations'], report['violations']
-                expected = 0 if mode == 'retry-backoff' else 2 if mode == 'http-logging' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable') else 1
+                expected = 0 if mode == 'retry-backoff' else 2 if mode == 'http-logging' else 7 if mode == 'recovery' else 3 if mode in ('temporary', 'unavailable', 'transport') else 1
                 assert report['tokens'] == expected, (mode, report['tokens'], expected)
                 log = (test / 'logfile/token-refresh.txt').read_text(errors='replace')
                 assert 'finished_all!' in log and 'uncaught exception:' not in log
-                if mode in ('invalid', 'queue-error', 'temporary', 'unavailable'):
+                if mode in ('invalid', 'queue-error', 'temporary', 'unavailable', 'transport'):
                     assert 'account=local-test@example.invalid' in log, 'OAuth failure lost its service account.'
+                if mode in ('unavailable', 'transport'):
+                    cause = 'HTTP request failed (status 503).' if mode == 'unavailable' else 'Network connection failed (curl 52:'
+                    summaries = [line for line in log.splitlines() if 'Request preparation failed:' in line]
+                    assert summaries, 'Missing propagated OAuth failure.'
+                    assert all('Last failure: ' + cause in line and
+                               'account=local-test@example.invalid' in line for line in summaries), \
+                        'OAuth retry exhaustion lost its cause or account.'
                 if mode == 'http-logging':
                     assert all(server.state.diagnostic_counts[prefix + name] == count
                                for prefix in ('sync-', 'bg-')

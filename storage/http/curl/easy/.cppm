@@ -94,7 +94,7 @@ export
         auto runnable() -> bool;
         auto replay() -> bool;
         auto checkpoint() -> void;
-        auto failed(std::string reason) -> void;
+        virtual auto failed(std::string reason) -> void;
         virtual auto saved_response() -> std::string;
         virtual auto restore_response(std::string_view value) -> void;
         virtual auto authentication_failure() const -> bool;
