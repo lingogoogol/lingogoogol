@@ -50,6 +50,10 @@ export namespace lgo
             return std::exchange(m_decision, std::nullopt);
         }
         auto values() const -> std::vector<std::string>;
+        auto set_checkbox_enabled(std::size_t index, bool enabled) -> void
+        {
+            m_checkboxes.at(index).button->set_enabled(enabled);
+        }
         auto error(std::string text) -> void
         {
             m_error->set_text(std::move(text));

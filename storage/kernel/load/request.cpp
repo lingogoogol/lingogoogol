@@ -15,7 +15,8 @@ namespace
     };
 
     auto submit_part(load_state_t& state, curl_multi_worker_t& multi, curl_easy_t&& transport,
-                     const std::shared_ptr<request_group_t>& group, std::size_t index) -> void
+                     const std::shared_ptr<request_group_t>& group, std::size_t index,
+                     std::size_t count, bool batched) -> void
     {
         google_batch_t request{std::move(transport)};
         request.clear();
@@ -23,18 +24,26 @@ namespace
         request.control_set(group->request->m_control);
         request.m_journal = group->request->m_journal;
         request.host_set(group->request->host_get());
-        request.request_add();
-        request.request_get(0) = group->request->request_get(index);
-        request.method_single();
+        for (std::size_t i{};i<count;++i)
+            request.request_get(request.request_add()) = group->request->request_get(index+i);
+        if (batched)
+        {
+            request.google_easy_t::path_set(group->request->path_get());
+            request.boundary_set(group->request->boundary_get());
+            request.method_post();
+        }
+        else request.method_single();
         const auto key = request.interface_get();
-        state.m_end.emplace(key,[group,index](auto& result)
+        state.m_end.emplace(key,[group,index,count](auto& result)
         {
             auto& part = dynamic_cast<google_batch_t&>(*result);
-            group->request->response_get(index) = part.response_get(0);
-            if (--group->remaining) return;
+            for (std::size_t i{};i<count;++i)
+                group->request->response_get(index+i) = part.response_get(i);
+            group->remaining -= count;
+            if (group->remaining) return;
             // Keep the same grouped checkpoint and completion contract as batch
-            // mode. Each successful child also has its own durable response, so
-            // a crash inside a group only resends its unfinished requests.
+            // mode. Each successful envelope has its own durable response, so
+            // rebuilding the same envelopes replays completed children.
             group->request->restore_response(group->request->saved_response());
             group->request->checkpoint();
             // A successful child parked during Pause already returned its
@@ -50,7 +59,9 @@ namespace
 
 auto task_batch_submit(load_state_t& state, curl_multi_worker_t& multi, google_batch_t&& request) -> void
 {
-    if (state.m_settings.batch_request || request.replay())
+    const bool batched = state.m_settings.batch_request;
+    const auto count = batched ? state.m_settings.batch_size : std::size_t{1};
+    if ((batched && request.part_count()<=count) || request.replay())
     {
         multi.add(std::move(request));
         return;
@@ -63,12 +74,15 @@ auto task_batch_submit(load_state_t& state, curl_multi_worker_t& multi, google_b
     group->request = std::make_unique<google_batch_t>(std::move(request));
     // Pending descriptions own no handles. The same GUI pool limits actual
     // HTTP concurrency, even when many content groups are split at once.
-    for (std::size_t index=1; index<group->remaining; ++index)
+    for (std::size_t index=count; index<group->remaining; index+=count)
+    {
+        const auto size = std::min(count,group->remaining-index);
         state.m_pending_parts.push_back({group->request->m_control,
-            [&state,group,index](auto& worker, auto&& easy)
-            { submit_part(state,worker,std::move(easy),group,index); }});
+            [&state,group,index,size,batched](auto& worker, auto&& easy)
+            { submit_part(state,worker,std::move(easy),group,index,size,batched); }});
+    }
     google_easy_t first{curl_easy_t{group->request->take_transport()}};
-    submit_part(state,multi,std::move(first),group,0);
+    submit_part(state,multi,std::move(first),group,0,std::min(count,group->remaining),batched);
 }
 
 auto task_part_begin(load_state_t& state, curl_multi_worker_t& multi, curl_easy_t&& easy) -> bool

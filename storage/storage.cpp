@@ -14,6 +14,7 @@ import lgo.io;
 import lgo.GUI;
 
 import storage.http;
+import storage.encode;
 import storage.google;
 import storage.kernel;
 
@@ -43,6 +44,9 @@ auto app() -> void
     };
     lgo::init_logfile(log_path(settings));
     http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
+    google_batch_t::gzip_enabled_set(settings.batch_gzip);
+    if (settings.content_zstd && !content_zstd_available())
+        lgo::log_file("content_zstd ignored: this build has no zstd.\n");
     google_account_t::token_retry_limit_set(settings.network_retries);
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
@@ -71,6 +75,7 @@ auto app() -> void
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
     runtime.batch_request = settings.batch_request;
+    runtime.batch_size = settings.batch_size;
     auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
@@ -644,6 +649,9 @@ auto app() -> void
                 const auto next_log_path = log_path(result.settings);
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
+                google_batch_t::gzip_enabled_set(result.settings.batch_gzip);
+                if (result.settings.content_zstd && !content_zstd_available())
+                    lgo::log_file("content_zstd ignored: this build has no zstd.\n");
                 google_account_t::token_retry_limit_set(result.settings.network_retries);
                 const bool changed_location{!result.session || !load_state.m_session ||
                     result.session->storage_id != load_state.m_session->storage_id ||
@@ -657,6 +665,7 @@ auto app() -> void
                 settings = result.settings;
                 load_state.m_settings = settings;
                 runtime.batch_request = settings.batch_request;
+                runtime.batch_size = settings.batch_size;
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
                 update_account_status();

@@ -44,10 +44,11 @@ import storage.google;
 //Structure of a file content blob's name:
 //{
 //  "parent": the chunk blob id this content belongs to (str),
-//  "parent_account": owner of parent chunk
+//  "parent_account": owner of parent chunk,
+//  "c": "zstd" (absent = raw), "r": uncompressed byte length
 //}
 
-//A file content blob's description contains base64 encoding of some file content.
+//A file content blob's description contains Base64URL of a fixed raw slice, optionally compressed.
 
 //Structure of a folder blob's name:
 //{
@@ -279,6 +280,7 @@ export
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
     struct upload_task_t: public load_task_t
     {
+        bool m_content_zstd{};
         ~upload_task_t() override
         {
             // Preparation captures this task and writes its containers. Join before member destruction.
@@ -353,6 +355,7 @@ export
         download_file_t* m_file{};
         std::string m_id{};
         std::vector<std::string> m_content_id{};
+        // Decoded raw bytes, including when restored from a saved response.
         std::vector<std::string> m_content{};
         bool m_loaded{ false };
         bool m_received{};

@@ -120,6 +120,8 @@ export
       public:
         auto checkpoint_key() const -> const std::string& { return m_cache_key; }
       protected:
+        // Logical body for diagnostics and stable checkpoints, even if encoded on wire.
+        virtual auto request_body() const -> const std::string&;
         auto configure_transport() -> void;
         static auto debug_callback(CURL*, curl_infotype type, char* data, std::size_t size, void*) -> int;
         static auto read_callback(char* dest, std::size_t, std::size_t size, void* src_void) -> std::size_t;
