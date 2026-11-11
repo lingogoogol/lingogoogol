@@ -530,7 +530,8 @@ auto directory_transfer_begin(directory_task_t& task, curl_multi_worker_t& multi
         {
             // Pull only this account's file jobs, preserving other identities
             // for the next physical request. Never mix users in a batch.
-            for (auto i=task.m_requests.begin(); i!=task.m_requests.end() && requests.size()<100;)
+            for (auto i=task.m_requests.begin(); i!=task.m_requests.end() &&
+                 requests.size()<task.m_state->m_settings.batch_size;)
                 if ((*i)->configure && (*i)->account==first->account)
                 { requests.push_back(*i); i=task.m_requests.erase(i); }
                 else ++i;

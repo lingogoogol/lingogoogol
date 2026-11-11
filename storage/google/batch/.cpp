@@ -1,5 +1,8 @@
 module;
 #include <nlohmann/json.hpp>
+#ifdef LGO_HAVE_ZLIB
+#include <zlib.h>
+#endif
 module storage.google.batch;
 
 import std;
@@ -14,6 +17,36 @@ import storage.google.easy;
 
 namespace
 {
+    std::atomic_bool batch_gzip{};
+
+    #ifdef LGO_HAVE_ZLIB
+    auto gzip_body(const std::string& body) -> std::string
+    {
+        // Batch bodies are bounded; do not silently truncate zlib's uInt input.
+        if (body.size()>std::numeric_limits<uInt>::max())
+            throw std::runtime_error{"Batch body exceeds zlib input limit."};
+        z_stream stream{};
+        if (deflateInit2(&stream,1,Z_DEFLATED,15+16,8,Z_DEFAULT_STRATEGY)!=Z_OK)
+            throw std::runtime_error{"Cannot initialize batch gzip."};
+        struct end_t { z_stream* stream; ~end_t() { deflateEnd(stream); } } end{&stream};
+        stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(body.data()));
+        stream.avail_in = static_cast<uInt>(body.size());
+        std::string result;
+        std::array<char,16384> buffer;
+        int status{};
+        do
+        {
+            stream.next_out = reinterpret_cast<Bytef*>(buffer.data());
+            stream.avail_out = static_cast<uInt>(buffer.size());
+            status = deflate(&stream,Z_FINISH);
+            if (status!=Z_OK && status!=Z_STREAM_END)
+                throw std::runtime_error{"Cannot gzip batch body."};
+            result.append(buffer.data(),buffer.size()-stream.avail_out);
+        } while (status!=Z_STREAM_END);
+        return result;
+    }
+    #endif
+
     auto api_error_reason(const std::string& body) -> std::string
     {
         // Messages may contain filenames, file contents or credentials. Only
@@ -46,6 +79,22 @@ namespace
     }
 }
 
+auto google_batch_t::gzip_available() -> bool
+{
+    #ifdef LGO_HAVE_ZLIB
+    return true;
+    #else
+    return false;
+    #endif
+}
+
+auto google_batch_t::gzip_enabled_set(bool enabled) -> void
+{
+    batch_gzip = enabled && gzip_available();
+    if (!gzip_available())
+        lgo::log_file("batch_gzip disabled: this build has no ZLIB; sending uncompressed batch bodies.\n");
+}
+
 google_batch_t::google_batch_t()
 : google_easy_t{} {}
 
@@ -68,6 +117,8 @@ auto google_batch_t::clear() -> void
     m_id_current = 0;
     m_auth_rejected = false;
     m_direct = false;
+    m_gzip = false;
+    m_body.clear();
     m_failure.clear();
     return;
 }
@@ -128,10 +179,14 @@ auto google_batch_t::method_post() -> void
         throw;
     }
 
+    m_direct = false;
+    m_gzip = batch_gzip.load() && m_host=="https://www.googleapis.com" && m_path=="/batch/drive/v3";
     body_generate();
     header_set("Content-Type", "multipart/mixed; boundary=" + m_boundary);
+    m_header.erase("Content-Encoding");
+    m_header.erase("Content-Length");
 
-    curl_easy_t::method_post(m_body);
+    curl_easy_t::method_post(body_payload());
     return;
 }
 
@@ -286,6 +341,11 @@ auto google_batch_t::parse() -> void
     }
 }
 
+auto google_batch_t::error_context() const -> std::string
+{
+    return google_easy_t::error_context() + (m_gzip ? " gzip" : "");
+}
+
 auto google_batch_t::failure_reason() const -> std::string
 {
     return m_failure.empty() ? curl_easy_t::failure_reason() : m_failure;
@@ -317,8 +377,30 @@ auto google_batch_t::resume() -> void
     body_generate();
     // The method remains POST. Replacing just the pending body preserves the
     // authentication retry budget; method_post() would start a new request.
-    m_read->m_payload = m_body;
+    m_read->m_payload = body_payload();
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_POSTFIELDSIZE_LARGE,
+        static_cast<curl_off_t>(m_read->m_payload.size())));
     return;
+}
+
+auto google_batch_t::request_body() const -> const std::string&
+{
+    return m_direct ? curl_easy_t::request_body() : m_body;
+}
+
+auto google_batch_t::body_payload() -> std::string
+{
+    #ifdef LGO_HAVE_ZLIB
+    if (m_gzip)
+    {
+        auto body = gzip_body(m_body);
+        header_set("Content-Encoding", "gzip");
+        // Content-Length comes from CURLOPT_POSTFIELDSIZE_LARGE; a manual header
+        // could go stale when resume() regenerates a smaller body.
+        return body;
+    }
+    #endif
+    return m_body;
 }
 
 auto google_batch_t::authorization_rejected() const -> bool

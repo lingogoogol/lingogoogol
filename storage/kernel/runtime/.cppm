@@ -25,6 +25,7 @@ export {
 
       public:
         std::atomic_bool batch_request{true};
+        std::atomic_size_t batch_size{100};
         explicit storage_runtime_t(std::atomic_bool* close);
         ~storage_runtime_t()
         {
