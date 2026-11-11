@@ -14,6 +14,7 @@ import lgo.io;
 import lgo.GUI;
 
 import storage.http;
+import storage.encode;
 import storage.google;
 import storage.kernel;
 
@@ -43,6 +44,9 @@ auto app() -> void
     };
     lgo::init_logfile(log_path(settings));
     http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
+    google_batch_t::gzip_enabled_set(settings.batch_gzip);
+    if (settings.content_zstd && !content_zstd_available())
+        lgo::log_file("content_zstd ignored: this build has no zstd.\n");
     google_account_t::token_retry_limit_set(settings.network_retries);
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
@@ -71,6 +75,7 @@ auto app() -> void
     lgo::state_t state{&engine, &depth};
     storage_runtime_t runtime{&close_app};
     runtime.batch_request = settings.batch_request;
+    runtime.batch_size = settings.batch_size;
     auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
@@ -90,25 +95,32 @@ auto app() -> void
     std::string pos{session ? session->root : ""};
     std::shared_ptr<lgo::divy_soft_t> progress_column;
     GUI_persistent_t persistent;
+    const std::filesystem::path parallel_checkpoint{"cloud_project/parallel-setup.json"};
     struct settings_result_t
     {
         storage_settings_t settings;
         std::shared_ptr<storage_session_t> session;
         bool reopen_space_menu{true};
+        std::string finished_setup;
     };
     std::future<settings_result_t> settings_job;
     struct cloud_result_t
     {
-        enum class kind_t { login, projects, accounts, created_project, created_account, remove } kind;
+        enum class kind_t { login, projects, accounts, created_project, created_account, remove,
+                            parallel_login, parallel_ready } kind;
         std::shared_ptr<google_oauth_user_t> user;
         std::string project;
         std::vector<cloud_project_t> projects;
         std::vector<cloud_service_account_t> accounts;
+        nlohmann::json setup;
+        std::vector<std::string> addresses;
         cloud_result_t(kind_t value, std::shared_ptr<google_oauth_user_t> identity = {}, std::string id = {})
             : kind{value}, user{std::move(identity)}, project{std::move(id)} {}
     };
     std::future<cloud_result_t> cloud_job;
     auto settings_control{std::make_shared<request_control_t>()};
+    auto parallel_completed = std::make_shared<std::atomic_size_t>(0);
+    std::size_t parallel_total{}, parallel_displayed{};
     std::shared_ptr<lgo::text_line_scroll_std_t> settings_text;
     std::shared_ptr<progress_button_t> settings_retry, settings_cancel, settings_confirm;
     std::shared_ptr<lgo::std_liney_t> settings_separator, clear_separator;
@@ -222,7 +234,7 @@ auto app() -> void
     };
     auto start_settings = [&](storage_settings_t candidate, std::string name,
                               std::function<std::shared_ptr<storage_session_t>()> work,
-                              bool reopen_space_menu = true)
+                               bool reopen_space_menu = true, std::string finished_setup = {})
     {
         if (settings_job.valid() || cloud_job.valid() || clearing_session)
             throw std::runtime_error{"另一個操作仍在執行"};
@@ -232,8 +244,8 @@ auto app() -> void
         begin_settings_row(std::move(name),true);
         persistent.m_switching=true;
         settings_job=std::async(std::launch::async,
-            [candidate=std::move(candidate),work=std::move(work),reopen_space_menu]
-            { return settings_result_t{candidate,work(),reopen_space_menu}; });
+            [candidate=std::move(candidate),work=std::move(work),reopen_space_menu,finished_setup=std::move(finished_setup)]
+            { return settings_result_t{candidate,work(),reopen_space_menu,finished_setup}; });
     };
     persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
@@ -333,6 +345,109 @@ auto app() -> void
         persistent.m_switching=true;
         cloud_job=std::async(std::launch::async,std::move(work));
     };
+    auto run_parallel = [&](nlohmann::json setup, std::shared_ptr<google_oauth_user_t> user,
+                            bool reauthorize = false)
+    {
+        const auto counts = setup.at("counts").get<std::vector<std::size_t>>();
+        parallel_completed->store(0);
+        begin_cloud("建立並行配置",
+            [setup=std::move(setup),counts,user=std::move(user),path=settings.account_path,reauthorize,
+             control=settings_control,completed=parallel_completed]() mutable
+        {
+            if (!user)
+                user = reauthorize ? google_oauth_user_t::login(path,control,oauth_purpose_t::cloud)
+                    : google_oauth_user_t::restore(path,setup.at("email"),oauth_purpose_t::cloud);
+            if (setup.at("user")!=user->storage_id())
+                throw std::runtime_error{"請使用原先配置的 Google 帳戶："+setup.at("email").get<std::string>()};
+            cloud_result_t result{cloud_result_t::kind_t::parallel_ready,user};
+            result.addresses=google_cloud_provision(user,control,setup.at("id"),counts,*completed);
+            result.setup=std::move(setup);
+            return result;
+        });
+        parallel_total=std::accumulate(counts.begin(),counts.end(),std::size_t{});
+        parallel_displayed=std::numeric_limits<std::size_t>::max();
+    };
+    auto configure_parallel = [&](const std::shared_ptr<google_oauth_user_t>& user, std::string target)
+    {
+        const auto name = target.empty() ? "預設空間" : space_by_id(target).name;
+        persistent.m_dialog_queue.push_back([&,user,target=std::move(target),name]
+        {
+            persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,"設定並行上傳",
+                std::vector<std::string>{user->address()+"  ·  "+name,"輸入一個帳戶數套用全部，或以逗號逐一指定。"},
+                std::vector<std::pair<std::string,std::string>>{{"新增專案數","2"},{"每個專案的服務帳戶數","2"}},"下一步");
+            persistent.m_dialog_done=[&,user,target,name](bool ok,const auto& values)
+            {
+                if (!ok) return true;
+                try
+                {
+                    const auto count = [](std::string_view value, std::size_t limit)
+                    {
+                        const auto first=value.find_first_not_of(" \t");
+                        if (first!=value.npos) value=value.substr(first,value.find_last_not_of(" \t")-first+1);
+                        std::size_t number{};
+                        const auto [end,error]=std::from_chars(value.data(),value.data()+value.size(),number);
+                        if (error!=std::errc{} || end!=value.data()+value.size() || !number || number>limit)
+                            throw std::runtime_error{"請輸入 1–"+std::to_string(limit)+" 的整數"};
+                        return number;
+                    };
+                    const auto projects_to_create=count(values.at(0),20);
+                    std::vector<std::size_t> counts;
+                    for (const auto part : values.at(1) | std::views::split(','))
+                        counts.push_back(count(std::string_view{part.data(),part.size()},100));
+                    if (counts.size()==1) counts.resize(projects_to_create,counts.front());
+                    if (counts.size()!=projects_to_create)
+                        throw std::runtime_error{"請輸入一個帳戶數，或為每個專案各輸入一個"};
+                    const auto total=std::accumulate(counts.begin(),counts.end(),std::size_t{});
+                    persistent.m_dialog_queue.push_back([&,user,target,name,counts=std::move(counts),total]
+                    {
+                        persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,"確認並行配置",
+                            std::vector<std::string>{name+" · "+user->address(),
+                                "將建立 "+std::to_string(counts.size())+" 個專案、"+std::to_string(total)+" 個服務帳戶。"},
+                            std::vector<std::pair<std::string,std::string>>{},"建立並開啟");
+                        persistent.m_dialog_done=[&,user,target,counts](bool accepted,const auto&)
+                        {
+                            if (!accepted) return true;
+                            try
+                            {
+                                if (std::filesystem::exists(parallel_checkpoint))
+                                    throw std::runtime_error{"已有未完成的並行配置"};
+                                std::random_device random;
+                                const auto id=storage_digest(user->storage_id()+std::to_string(random())+
+                                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+                                auto setup=nlohmann::json{{"id",id},{"space",target},{"user",user->storage_id()},
+                                    {"email",user->address()},{"counts",counts}};
+                                storage_atomic_write(parallel_checkpoint,setup.dump());
+                                run_parallel(std::move(setup),user);
+                                return true;
+                            }
+                            catch (const std::exception& error) { persistent.m_dialog->error(error.what()); return false; }
+                        };
+                    });
+                    return true;
+                }
+                catch (const std::exception& error) { persistent.m_dialog->error(error.what()); return false; }
+            };
+        });
+    };
+    auto start_parallel = [&](std::string target)
+    {
+        begin_cloud("登入 Google",[path=settings.account_path,target=std::move(target),control=settings_control]
+        {
+            const auto users=google_oauth_user_t::saved_accounts(path,oauth_purpose_t::cloud);
+            auto user=users.size()==1 ? google_oauth_user_t::restore(path,users.front().address,oauth_purpose_t::cloud)
+                : google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
+            cloud_result_t result{cloud_result_t::kind_t::parallel_login,std::move(user)};
+            result.setup=target;
+            return result;
+        });
+    };
+    auto resume_parallel = [&](bool reauthorize)
+    {
+        auto setup=nlohmann::json::parse(storage_read(parallel_checkpoint));
+        const auto target=setup.at("space").get<std::string>();
+        if (!target.empty()) space_by_id(target);
+        run_parallel(std::move(setup),{},reauthorize);
+    };
     auto select_project = [&](std::string project)
     {
         selected_project=project;
@@ -354,6 +469,12 @@ auto app() -> void
                     {"編輯",[&,id=space.id] { editing_space=id; menu_page=menu_page_t::links; show_menu(); }},
                     {"移除",[&,space]
                     {
+                        if (std::filesystem::exists(parallel_checkpoint))
+                        {
+                            const auto pending=nlohmann::json::parse(storage_read(parallel_checkpoint));
+                            if (pending.at("space")==space.id || pending.at("id")==space.id)
+                                throw std::runtime_error{"請先完成此空間的並行配置"};
+                        }
                         typed_removal("移除空間",{"空間："+space.name,"將移除本機空間設定與 root 紀錄，並登出此空間、暫停傳輸。",
                             "所有雲端 blob 與服務帳戶金鑰都會保留。","失去 root 紀錄後，新建同名空間也不會自動找回原資料。"},
                             "移除空間",[&,id=space.id] { menu_page=menu_page_t::spaces; sign_out(id,true,{}); });
@@ -413,6 +534,16 @@ auto app() -> void
         using action_t=std::pair<std::string,std::function<void()>>;
         std::vector<action_t> actions;
         if (menu_page==menu_page_t::spaces)
+        {
+            if (std::filesystem::exists(parallel_checkpoint))
+            {
+                actions.emplace_back("繼續配置",[&] { resume_parallel(false); });
+                actions.emplace_back("重新授權",[&] { resume_parallel(true); });
+            }
+            else if (auto current=load_state.m_session)
+                actions.emplace_back("擴充並行",[&,id=current->storage_id] { start_parallel(id); });
+            else if (settings.spaces.empty())
+                actions.emplace_back("設定並行上傳",[&] { start_parallel({}); });
             actions.emplace_back("新增空間",[&]
             {
                 name_dialog("新增空間","空間名稱",[&](std::string name)
@@ -425,6 +556,7 @@ auto app() -> void
                     persistent.m_deferred.push_back(show_menu);
                 });
             });
+        }
         else
         {
             actions.emplace_back("返回",[&]
@@ -435,7 +567,11 @@ auto app() -> void
                 show_menu();
             });
             if (menu_page==menu_page_t::links)
+            {
+                if (!std::filesystem::exists(parallel_checkpoint))
+                    actions.emplace_back("擴充並行",[&] { start_parallel(editing_space); });
                 actions.emplace_back("新增帳戶",[&] { menu_page=menu_page_t::users; show_menu(); });
+            }
             else if (menu_page==menu_page_t::users)
                 actions.emplace_back("新增使用者",[&]
                 {
@@ -593,8 +729,15 @@ auto app() -> void
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
         using namespace std::chrono_literals;
+        if (cloud_job.valid() && parallel_total && parallel_displayed!=parallel_completed->load())
+        {
+            parallel_displayed=parallel_completed->load();
+            settings_text->set_text("建立並行配置（服務帳戶 "+std::to_string(parallel_displayed)+
+                "/"+std::to_string(parallel_total)+"）",false);
+        }
         if (cloud_job.valid() && cloud_job.wait_for(0s)==std::future_status::ready)
         {
+            parallel_total=0;
             persistent.m_switching = false;
             settings_retry->hide();
             settings_cancel->hide();
@@ -607,7 +750,30 @@ auto app() -> void
                 settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_directory_status->set_text("");
                 if (result.user) cloud_user=result.user;
-                if (result.kind==cloud_result_t::kind_t::projects)
+                if (result.kind==cloud_result_t::kind_t::parallel_login)
+                    configure_parallel(result.user,result.setup.get<std::string>());
+                else if (result.kind==cloud_result_t::kind_t::parallel_ready)
+                {
+                    if (settings_control->cancelled) throw std::runtime_error{"操作已取消"};
+                    const auto id=result.setup.at("id").get<std::string>();
+                    const auto target=result.setup.at("space").get<std::string>();
+                    auto candidate=settings;
+                    auto found=std::ranges::find(candidate.spaces,target.empty() ? id : target,&storage_space_t::id);
+                    if (found==candidate.spaces.end())
+                    {
+                        if (!target.empty()) throw std::runtime_error{"空間已移除"};
+                        candidate.spaces.push_back({id,"預設空間",{},false});
+                        found=std::prev(candidate.spaces.end());
+                    }
+                    for (const auto& address : result.addresses)
+                        if (std::ranges::find(found->accounts,address)==found->accounts.end())
+                            found->accounts.push_back(address);
+                    found->signed_in=true;
+                    candidate.selected_space=found->id;
+                    start_settings(candidate,"開啟空間："+found->name,[&,candidate,space=*found]
+                    { return runtime.open_space(candidate,space,settings_control); },false,id);
+                }
+                else if (result.kind==cloud_result_t::kind_t::projects)
                 { projects=std::move(result.projects); menu_page=menu_page_t::projects; show_menu(); }
                 else if (result.kind==cloud_result_t::kind_t::accounts)
                 { services=std::move(result.accounts); menu_page=menu_page_t::services; show_menu(); }
@@ -630,6 +796,7 @@ auto app() -> void
                 settings_text->set_text(settings_control->cancelled ? "已取消："+settings_task_name :
                     "失敗："+settings_task_name+"（"+error.what()+"）",false);
                 persistent.m_directory_status->set_text(settings_control->cancelled ? "操作已取消" : "帳戶操作失敗");
+                if (std::filesystem::exists(parallel_checkpoint)) menu_page=menu_page_t::spaces;
                 show_menu();
             }
         }
@@ -644,6 +811,9 @@ auto app() -> void
                 const auto next_log_path = log_path(result.settings);
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
+                google_batch_t::gzip_enabled_set(result.settings.batch_gzip);
+                if (result.settings.content_zstd && !content_zstd_available())
+                    lgo::log_file("content_zstd ignored: this build has no zstd.\n");
                 google_account_t::token_retry_limit_set(result.settings.network_retries);
                 const bool changed_location{!result.session || !load_state.m_session ||
                     result.session->storage_id != load_state.m_session->storage_id ||
@@ -656,7 +826,15 @@ auto app() -> void
                 }
                 settings = result.settings;
                 load_state.m_settings = settings;
+                if (!result.finished_setup.empty())
+                {
+                    std::error_code error;
+                    if (std::filesystem::remove(parallel_checkpoint,error))
+                        std::filesystem::remove_all(std::filesystem::path{"cloud_project/parallel"}/result.finished_setup,error);
+                    if (error) lgo::log_file("Parallel setup checkpoint cleanup failed: "+error.message()+"\n");
+                }
                 runtime.batch_request = settings.batch_request;
+                runtime.batch_size = settings.batch_size;
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
                 update_account_status();
@@ -677,6 +855,11 @@ auto app() -> void
                 settings_text->set_text(settings_control->cancelled ?
                     "已取消："+settings_task_name : "失敗："+settings_task_name+"（"+error.what()+"）",false);
                 lgo::log_file(std::string{"Space/settings operation failed: "} + error.what() + "\n");
+                if (std::filesystem::exists(parallel_checkpoint))
+                {
+                    menu_page=menu_page_t::spaces;
+                    persistent.m_deferred.push_back(show_menu);
+                }
             }
             settings_retry->hide();
             settings_cancel->hide();

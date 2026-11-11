@@ -31,8 +31,14 @@ export {
         std::string selected_space;
         int network_retries{-1};
         bool batch_request{true};
+        bool batch_gzip{};
+        std::string content_encoding{"base64url"};
+        bool content_zstd{};
+        static auto validate_content_encoding(std::string_view encoding) -> void;
         std::size_t worker_count{64};
         static auto parse_worker_count(std::string_view text) -> std::size_t;
+        std::size_t batch_size{100};
+        static auto parse_batch_size(std::string_view text) -> std::size_t;
         // Empty disables request/response diagnostics, including batch subrequests.
         std::string http_log_codes;
         static auto parse_http_log_codes(std::string_view text) -> std::set<long>;

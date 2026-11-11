@@ -30,6 +30,7 @@ target_link_libraries(
         lgo.io
         lgo.GUI
         storage.http
+        storage.encode
         storage.google
         storage.kernel
 )
