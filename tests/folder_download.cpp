@@ -83,6 +83,15 @@ int main()
         blocked_upload->m_prepared = prepared.get_future();
         auto upload_i{ loads.m_task_list.emplace(loads.m_task_list.end(), blocked_upload) };
 
+        // Scheduler-only tasks have no progress row. Both pause and network
+        // failure must remain safe while their preparation is still pending.
+        blocked_upload->m_control->pause(true);
+        check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed while pausing a rowless task.");
+        blocked_upload->m_control->pause(false);
+        blocked_upload->m_control->fail("fixture network failure");
+        check(!message_loop(&engine, &persistent, &multi, &loads, &queue), "GUI closed while reporting a rowless task failure.");
+        blocked_upload->m_control->retry();
+
         auto add = [&](const std::string& id, const std::filesystem::path& path, bool folder = true)
         {
             // The fixture replaces only the native picker with an "output" selection;

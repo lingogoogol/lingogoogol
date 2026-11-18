@@ -305,12 +305,14 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         else if (task->m_control->paused)
         {
             const auto download{std::dynamic_pointer_cast<download_task_t>(task)};
-            if (!download || download->m_error.empty())
+            if (task->m_progress_text && (!download || download->m_error.empty()))
                 task->m_progress_text->set_text(
                     "網路失敗：" + task->m_label + "（" + task->m_control->reason() + "）", false);
         }
-        else if (task->m_control->user_paused)
+        else if (task->m_control->user_paused && task->m_progress_text)
         {
+            // Scheduler-only callers can intentionally omit the GUI row.
+            // Pause/failure state must not dereference a missing label.
             task->m_progress_text->set_text("已暫停：" + task->m_paused_text, false);
         }
         const bool directory{task->m_type == "directory"};
