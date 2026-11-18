@@ -362,18 +362,16 @@ auto app() -> void
         persistent.m_switching=true;
         cloud_job=std::async(std::launch::async,std::move(work));
     };
-    auto run_parallel = [&](nlohmann::json setup, std::shared_ptr<google_oauth_user_t> user,
-                            bool reauthorize = false)
+    auto run_parallel = [&](nlohmann::json setup, std::shared_ptr<google_oauth_user_t> user)
     {
         const auto counts = setup.at("counts").get<std::vector<std::size_t>>();
         parallel_completed->store(0);
         begin_cloud("建立並行配置",
-            [setup=std::move(setup),counts,user=std::move(user),path=settings.account_path,reauthorize,
+            [setup=std::move(setup),counts,user=std::move(user),path=settings.account_path,
              control=settings_control,completed=parallel_completed]() mutable
         {
             if (!user)
-                user = reauthorize ? google_oauth_user_t::login(path,control,oauth_purpose_t::cloud)
-                    : google_oauth_user_t::restore(path,setup.at("email"),oauth_purpose_t::cloud);
+                user = google_oauth_user_t::restore(path,setup.at("email"),oauth_purpose_t::cloud);
             if (setup.at("user")!=user->storage_id())
                 throw std::runtime_error{"請使用原先配置的 Google 帳戶："+setup.at("email").get<std::string>()};
             cloud_result_t result{cloud_result_t::kind_t::parallel_ready,user};
@@ -456,12 +454,12 @@ auto app() -> void
             return result;
         });
     };
-    auto resume_parallel = [&](bool reauthorize)
+    auto resume_parallel = [&]
     {
         auto setup=nlohmann::json::parse(storage_read(parallel_checkpoint));
         const auto target=setup.at("space").get<std::string>();
         if (!target.empty()) space_by_id(target);
-        run_parallel(std::move(setup),{},reauthorize);
+        run_parallel(std::move(setup),{});
     };
     auto select_project = [&](std::string project)
     {
@@ -566,8 +564,7 @@ auto app() -> void
         {
             if (std::filesystem::exists(parallel_checkpoint))
             {
-                actions.emplace_back("繼續配置",[&] { resume_parallel(false); });
-                actions.emplace_back("重新授權",[&] { resume_parallel(true); });
+                actions.emplace_back("繼續配置",[&] { resume_parallel(); });
             }
             else if (auto current=load_state.m_session)
                 actions.emplace_back("擴充並行",[&,id=current->storage_id] { start_parallel(id); });
