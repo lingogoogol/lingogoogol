@@ -308,6 +308,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             persistent->m_close_accounts();
         else persistent->m_layout_accounts();
     }
+    poll_task_io(*load_state);
     collect_finished_tasks(*load_state, *multi);
     if(load_state->m_restore_job.valid() && load_state->m_restore_job.wait_for(std::chrono::seconds{0})==std::future_status::ready)
     {

@@ -118,6 +118,7 @@ auto google_batch_t::clear() -> void
     m_auth_rejected = false;
     m_direct = false;
     m_gzip = false;
+    m_needs_encoding = false;
     m_body.clear();
     m_failure.clear();
     return;
@@ -186,7 +187,8 @@ auto google_batch_t::method_post() -> void
     m_header.erase("Content-Encoding");
     m_header.erase("Content-Length");
 
-    curl_easy_t::method_post(body_payload());
+    m_needs_encoding=m_gzip && storage_is_gui_thread();
+    curl_easy_t::method_post(m_needs_encoding ? m_body : body_payload());
     return;
 }
 
@@ -214,6 +216,20 @@ auto google_batch_t::run_clear_if_full() -> void
         clear();
     }
     return;
+}
+
+auto google_batch_t::prepare() -> bool
+{
+    if(m_needs_encoding)
+    {
+        // The GUI constructs logical requests, while their curl owner performs
+        // compression before the first send. Checkpoint keys stay uncompressed.
+        m_read->m_payload=body_payload();
+        api_curl(curl_easy_setopt(m_interface,CURLOPT_POSTFIELDSIZE_LARGE,
+            static_cast<curl_off_t>(m_read->m_payload.size())));
+        m_needs_encoding=false;
+    }
+    return google_easy_t::prepare();
 }
 
 auto google_batch_t::parse() -> void

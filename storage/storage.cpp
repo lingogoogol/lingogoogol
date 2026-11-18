@@ -246,15 +246,14 @@ auto app() -> void
     persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
         auto next_font=std::make_unique<lgo::font_face_t>(candidate.font_path,lgo::std_font_size.x);
-        std::filesystem::create_directories(candidate.logfile_path);
-        const auto probe_path=std::filesystem::path{candidate.logfile_path}/
-            (".storage-write-test."+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::ofstream probe{probe_path,std::ios::binary};
-        if (!probe) throw std::runtime_error{"無法寫入日誌資料夾"};
-        probe.close();
-        std::filesystem::remove(probe_path);
         start_settings(candidate,"更新設定",[&,candidate,current=load_state.m_session]
         {
+            std::filesystem::create_directories(candidate.logfile_path);
+            const auto probe_path=std::filesystem::path{candidate.logfile_path}/
+                (".storage-write-test."+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            std::ofstream probe{probe_path,std::ios::binary};
+            if(!probe)throw std::runtime_error{"無法寫入日誌資料夾"};
+            probe.close();std::filesystem::remove(probe_path);
             if (current && candidate.root_path!=settings.root_path)
                 return runtime.open_space(candidate,*std::ranges::find(candidate.spaces,current->storage_id,&storage_space_t::id),settings_control);
             return current;

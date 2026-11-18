@@ -42,6 +42,7 @@ export
         auto method_single() -> void;
 
         auto run_clear_if_full() -> void;
+        auto prepare() -> bool override;
         virtual auto parse() -> void;
         virtual auto valid() -> bool override;
         auto error_context() const -> std::string override;
@@ -71,6 +72,7 @@ export
         bool m_auth_rejected{};
         bool m_direct{};
         bool m_gzip{};
+        bool m_needs_encoding{};
         std::string m_failure;
         //The number of parts generated in `m_body` in the last call to `body_generate`.
         std::uint64_t m_count{};

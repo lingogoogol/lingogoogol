@@ -313,6 +313,7 @@ export
         std::future<void> m_prepared{};
         // Queue refill may wait on Google. Reserve IDs off the GUI thread.
         std::future<void> m_allocation{};
+        std::shared_ptr<std::vector<std::pair<std::string,std::string>>> m_prepared_content;
         std::uint64_t m_size{ 0 };
         //The total size in bytes of chunks that has finished transferring to the cloud.
         std::uint64_t m_progress{ 0 };
@@ -418,12 +419,22 @@ export
         std::uint64_t m_filesystem_progress{ 0 };
         std::vector<download_chunk_t> m_chunk_arr{};
         std::size_t m_saved_chunk_count{};
+        std::shared_future<void> m_output;
+        std::shared_ptr<std::pair<std::uint64_t,std::size_t>> m_output_result;
         //`m_next_id` equal to `"null"` indicates that chunk loading has completed.
         std::string m_next_id{};
     };
 
     struct download_task_t: public load_task_t
     {
+        struct decode_job_t
+        {
+            std::size_t file{},chunk{};
+            std::shared_ptr<std::vector<std::string>> content;
+            std::shared_future<void> ready;
+        };
+        std::deque<decode_job_t> m_decoding;
+        std::deque<std::size_t> m_output_files;
         ~download_task_t() override
         {
             if (m_prepared.valid()) m_prepared.wait();
@@ -594,6 +605,7 @@ export
     auto download_manifest_restore(google_easy_t& easy, download_task_t& task) -> bool;
     auto download_manifest_save(download_task_t& task) -> void;
     auto download_write_ready(download_file_t& file) -> void;
+    auto poll_task_io(load_state_t& state) -> void;
     auto download_complete(download_file_t& file) -> void;
     auto task_progress_save(load_task_t& task) -> void;
 
