@@ -98,7 +98,7 @@ auto app() -> void
     struct cloud_result_t
     {
         enum class kind_t { login, projects, accounts, created_project, created_account, remove,
-                            parallel_users, parallel_login, parallel_ready } kind;
+                            parallel_users, parallel_login, parallel_ready, terms_opened } kind;
         std::shared_ptr<google_oauth_user_t> user;
         std::string project;
         std::vector<cloud_project_t> projects;
@@ -829,6 +829,12 @@ auto app() -> void
                     start_settings(candidate,"開啟空間："+found->name,[&,candidate,space=*found]
                     { return runtime.open_space(candidate,space,settings_control); },false,id);
                 }
+                else if (result.kind==cloud_result_t::kind_t::terms_opened)
+                {
+                    persistent.m_directory_status->set_text("同意條款後，請按「繼續配置」。");
+                    menu_page=menu_page_t::spaces;
+                    show_menu();
+                }
                 else if (result.kind==cloud_result_t::kind_t::projects)
                 { projects=std::move(result.projects); menu_page=menu_page_t::projects; show_menu(); }
                 else if (result.kind==cloud_result_t::kind_t::accounts)
@@ -846,6 +852,40 @@ auto app() -> void
                     select_project(result.project);
                 else
                 { menu_page=menu_page_t::users; glfwFocusWindow(engine.window_get()); show_menu(); }
+            }
+            catch (const cloud_terms_required_t& error)
+            {
+                settings_text->set_text("等待同意 Google API 條款："+settings_task_name,false);
+                persistent.m_directory_status->set_text("配置進度已保留，等待同意條款。");
+                menu_page=menu_page_t::spaces;
+                const auto url="https://console.developers.google.com/terms/"+error.terms_id;
+                persistent.m_dialog_queue.push_back([&,id=error.terms_id,url]
+                {
+                    persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,
+                        "同意 Google API 服務條款",
+                        std::vector<std::string>{"Google 要求先同意服務條款："+id,
+                            "按「確認」將啟動瀏覽器，請使用配置時的 Google 帳戶同意條款。",
+                            "配置進度已保留；同意後請回程式按「繼續配置」。"},
+                        std::vector<std::pair<std::string,std::string>>{},"確認");
+                    persistent.m_dialog_done=[&,url](bool accepted,const auto&)
+                    {
+                        // Defer until the modal has closed; browser launch stays off the GUI thread.
+                        persistent.m_deferred.push_back([&,accepted,url]
+                        {
+                            if (!accepted) { show_menu(); return; }
+                            begin_cloud("開啟 Google 條款頁面",[url]
+                            {
+                                const std::wstring browser_url{url.begin(),url.end()};
+                                const auto result=ShellExecuteW(nullptr,L"open",
+                                    browser_url.c_str(),nullptr,nullptr,1);
+                                if (reinterpret_cast<std::intptr_t>(result)<=32)
+                                    throw std::runtime_error{"無法啟動瀏覽器，請開啟 "+url};
+                                return cloud_result_t{cloud_result_t::kind_t::terms_opened};
+                            });
+                        });
+                        return true;
+                    };
+                });
             }
             catch (const std::exception& error)
             {

@@ -4,6 +4,12 @@ import storage.google.oauth;
 import storage.state;
 
 export {
+    struct cloud_terms_required_t : std::runtime_error
+    {
+        std::string terms_id;
+        explicit cloud_terms_required_t(std::string id)
+            : std::runtime_error{"Google API 服務條款尚未同意"}, terms_id{std::move(id)} {}
+    };
     struct cloud_project_t { std::string id, name; };
     struct cloud_service_account_t { std::string address, path; };
     auto google_cloud_projects(const std::shared_ptr<google_oauth_user_t>& user,

@@ -41,6 +41,25 @@ namespace
     {
         if (response.status<200 || response.status>=300)
         {
+            const auto parsed = json::parse(response.body,nullptr,false);
+            if (parsed.is_object() && parsed.contains("error") && parsed.at("error").is_object())
+            {
+                const auto details=parsed.at("error").value("details",json::array());
+                if (details.is_array()) for (const auto& detail : details)
+                    if (detail.is_object() &&
+                        detail.value("@type","")=="type.googleapis.com/google.rpc.ErrorInfo" &&
+                        detail.value("domain","")=="serviceusage.googleapis.com" &&
+                        detail.value("reason","")=="UREQ_TOS_NOT_ACCEPTED")
+                    {
+                        const auto metadata=detail.value("metadata",json::object());
+                        const auto id=metadata.is_object() ? metadata.value("tos_id",std::string{}) : std::string{};
+                        // Build URLs only from a validated identifier, never from response message links.
+                        if (id.empty() || id.size()>128 || id.find_first_not_of(
+                            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")!=std::string::npos)
+                            throw std::runtime_error{"Google 要求同意服務條款，但未提供有效的條款識別碼"};
+                        throw cloud_terms_required_t{id};
+                    }
+            }
             // Never include response bodies: the same transport also receives
             // private keys. Status plus the failing API identifies the step.
             if (response.status==403)
@@ -520,6 +539,8 @@ auto google_cloud_provision(const std::shared_ptr<google_oauth_user_t>& user,
             }
         }
     }
+    // Preserve the typed prerequisite so the GUI can offer the terms page.
+    catch (const cloud_terms_required_t&) { throw; }
     catch (const std::exception& error) { throw std::runtime_error{step+"："+error.what()}; }
     return addresses;
 }

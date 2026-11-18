@@ -9,4 +9,5 @@ export module external.shellapi;
 export
 {
     using ::CommandLineToArgvW;
+    using ::ShellExecuteW;
 }

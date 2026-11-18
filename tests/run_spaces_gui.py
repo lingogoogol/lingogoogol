@@ -31,6 +31,11 @@ class Handler(fixture['Handler']):
             path = urllib.parse.urlsplit(self.path).path
             value = json.loads(body) if body else {}
             self.server.cloud_calls.append((method, path))
+            if path == '/resource/v3/projects/storage-ai-terms-fixture':
+                return self.reply(400, {'error': {'code':400, 'status':'FAILED_PRECONDITION',
+                    'details':[{'@type':'type.googleapis.com/google.rpc.ErrorInfo',
+                        'reason':'UREQ_TOS_NOT_ACCEPTED','domain':'serviceusage.googleapis.com',
+                        'metadata':{'tos_id':(self.server.directory/'terms-id').read_text()}}]}})
             if path == '/resource/v3/projects:search':
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 if 'pageToken' not in query:
@@ -191,9 +196,9 @@ def open_menu(): click(snapshot()['toolbar']); return ready(0)
 def paste(text):
     subprocess.run(['wine64',sys.argv[2],text],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     command('windowfocus','--sync',window);command('key','ctrl+a');command('key','ctrl+v');time.sleep(.12)
-def dialog(value, lines=0, accept=True):
+def dialog(value, lines=0, accept=True, fields=1):
     s=wait(lambda:snapshot() if snapshot()['dialog'] else None,'Missing dialog')
-    height=152+28*lines+68
+    height=152+28*lines+68*fields
     left=(s['window_w']-720)//2; top=(s['window_h']-height)//2
     if value is not None:
         click({'x':left+200,'y':top+80+28*lines}); paste(value)
@@ -277,6 +282,40 @@ try:
     height=152+28*2+68*2
     click({'x':(s['window_w']-720)//2+480,'y':(s['window_h']-height)//2+height-48})
     closed()
+    # Simulate a prerequisite failure after the durable provisioning checkpoint.
+    checkpoint=Path('cloud_project/parallel-setup.json')
+    checkpoint.parent.mkdir(exist_ok=True)
+    checkpoint.write_text(json.dumps({'fixture':'terms-progress-must-survive'}))
+    saved=checkpoint.read_bytes()
+    for terms_id,accepted in [('universal',False),('universal',True),
+                              ('workspace-apis-addendum',False),('workspace-apis-addendum',True)]:
+        Path('terms-id').write_text(terms_id)
+        Path('terms-opened').unlink(missing_ok=True)
+        Path('open-terms-test').touch()
+        wait(lambda:snapshot()['dialog'],'Missing Google terms prompt')
+        assert checkpoint.read_bytes()==saved
+        dialog(None,lines=3,accept=accepted,fields=0);closed()
+        if accepted:
+            wait(lambda:Path('terms-opened').exists(),'Terms page was not opened')
+            assert Path('terms-opened').read_text()=='https://console.developers.google.com/terms/'+terms_id
+            wait(lambda:not snapshot()['switching'],'Browser task did not finish')
+            wait(lambda:snapshot()['status']=='同意條款後，請按「繼續配置」。',
+                 'Missing complete terms status message')
+            command('key','Escape');wait(lambda:not snapshot()['menu'],'Terms menu did not close')
+        else:
+            time.sleep(.2)
+            assert not Path('terms-opened').exists(),'Cancel opened a browser'
+        assert checkpoint.read_bytes()==saved,'Terms prompt lost provisioning progress'
+    for invalid in ('../universal',):
+        Path('terms-id').write_text(invalid)
+        Path('terms-opened').unlink(missing_ok=True)
+        Path('open-terms-test').touch()
+        wait(lambda:'有效的條款識別碼' in snapshot()['cloud_task'] and not snapshot()['switching'],
+             'Invalid terms identifier was not rejected')
+        assert not snapshot()['dialog'] and not Path('terms-opened').exists()
+        assert checkpoint.read_bytes()==saved
+    checkpoint.unlink()
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Terms menu did not close')
     open_menu();action('編輯');ready(1);footer('新增帳戶');ready(2)
     action('使用');ready(3);assert not snapshot()['rows'],'Project ID/state filtering failed'
     for status in (403, 503):
@@ -378,12 +417,26 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
     (test/'oauth.cpp').write_text(oauth)
     (test/'cloud.cpp').write_text(cloud)
     entry = (source/'storage/storage.cpp').read_text()
+    # Intercept only the browser launch; keep the production error and dialog paths.
+    entry, launches = re.subn(
+        r'ShellExecuteW\(nullptr,L"open",\s*browser_url.c_str\(\),nullptr,nullptr,1\)',
+        '([&] { storage_atomic_write("browser-url",url); '
+        'return reinterpret_cast<void*>(33); })()', entry)
+    assert launches == 1
     entry = entry.replace('        lgo::text_line_t::pending_load();', observation+'''
         if (std::filesystem::exists("open-clear")) {
             std::filesystem::remove("open-clear"); load_state.m_clear_page();
         }
         if (std::filesystem::exists("open-settings")) {
             std::filesystem::remove("open-settings"); load_state.m_settings_page();
+        }
+        if (std::filesystem::exists("open-terms-test")) {
+            std::filesystem::remove("open-terms-test");
+            begin_cloud("建立並行配置",[user=cloud_user,control=settings_control]() -> cloud_result_t {
+                google_cloud_accounts(user,control,"storage-ai-terms-fixture");
+                throw std::runtime_error{"Expected the terms prerequisite error"};
+            });
+        }
         }
         if (std::filesystem::exists("emit-log")) {
             lgo::log_file(storage_read("emit-log")+"\\n"); std::filesystem::remove("emit-log");
@@ -399,6 +452,9 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
         while not watcher_stop.wait(.03):
             if not path.exists(): continue
             url = path.read_text(); path.unlink()
+            if url.startswith('https://console.developers.google.com/terms/'):
+                (test/'terms-opened').write_text(url)
+                continue
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
             server.challenge = query['code_challenge'][0]
             server.redirect = query['redirect_uri'][0]
@@ -426,7 +482,8 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
         assert not server.errors, server.errors
         assert len(server.project_attempts)==2 and len(set(server.project_attempts))==1
         project_calls = [(method,path) for method,path in server.cloud_calls if path.startswith('/resource/v3/projects')
-                         and path != '/resource/v3/projects:search']
+                         and path not in ('/resource/v3/projects:search',
+                                          '/resource/v3/projects/storage-ai-terms-fixture')]
         assert project_calls[0] == ('POST', '/resource/v3/projects'), 'Fresh creation queried an inaccessible ID first'
         assert project_calls[1] == ('GET', '/resource/v3/projects/'+server.project_attempts[0])
         assert sum(method=='POST' and path.endswith('/serviceAccounts') for method,path in server.cloud_calls)==1
