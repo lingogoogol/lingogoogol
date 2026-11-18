@@ -65,7 +65,8 @@ int main(int argc,char** argv)
         else if (phase=="download-crash")
             begin_task(&loads,session,"download-folder","output",nlohmann::json::parse(storage_read("fixture-tree")).get<std::string>());
         else restore_tasks(&loads,[&](const auto&) { return session; });
-        check(!loads.m_task_list.empty(),"No task restored.");
+        while(loads.m_restore_job.valid() || !loads.m_restore_queue.empty())pump();
+        check(!loads.m_task_list.empty() || !loads.m_finished_tasks.empty(),"No task restored.");
         while (!loads.m_task_list.empty())
         {
             pump();

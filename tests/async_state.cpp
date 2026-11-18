@@ -28,8 +28,18 @@ int main()
         for(int i=0;i<200;++i)journal->set("counter",i);
         journal->wait();
         const auto path=journal->path();journal.reset();
+        const auto stale=storage_read(path/"00000000000000000000.record");
         auto restored=std::async(std::launch::async,[]{return task_journal_t::restore();}).get();
         check(restored.size()==1 && restored.front()->field("counter")==nlohmann::json(199),"Replay lost a committed update");
+        std::size_t records{};for(const auto& f:std::filesystem::directory_iterator{path})records+=f.path().extension()==".record";
+        check(records==0,"Recovery did not compact the historical record generation");
+        storage_atomic_write(path/"00000000000000000000.record",stale);
+        restored.clear();
+        restored=std::async(std::launch::async,[]{return task_journal_t::restore();}).get();
+        check(restored.front()->field("counter")==nlohmann::json(199),"A stale pre-compaction record overwrote the snapshot");
+        restored.front()->set("counter",200);restored.front()->wait();restored.clear();
+        restored=std::async(std::launch::async,[]{return task_journal_t::restore();}).get();
+        check(restored.front()->field("counter")==nlohmann::json(200),"The new record generation did not replay");
         std::atomic_int attempts{},after{};
         storage_write_queue_t retry;
         retry.push([&]{if(++attempts==1)throw std::runtime_error{"injected disk failure"};});

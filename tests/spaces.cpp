@@ -101,7 +101,8 @@ int main(int argc,char** argv)
         if (phase!="clear-resume")
         {
         restore_tasks(&loads,[&](const json&) { return session; });
-        check(!loads.m_task_list.empty(),"Interrupted upload was not restored.");
+        wait([&]{return !loads.m_restore_job.valid() && loads.m_restore_queue.empty();});
+        check(!loads.m_task_list.empty() || !loads.m_finished_tasks.empty(),"Interrupted upload was not restored.");
         settle();
         auto all=entries(pos);
         validate();

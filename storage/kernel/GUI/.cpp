@@ -309,6 +309,23 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         else persistent->m_layout_accounts();
     }
     collect_finished_tasks(*load_state, *multi);
+    if(load_state->m_restore_job.valid() && load_state->m_restore_job.wait_for(std::chrono::seconds{0})==std::future_status::ready)
+    {
+        try{for(auto& journal:load_state->m_restore_job.get())load_state->m_restore_queue.push_back(std::move(journal));}
+        catch(const std::exception& error){persistent->m_directory_status->set_text("續傳紀錄載入失敗");lgo::log_file(std::string{"Recovery failed: "}+error.what()+"\n");}
+    }
+    // Construct at most one restored GUI row per frame; disk replay happened
+    // on the loader worker, and its task preparation restores routes off-thread.
+    if(!load_state->m_restore_queue.empty())
+    {
+        auto journal=std::move(load_state->m_restore_queue.front());load_state->m_restore_queue.pop_front();
+        if(!load_state->m_known_journals.contains(journal->path()))
+        {
+            const auto intent=journal->intent();
+            if(auto session=load_state->m_restore_session(intent))
+                begin_task(load_state,std::move(session),intent.at("kind"),intent.at("path"),intent.at("pos"),journal);
+        }
+    }
     for (auto entry{load_state->m_task_list.begin()}; entry != load_state->m_task_list.end();)
     {
         auto task{*entry++};
@@ -492,6 +509,7 @@ namespace
                   std::string label, bool preparing = false) -> void
     {
         task->m_state = state;
+        if(task->m_journal)state->m_known_journals.insert(task->m_journal->path());
         // Results and network failures identify the operation, independently
         // of transient preparation, resume and pause messages shown in the row.
         task->m_label = label;
@@ -616,6 +634,7 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
             while (previous.valid() && previous.wait_for(20ms) != std::future_status::ready)
                 if (task->m_control->cancelled) throw std::runtime_error{"操作已中止"};
             if (task->m_control->cancelled) throw std::runtime_error{"操作已中止"};
+            if(const auto routes=task->m_journal->field("routing"))task->m_session->restore_routing(*routes);
             directory_execute(*task);
         }).share();
     state->m_upload_linked = task->m_operation;
@@ -627,7 +646,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
     if (kind.starts_with("directory-"))
     {
         if (!journal) throw std::invalid_argument{"Directory restoration requires a saved intent."};
-        const auto saved = journal->data();
+        const auto saved = journal->intent();
         begin_directory_task(state, session, kind, pos, saved.at("entity"), saved.at("destination"), path, journal);
         return;
     }
@@ -649,7 +668,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
         auto task{std::make_shared<upload_task_t>()};
         task->m_session = session;
         task->m_journal = journal;
-        const auto saved = journal ? journal->data() : nlohmann::json::object();
+        const auto saved = journal ? journal->intent() : nlohmann::json::object();
         task->m_blob_version = saved.value("blob_version",journal ? std::uint64_t{0} : storage_format::current_version);
         storage_format::version(nlohmann::json{{"version",task->m_blob_version}});
         task->m_bytes_per_content = task->m_blob_version ? storage_format::content_capacity : storage_format::legacy_content_capacity;
@@ -669,6 +688,8 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                 std::async(std::launch::async,
                            [task, queue, folder, path]
                            {
+                               if(task->m_journal && task->m_session)
+                                   if(const auto routes=task->m_journal->field("routing"))task->m_session->restore_routing(*routes);
                                if (!queue)
                                    throw std::runtime_error{"No account reserve is available."};
                                if (folder)
@@ -709,6 +730,8 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                 task->m_prepared = std::async(std::launch::async,
                                               [task, folder, path, pos]
                                               {
+                                                  if(task->m_journal && task->m_session)
+                                                      if(const auto routes=task->m_journal->field("routing"))task->m_session->restore_routing(*routes);
                                                   google_easy_t request;
                                                   if (task->m_session)
                                                       request.m_account_context = task->m_session->account;
@@ -736,7 +759,7 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
             };
             task->m_retry_prepare();
         };
-        const auto saved = journal ? journal->data() : nlohmann::json::object();
+        const auto saved = journal ? journal->intent() : nlohmann::json::object();
         if (saved.value("declined", false))
             launch(false);
         else if (!saved.value("destination_ready", false) &&
@@ -756,16 +779,10 @@ auto restore_tasks(load_state_t* state,
                    const std::function<std::shared_ptr<storage_session_t>(const nlohmann::json&)>& session)
     -> void
 {
-    for (auto& journal : task_journal_t::restore())
-    {
-        const auto already_loaded = [&](const auto& task)
-            { return task->m_journal && task->m_journal->path()==journal->path(); };
-        if (std::ranges::any_of(state->m_task_list,already_loaded) ||
-            std::ranges::any_of(state->m_finished_tasks,already_loaded)) continue;
-        const auto intent = journal->data();
-        if (auto target = session(intent))
-            begin_task(state, std::move(target), intent.at("kind"), intent.at("path"), intent.at("pos"), journal);
-    }
+    if(state->m_restore_job.valid() || !state->m_restore_queue.empty())return;
+    state->m_restore_session=session;
+    state->m_restore_cancel->store(false);
+    state->m_restore_job=std::async(std::launch::async,[cancel=state->m_restore_cancel]{return task_journal_t::restore(cancel.get());});
 }
 
 auto file_upload_callback(load_state_t* state, blob_queue_t*, std::string pos) -> void

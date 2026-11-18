@@ -89,9 +89,10 @@ auto storage_session_t::routing_for(const std::vector<std::string>& ids) const -
 }
 auto storage_session_t::restore_routing(const nlohmann::json& saved) -> void
 {
-    std::lock_guard lock{routing_mutex};
-    for (const auto& [id,address] : saved.at("owners").items()) owners[id] = address;
-    for (const auto& [id,type] : saved.at("kinds").items()) kinds[id] = type;
+    for (const auto& [id,address] : saved.at("owners").items())
+    {std::lock_guard lock{routing_mutex};owners[id]=address;}
+    for (const auto& [id,type] : saved.at("kinds").items())
+    {std::lock_guard lock{routing_mutex};kinds[id]=type;}
 }
 auto task_owner(load_task_t& task, const std::string& key, std::uint64_t units) -> std::string
 {

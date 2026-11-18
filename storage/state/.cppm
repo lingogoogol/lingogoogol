@@ -99,7 +99,7 @@ export {
         auto save_locked() -> void;
 
       public:
-        task_journal_t(std::filesystem::path path, nlohmann::json intent);
+        task_journal_t(std::filesystem::path path, nlohmann::json intent, const std::atomic_bool* cancelled=nullptr);
         auto data() const -> nlohmann::json;
         auto intent() const -> nlohmann::json;
         auto saved_progress() const -> nlohmann::json;
@@ -124,7 +124,7 @@ export {
         auto response(std::string_view key, std::string_view value) -> void;
         // Durably remove from the task index, then delete caches in background.
         auto finish() -> void;
-        static auto restore() -> std::vector<std::shared_ptr<task_journal_t>>;
+        static auto restore(const std::atomic_bool* cancelled=nullptr) -> std::vector<std::shared_ptr<task_journal_t>>;
         static auto create(nlohmann::json intent) -> std::shared_ptr<task_journal_t>;
     };
 }

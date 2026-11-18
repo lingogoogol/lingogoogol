@@ -77,14 +77,6 @@ auto app() -> void
     auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
-    for (const auto& space : settings.spaces)
-        if (space.signed_in)
-            try
-            {
-                auto restored = runtime.open_space(settings,space,startup_control);
-                if (space.id==settings.selected_space) session=std::move(restored);
-            }
-            catch (const std::exception& error) { startup_error=error.what(); }
     if (session) google_account_t::default_shared_set(session->account);
     load_state_t load_state;
     load_state.m_session = session;
@@ -727,7 +719,21 @@ auto app() -> void
             return {};
         });
     };
-    restore_available_tasks();
+    if(std::ranges::any_of(settings.spaces,[](const auto& space){return space.signed_in;}))
+        start_settings(settings,"載入帳戶與續傳紀錄",[&runtime,initial=settings,control=settings_control]
+        {
+            std::shared_ptr<storage_session_t> selected;
+            std::exception_ptr failure;
+            for(const auto& space:initial.spaces)if(space.signed_in)
+            {
+                if(control->cancelled)throw std::runtime_error{"操作已取消"};
+                try{auto active=runtime.open_space(initial,space,control);if(space.id==initial.selected_space)selected=std::move(active);}
+                catch(...){failure=std::current_exception();}
+            }
+            if(!selected && failure)std::rethrow_exception(failure);
+            return selected;
+        },false);
+    else restore_available_tasks();
     if (session && std::filesystem::exists("clear."+storage_digest(session->storage_id)))
         persistent.m_clear_account();
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))

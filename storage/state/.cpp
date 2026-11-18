@@ -266,22 +266,27 @@ auto request_control_t::reason() const -> std::string
     return error;
 }
 
-task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent)
+task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent, const std::atomic_bool* cancelled)
     : m_path{std::move(path)}, m_data(std::move(intent))
 {
     m_initial_saved=std::filesystem::exists(m_path/"state");
     if (!m_initial_saved) return;
+    m_next_record=m_data.value("_record_base",std::uint64_t{});
+    const auto record_base=m_next_record;
     std::vector<std::filesystem::path> records;
     for (const auto& entry : std::filesystem::directory_iterator{m_path})
         if (entry.path().extension()==".record") records.push_back(entry.path());
     std::ranges::sort(records);
     for (const auto& record : records)
     {
+        if(cancelled && cancelled->load())throw std::runtime_error{"Recovery cancelled."};
         const auto stem=record.stem().string();
         std::uint64_t sequence{};
         const auto [end,error]=std::from_chars(stem.data(),stem.data()+stem.size(),sequence);
-        if (error!=std::errc{} || end!=stem.data()+stem.size() || sequence!=m_next_record)
-            throw std::runtime_error{"Invalid task record sequence: "+record.string()};
+        if (error!=std::errc{} || end!=stem.data()+stem.size())
+            throw std::runtime_error{"Invalid task record name: "+record.string()};
+        if(sequence<record_base)continue;
+        if(sequence!=m_next_record)throw std::runtime_error{"Invalid task record sequence: "+record.string()};
         const auto changes=nlohmann::json::parse(storage_read(record));
         if (changes.contains("fields"))
             for (const auto& [key,value] : changes.at("fields").items()) m_data[key]=value;
@@ -292,6 +297,20 @@ task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent
                 for (const auto& [id,value] : entries.items()) m_data["routing"][kind][id]=value;
         ++m_next_record;
     }
+    if(m_next_record>record_base)
+    {
+        // Commit the replay boundary before deleting old records. A crash at
+        // any point either replays the old generation or skips retired files.
+        m_data["_record_base"]=m_next_record;
+        storage_atomic_write(m_path/"state",m_data.dump());
+        for(const auto& record:records)
+        {
+            if(cancelled && cancelled->load())break;
+            std::error_code error;std::filesystem::remove(record,error);
+        }
+    }
+    const auto progress_path=m_path/(storage_digest("task")+".progress");
+    if(std::filesystem::exists(progress_path))m_task_progress=nlohmann::json::parse(storage_read(progress_path));
 }
 auto task_journal_t::save_locked() -> void
 {
@@ -482,7 +501,7 @@ auto task_journal_t::create(nlohmann::json intent) -> std::shared_ptr<task_journ
     if(!storage_is_gui_thread())result->m_writes.wait();
     return result;
 }
-auto task_journal_t::restore() -> std::vector<std::shared_ptr<task_journal_t>>
+auto task_journal_t::restore(const std::atomic_bool* cancelled) -> std::vector<std::shared_ptr<task_journal_t>>
 {
     std::vector<std::shared_ptr<task_journal_t>> result;
     if (!std::filesystem::exists("task"))
@@ -492,12 +511,13 @@ auto task_journal_t::restore() -> std::vector<std::shared_ptr<task_journal_t>>
         throw std::runtime_error{"Invalid task index; original file was preserved."};
     for (const auto& entry : index)
     {
+        if(cancelled && cancelled->load())throw std::runtime_error{"Recovery cancelled."};
         const auto id{entry.get<std::string>()};
         if (id.empty() || id.find_first_not_of("0123456789-") != std::string::npos)
             throw std::runtime_error{"Invalid saved task identifier."};
         const auto path{std::filesystem::path{"task.data"} / id};
         result.push_back(
-            std::make_shared<task_journal_t>(path, nlohmann::json::parse(storage_read(path / "state"))));
+            std::make_shared<task_journal_t>(path, nlohmann::json::parse(storage_read(path / "state")),cancelled));
     }
     return result;
 }

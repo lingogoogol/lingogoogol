@@ -124,6 +124,12 @@ export
     {
         std::shared_ptr<storage_session_t> m_session;
         storage_settings_t m_settings;
+        std::shared_ptr<std::atomic_bool> m_restore_cancel{std::make_shared<std::atomic_bool>(false)};
+        ~load_state_t(){m_restore_cancel->store(true);}
+        std::future<std::vector<std::shared_ptr<task_journal_t>>> m_restore_job;
+        std::deque<std::shared_ptr<task_journal_t>> m_restore_queue;
+        std::function<std::shared_ptr<storage_session_t>(const nlohmann::json&)> m_restore_session;
+        std::set<std::filesystem::path> m_known_journals;
         // The GUI publishes the logical dispatch window; background directory
         // coordinators must not read mutable settings across threads.
         std::atomic_size_t m_directory_request_window{transfer_slot_count*100};
