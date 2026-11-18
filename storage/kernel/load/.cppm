@@ -112,6 +112,7 @@ export
                      const nlohmann::json& content = nullptr) -> void;
         auto choose(std::uint64_t units) -> std::string;
         auto routing() const -> nlohmann::json;
+        auto routing_for(const std::vector<std::string>& ids) const -> nlohmann::json;
         auto restore_routing(const nlohmann::json& saved) -> void;
     };
 

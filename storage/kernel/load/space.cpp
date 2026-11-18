@@ -74,6 +74,17 @@ auto storage_session_t::routing() const -> nlohmann::json
     std::lock_guard lock{routing_mutex};
     return {{"owners",owners},{"kinds",kinds}};
 }
+auto storage_session_t::routing_for(const std::vector<std::string>& ids) const -> nlohmann::json
+{
+    std::lock_guard lock{routing_mutex};
+    auto saved=nlohmann::json{{"owners",nlohmann::json::object()},{"kinds",nlohmann::json::object()}};
+    for(const auto& id:ids)
+    {
+        if(owners.contains(id))saved["owners"][id]=owners.at(id);
+        if(kinds.contains(id))saved["kinds"][id]=kinds.at(id);
+    }
+    return saved;
+}
 auto storage_session_t::restore_routing(const nlohmann::json& saved) -> void
 {
     std::lock_guard lock{routing_mutex};

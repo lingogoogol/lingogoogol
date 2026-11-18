@@ -572,8 +572,11 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     if (!journal)
         journal = task_journal_t::create(nlohmann::json{{"kind", kind}, {"path", name}, {"pos", source},
             {"entity", entity}, {"destination", destination}, {"account_path", session->account_path},
-            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()}, {"root", session->root}, {"routing",session->routing()}});
-    session->restore_routing(journal->data().at("routing"));
+            {"account_email", session->address}, {"account_namespace", session->storage_id}, {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()}, {"root", session->root},
+            // Creating a directory has no source entity; json{} is null, and
+            // value() on null throws before the background task can be created.
+            {"routing",session->routing_for({session->root,source,destination,
+                entity.is_object() ? entity.value("id",std::string{}) : std::string{}})}});
     auto task{std::make_shared<directory_task_t>()};
     task->m_session = session; task->m_journal = journal; task->m_type = "directory";
     task->m_kind = kind; task->m_name = name; task->m_source = source;
