@@ -134,9 +134,12 @@ auto app() -> void
         curl_multi_worker_t& multi;
         GUI_persistent_t& gui;
         std::shared_ptr<request_control_t> settings, clear;
-        ~shutdown_t()
+        bool stopped{};
+        auto stop() -> void
         {
+            if(std::exchange(stopped,true))return;
             close_app = true;
+            tasks.m_restore_cancel->store(true);
             settings->cancel();
             clear->cancel();
             for (auto& listing : gui.m_listings)
@@ -149,7 +152,23 @@ auto app() -> void
                 task->m_control->cancel();
             runtime.stop();
             multi.stop();
+            for(const auto& list:{&tasks.m_task_list,&tasks.m_finished_tasks})
+                for(const auto& task:*list)
+                {
+                    if(auto upload=std::dynamic_pointer_cast<upload_task_t>(task))
+                    {
+                        if(upload->m_prepared.valid())upload->m_prepared.wait();
+                        if(upload->m_allocation.valid())upload->m_allocation.wait();
+                        if(upload->m_linked.valid())upload->m_linked.wait();
+                    }
+                    if(auto download=std::dynamic_pointer_cast<download_task_t>(task))
+                        if(download->m_prepared.valid())download->m_prepared.wait();
+                    if(auto directory=std::dynamic_pointer_cast<directory_task_t>(task))
+                        if(directory->m_operation.valid())directory->m_operation.wait();
+                    if(task->m_journal)task->m_journal->wait();
+                }
         }
+        ~shutdown_t(){try{stop();}catch(const std::exception& error){lgo::log_file(std::string{"Shutdown save failed: "}+error.what()+"\n");}}
     } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control};
     home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
     std::string settings_task_name;
@@ -840,10 +859,12 @@ auto app() -> void
                 load_state.m_settings = settings;
                 if (!result.finished_setup.empty())
                 {
-                    std::error_code error;
-                    if (std::filesystem::remove(parallel_checkpoint,error))
-                        std::filesystem::remove_all(std::filesystem::path{"cloud_project/parallel"}/result.finished_setup,error);
-                    if (error) lgo::log_file("Parallel setup checkpoint cleanup failed: "+error.message()+"\n");
+                    storage_background([checkpoint=parallel_checkpoint,id=result.finished_setup]
+                    {
+                        std::error_code error;
+                        if(std::filesystem::remove(checkpoint,error))std::filesystem::remove_all(std::filesystem::path{"cloud_project/parallel"}/id,error);
+                        if(error)lgo::log_file("Parallel setup checkpoint cleanup failed: "+error.message()+"\n");
+                    });
                 }
                 runtime.batch_request = settings.batch_request;
                 runtime.batch_size = settings.batch_size;
@@ -986,6 +1007,8 @@ auto app() -> void
         lgo::text_line_t::pending_load();
     }
     // Space membership and sign-in state are durable independently of tasks.
+    glfwHideWindow(engine.window_get());
+    shutdown.stop();
     sync_settings();
     settings_writes.wait();
     engine.flush();

@@ -63,6 +63,7 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
             if (!addresses.empty()) { interleaved.push_back(addresses.front()); addresses.pop_front(); }
     for (const auto& address : interleaved)
     {
+        if(control->cancelled)throw std::runtime_error{"Operation cancelled."};
         const auto found = std::ranges::find(registered,address,&service_account_file_t::address);
         if (found==registered.end()) throw std::runtime_error{"無法讀取程式建立的服務帳戶："+address};
         const auto credential = nlohmann::json::parse(storage_read(found->account_path));
@@ -240,6 +241,9 @@ auto storage_runtime_t::cleared(const std::shared_ptr<storage_session_t>& sessio
 auto storage_runtime_t::stop() -> void
 {
     std::lock_guard lock{m_mutex};
+    // Signal all queues before joining any one of them. Sequential timeout
+    // waits otherwise grow with every account created during a long session.
+    for (auto& [email, queue] : m_queues)queue->request_stop();
     for (auto& [email, account] : m_accounts)
         account->stop();
     for (auto& [email, queue] : m_queues)

@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='storage-task-cleanup-') as directory:
         log = (test/'logfile/cleanup.txt').read_text()
         assert 'finished_all!' in log and 'uncaught exception:' not in log
         assert json.loads((test/'task').read_text()) == []
-        assert not list((test/'task.data').iterdir()), 'Cleanup did not drain at shutdown'
+        assert all((path/'retired').exists() for path in (test/'task.data').iterdir()), 'Shutdown left an unmarked retired cache'
     finally:
         server = '/usr/lib/x86_64-linux-gnu/wine/wineserver'
         subprocess.run([server, '-k'], env=env, capture_output=True)

@@ -41,6 +41,7 @@ export {
       public:
         blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close);
         ~blob_queue_t();
+        auto request_stop() -> void;
         auto stop() -> void;
         auto check_error() const -> void;
         auto retry() -> void;

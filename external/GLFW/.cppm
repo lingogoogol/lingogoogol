@@ -74,6 +74,7 @@ export
     using ::glfwGetWindowSize;
     using ::glfwSetWindowSize;
     using ::glfwFocusWindow;
+    using ::glfwHideWindow;
     using ::glfwGetWindowAttrib;
     using ::glfwSetWindowSizeLimits;
     using ::glfwSetWindowRefreshCallback;

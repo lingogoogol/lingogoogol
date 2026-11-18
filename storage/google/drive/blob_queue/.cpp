@@ -123,15 +123,17 @@ blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account
     return;
 }
 
+auto blob_queue_t::request_stop() -> void
+{
+    m_stopped=true;
+    m_control->cancel();
+    m_condition_variable.notify_all();
+    m_worker.request_stop();
+}
 auto blob_queue_t::stop() -> void
 {
     std::lock_guard stop_lock{m_stop_mutex};
-    // Publish cancellation under the same mutex as get()'s predicate to avoid lost wakeups.
-    {
-        std::unique_lock lock{ m_mutex };
-        m_stopped = true;
-    }
-    m_condition_variable.notify_all();
+    request_stop();
     m_worker.stop();
     if (m_thread.joinable())
         m_thread.join();

@@ -74,7 +74,10 @@ int main()
             std::cout << (upload ? "Upload" : "Download") << " completion milliseconds: "
                       << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << std::endl;
             check(elapsed<250ms,"Completed transfer blocked the GUI deleting checkpoints.");
-            check(task->m_result==task_result_t::completed,"Completion was not published.");
+            const auto commit_deadline=std::chrono::steady_clock::now()+5s;
+            while(task->m_result!=task_result_t::completed)
+            {check(std::chrono::steady_clock::now()<commit_deadline,"Terminal state did not become durable.");pump();}
+
             check(task_journal_t::restore().size()==(upload ? 1 : 2),
                   "Completed task was left in the durable index.");
             // A late response must not recreate a directory while cleanup owns it.
@@ -98,7 +101,7 @@ int main()
         }
         check(std::filesystem::exists(active->path()/"state"),"Cleanup removed an active task.");
         check(!std::filesystem::exists("task.data/1-1/late.response"),"Late response recreated finished state.");
-        active->finish();
+        active->finish();active->wait();
         check(rendered>=10,"GUI did not render during checkpoint cleanup.");
         std::cout << "PASS: GUI loops/rendered frames during cleanup: " << frames << '/' << rendered << '\n';
         lgo::log_file("finished_all!\n");

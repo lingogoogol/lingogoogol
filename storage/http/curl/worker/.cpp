@@ -269,6 +269,8 @@ auto curl_multi_worker_t::ready_get_unique() -> std::unique_ptr<curl_easy_t>
     return result;
 }
 
+auto curl_multi_worker_t::request_stop() -> void {m_impl->request_stop();}
+
 auto curl_multi_worker_t::stop() -> void
 {
     std::lock_guard stop_lock{m_impl->stop_mutex};

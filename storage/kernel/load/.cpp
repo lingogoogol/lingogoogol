@@ -125,7 +125,7 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
             { return !future.valid() || future.wait_for(0s) == std::future_status::ready; };
         bool busy{multi.pending(task.m_control)};
         if (const auto upload{std::dynamic_pointer_cast<upload_task_t>(*entry)})
-            busy = busy || !ready(upload->m_prepared) || !ready(upload->m_linked);
+            busy = busy || !ready(upload->m_prepared) || !ready(upload->m_allocation) || !ready(upload->m_linked);
         if (const auto download{std::dynamic_pointer_cast<download_task_t>(*entry)})
             busy = busy || !ready(download->m_prepared);
         if (const auto operation{std::dynamic_pointer_cast<directory_task_t>(*entry)})
@@ -148,7 +148,25 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
                 if (state.m_progress_column) state.m_progress_column->remove_object(task.m_progress_div);
                 task.m_row_removed = true;
             }
-            if (!busy) { entry = state.m_finished_tasks.erase(entry); continue; }
+            if (!busy)
+            {
+                if(auto upload=std::dynamic_pointer_cast<upload_task_t>(*entry))
+                {
+                    auto payload=std::make_shared<decltype(upload->m_entity_arr)>(std::move(upload->m_entity_arr));
+                    storage_background([payload]{payload->clear();});
+                }
+                if(auto download=std::dynamic_pointer_cast<download_task_t>(*entry))
+                {
+                    auto payload=std::make_shared<decltype(download->m_file_arr)>(std::move(download->m_file_arr));
+                    storage_background([payload]{payload->clear();});
+                }
+                if(task.m_journal)
+                {
+                    auto journal=task.m_journal;
+                    storage_background([journal]{journal->retire_memory();});
+                }
+                entry = state.m_finished_tasks.erase(entry);continue;
+            }
         }
         ++entry;
     }

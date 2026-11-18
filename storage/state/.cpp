@@ -19,20 +19,36 @@ namespace
         std::condition_variable_any m_ready;
         std::deque<std::filesystem::path> m_paths;
         // Declared last so jthread stops/joins before its queue and locks die.
-        // Drain queued paths on normal exit; an interrupted deletion only
-        // leaves unindexed cache files, never a resumable completed task.
+        // Stop between files on exit. Durable tombstones let the next launch
+        // resume retired-cache deletion without delaying window shutdown.
         std::jthread m_worker{[this](std::stop_token stop)
         {
             for (;;)
             {
                 std::unique_lock lock{m_mutex};
                 m_ready.wait(lock,stop,[this] { return !m_paths.empty(); });
-                if (m_paths.empty()) return;
+                if (stop.stop_requested() || m_paths.empty()) return;
                 auto path=std::move(m_paths.front());
                 m_paths.pop_front();
                 lock.unlock();
                 std::error_code error;
-                std::filesystem::remove_all(path,error);
+                // Task caches are normally flat. Check cancellation at every
+                // filesystem entry; remove_all() cannot be interrupted.
+                const auto remove=[&](auto&& self,const std::filesystem::path& directory) -> bool
+                {
+                    for(std::filesystem::directory_iterator i{directory,error},end;!error && i!=end;i.increment(error))
+                    {
+                        if(stop.stop_requested())return false;
+                        if(i->path().filename()=="retired")continue;
+                        if(i->is_directory(error)){if(!self(self,i->path()))return false;}
+                        else std::filesystem::remove(i->path(),error);
+                    }
+                    if(error || stop.stop_requested())return false;
+                    std::filesystem::remove(directory/"retired",error);
+                    std::filesystem::remove(directory,error);
+                    return !error;
+                };
+                if(std::filesystem::exists(path,error))remove(remove,path);
                 // A locked cache can remain orphaned. It must not turn an
                 // already durable successful transfer into a failed task.
                 if (error)
@@ -519,6 +535,11 @@ auto task_journal_t::restore(const std::atomic_bool* cancelled) -> std::vector<s
         result.push_back(
             std::make_shared<task_journal_t>(path, nlohmann::json::parse(storage_read(path / "state")),cancelled));
     }
+    if(std::filesystem::exists("task.data"))
+        for(const auto& entry:std::filesystem::directory_iterator{"task.data"})
+            if(entry.is_directory() && std::filesystem::exists(entry.path()/"retired") &&
+               !std::ranges::any_of(index,[&](const auto& id){return id==entry.path().filename().string();}))
+                journal_cleanup().add(std::filesystem::absolute(entry.path()));
     return result;
 }
 
