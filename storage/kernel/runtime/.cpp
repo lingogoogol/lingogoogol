@@ -3,6 +3,7 @@ module;
 #include "storage/blob_format.hpp"
 module storage.kernel.runtime;
 import std;
+import lgo.io.file;
 import storage.kernel.load;
 import storage.google;
 import storage.http;
@@ -40,6 +41,13 @@ storage_runtime_t::storage_runtime_t(std::atomic_bool* close) : m_close{close}
 auto storage_runtime_t::open_space(const storage_settings_t& settings, const storage_space_t& space,
     const std::shared_ptr<request_control_t>& control) -> std::shared_ptr<storage_session_t>
 {
+    auto stage=[&](std::string text)
+    {
+        control->activity_set(text);
+        lgo::log_file(std::format("[{:%FT%T}Z] open_space {}: {}\n",
+            std::chrono::system_clock::now(),space.id,text));
+    };
+    stage("讀取空間與服務帳戶設定");
     auto session = std::make_shared<storage_session_t>();
     session->storage_id = space.id;
     session->address = space.name;
@@ -76,12 +84,14 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
     std::filesystem::create_directories(settings.root_path);
     if (std::filesystem::exists(session->root_path))
     {
+        stage("讀取已保存的根目錄");
         const auto root = nlohmann::json::parse(storage_read(session->root_path));
         session->root = root.at("id");
         session->root_account = root.at("account");
     }
     else
     {
+        stage("建立雲端根目錄");
         session->root_account = session->choose(1);
         google_easy_t request;
         request.m_account_context = session->accounts.at(session->root_account);
@@ -91,6 +101,7 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
     }
     // Establish the root before reserves compete for DNS/TLS connections.
     // One shared budget caps total background batches across every account.
+    stage("啟動帳戶共用的預備 blob 佇列");
     {
         std::lock_guard lock{m_mutex};
         auto total=m_queues.size();
@@ -108,6 +119,7 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
         session->queues[address]=reserve;
     }
     session->queue=session->queues.begin()->second;
+    stage("空間已開啟");
     session->remember(session->root,session->root_account,"folder");
     session->clearing = std::ranges::any_of(space.accounts,[&](const auto& address)
         { return clearing_accounts.contains(address); });

@@ -198,7 +198,6 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                         {
                             curl_multi_remove_handle(m_interface, message->easy_handle);
                         }
-                        lgo::log_file(e.message() + " " + easy_ptr->error_context() + "\n");
                     }
                     if (cancelled && cancelled->load()) return failed_count;
                     m_active.erase(message->easy_handle);
@@ -222,17 +221,10 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
                     {
                         // curl's static error text contains no request data. Keep it
                         // with the failure so nested OAuth retries retain the cause.
-                        const auto reason = successful ? easy_ptr->failure_reason() :
+                        const auto reason = successful || message->data.result==CURLE_OK ? easy_ptr->failure_reason() :
                             std::format("Network connection failed (curl {}: {}).",
                                 static_cast<int>(message->data.result), curl_easy_strerror(message->data.result));
-                        lgo::log_file
-                        (
-                            "A transfer failed in curl_multi_t::run:\n"
-                            "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
-                            "  " + easy_ptr->error_context() +
-                            "  response_code: " + std::to_string(curl_easy_multi_access_t::response_code_get(*easy_ptr)) +
-                            "\n" + reason + "\n"
-                        );
+                        easy_ptr->log_failure(reason);
                         easy_ptr->failed(reason);
                         m_waiting.emplace(message->easy_handle);
                         ++failed_count;

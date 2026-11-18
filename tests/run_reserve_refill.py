@@ -101,6 +101,7 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
         # Each scenario replaces the complete queue, including its tail edit.
         (test/'test-queue.tail').unlink(missing_ok=True)
         (test/'test-queue').write_text(json.dumps(['reserved']*initial))
+        (test/'refill.log').unlink(missing_ok=True)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             run = subprocess.run(['wine64', str(test/'test.exe'), mode], cwd=test,

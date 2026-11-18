@@ -70,6 +70,13 @@ export {
         std::atomic_uint epoch{};
         mutable std::mutex mutex;
         std::string error;
+        std::string activity_text, retry_text;
+        auto activity_set(std::string text) -> void
+        { std::lock_guard lock{mutex}; activity_text=std::move(text); retry_text.clear(); }
+        auto retry_status_set(std::string text) -> void
+        { std::lock_guard lock{mutex}; retry_text=std::move(text); }
+        auto activity() const -> std::string
+        { std::lock_guard lock{mutex}; return activity_text+(retry_text.empty() ? "" : " · "+retry_text); }
         std::set<std::uintptr_t> sockets;
         auto cancel() -> void;
         auto pause(bool value) -> void;

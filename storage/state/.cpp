@@ -273,6 +273,7 @@ auto request_control_t::retry() -> void
 {
     std::lock_guard lock{mutex};
     error.clear();
+    retry_text.clear();
     ++epoch;
     paused = false;
 }

@@ -3,6 +3,7 @@ import std;
 import storage.google;
 import storage.http;
 import storage.kernel;
+import lgo.io;
 using namespace std::chrono_literals;
 using nlohmann::json;
 
@@ -15,10 +16,28 @@ int main(int argc,char** argv)
     {
         check(argc==2,"Missing mode.");
         const std::string mode=argv[1];
+        lgo::init_logfile("refill.log");
         {
             curl_easy_t uncontrolled;
             uncontrolled.failed("Synthetic connection failure.");
             check(!uncontrolled.runnable(),"Uncontrolled synchronous requests retried without backoff.");
+        }
+        {
+            auto control=std::make_shared<request_control_t>();
+            curl_easy_t request;
+            request.host_set("https://fixture.invalid");request.path_set("/retry");request.control_set(control);
+            for(int i=0;i<1000;++i)
+            {
+                request.log_failure("Synthetic connection failure.");
+                const auto written=storage_read("refill.log");
+                check(std::count(written.begin(),written.end(),'\n')==i+1,
+                    "A repeated failure was not immediately flushed to the log.");
+            }
+            control->fail("Synthetic connection failure.");
+            request.log_failure("Synthetic connection failure.");
+            const auto written=storage_read("refill.log");
+            check(std::count(written.begin(),written.end(),'\n')==1001,
+                "Terminal failure was not immediately written.");
         }
         auto account=std::make_shared<google_account_t>("user1@storage-ai-project1.iam.gserviceaccount.com","synthetic-key");
         std::atomic_bool close{};

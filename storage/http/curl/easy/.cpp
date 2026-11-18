@@ -94,7 +94,16 @@ auto curl_easy_t::log_http_response() const -> void
 
 auto curl_easy_t::error_context() const -> std::string
 {
-    return "interface=" + std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface));
+    return "interface=" + std::format("{:016x}", reinterpret_cast<std::uintptr_t>(m_interface))+
+        " method="+m_verb+" endpoint="+m_host+m_path;
+}
+
+auto curl_easy_t::log_failure(std::string_view reason) const -> void
+{
+    // log_file flushes each complete message; every failure is written now,
+    // including repeated failures, with no in-memory aggregation to lose.
+    lgo::log_file(std::format("[{:%FT%T}Z] transfer failure {} attempts={} {}\n",
+        std::chrono::system_clock::now(),error_context(),static_cast<std::uint64_t>(m_failures)+1,reason));
 }
 
 auto curl_easy_t::get() -> curl_easy_t&
@@ -376,16 +385,9 @@ auto curl_easy_t::run() -> void
             break;
         }
         const auto reason = failure_reason();
-        lgo::log_file
-        (
-            "A transfer failed in curl_easy_t::run:"
-            "  current_time:" + std::format("{:%T}", std::chrono::system_clock::now()) +
-            "  " + error_context() +
-            // Detailed diagnostics are opt-in and redact credential fields.
-            "  response_code: " + std::to_string(m_response_code) + "\n" + reason + "\n"
-        );
         //Rewind the request body before retrying a failed PATCH/POST. Otherwise
         //folder publication retries send an empty body after the first attempt.
+        log_failure(reason);
         failed(reason);
         }
 	return;
@@ -505,9 +507,10 @@ auto curl_easy_t::run_try() -> void
         }
         catch (lgo::error_t error)
         {
-            lgo::log_file(std::string{ error.what() } + " " + error_context() + "\n");
             //A connection failure can also leave a partially consumed request body.
-            failed("Network connection failed.");
+            const auto reason=std::string{"Network connection failed: "}+error.message();
+            log_failure(reason);
+            failed(reason);
             continue;
         }
         break;

@@ -74,6 +74,7 @@ export
         // Typed clients attach identity without coupling the transport module
         // to Google account modules (which themselves depend on this module).
         virtual auto error_context() const -> std::string;
+        auto log_failure(std::string_view reason) const -> void;
         // Nonblocking preparation before each attempt. False keeps the request
         // outside CURLM while asynchronous credentials are being refreshed.
         virtual auto prepare() -> bool;

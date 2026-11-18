@@ -93,6 +93,8 @@ int main(int argc,char** argv)
         auto validate=[&]
         {
             google_easy_t request;
+            auto control=std::make_shared<request_control_t>();control->retry_limit=0;
+            request.control_set(control);
             request.path_set("/fixture/validate"); request.method_get(); request.run();
         };
         if (phase=="upload-crash")

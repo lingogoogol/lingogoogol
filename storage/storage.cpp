@@ -256,14 +256,32 @@ auto app() -> void
         settings_control->retry();
         settings_control->cancelled=false;
         settings_control->retry_limit=candidate.network_retries;
+        settings_control->activity_set("");
+        const auto operation=name;
         begin_settings_row(std::move(name),true);
         persistent.m_switching=true;
         settings_job=std::async(std::launch::async,
-            [candidate=std::move(candidate),work=std::move(work),reopen_space_menu,finished_setup=std::move(finished_setup)]
+            [candidate=std::move(candidate),work=std::move(work),reopen_space_menu,finished_setup=std::move(finished_setup),
+             operation,control=settings_control]
             {
-                auto session=work();
-                candidate.save();
-                return settings_result_t{candidate,std::move(session),reopen_space_menu,finished_setup};
+                const auto start=std::chrono::steady_clock::now();
+                lgo::log_file(std::format("[{:%FT%T}Z] operation started: {}\n",std::chrono::system_clock::now(),operation));
+                try
+                {
+                    auto session=work();
+                    control->activity_set("保存空間設定");
+                    candidate.save();
+                    lgo::log_file(std::format("[{:%FT%T}Z] operation completed: {} elapsed={}ms\n",
+                        std::chrono::system_clock::now(),operation,
+                        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count()));
+                    return settings_result_t{candidate,std::move(session),reopen_space_menu,finished_setup};
+                }
+                catch(const std::exception& error)
+                {
+                    lgo::log_file(std::format("[{:%FT%T}Z] operation failed: {} stage={} reason={}\n",
+                        std::chrono::system_clock::now(),operation,control->activity(),error.what()));
+                    throw;
+                }
             });
     };
     persistent.m_apply_settings = [&](storage_settings_t candidate)
@@ -990,7 +1008,8 @@ auto app() -> void
             }
             else
             {
-                settings_text->set_text(settings_task_name+"（處理中）",false);
+                const auto activity=settings_control->activity();
+                settings_text->set_text(settings_task_name+"（"+(activity.empty() ? "處理中" : activity)+"）",false);
                 settings_retry->hide();
                 settings_separator->hide();
                 settings_cancel->set_pos(settings_retry->get_pos());
