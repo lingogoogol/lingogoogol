@@ -127,6 +127,7 @@ class Handler(fixture['Handler']):
 
 observation = r'''
         {
+            int window_x{},window_y{};glfwGetWindowPos(engine.window_get(),&window_x,&window_y);
             auto rows=nlohmann::json::array(), footer=nlohmann::json::array();
             auto point=[](auto& object) {
                 const auto p=object.get_pos(); const auto s=object.get_size();
@@ -157,6 +158,8 @@ observation = r'''
             auto value=nlohmann::json{{"toolbar",point(*persistent.m_login_button)},
                 {"label",persistent.m_login_button->get_text()},{"menu",bool(persistent.m_account_menu)},
                 {"dialog",bool(persistent.m_dialog)},{"switching",persistent.m_switching},
+                {"maximized",bool(glfwGetWindowAttrib(engine.window_get(),GLFW_MAXIMIZED))},
+                {"window_x",window_x},{"window_y",window_y},
                 {"log_path",lgo::get_logfile_path()},{"workers",load_state.m_settings.worker_count},
                 {"rows",rows},{"footer",footer},{"page",static_cast<int>(menu_page)},
                 {"session",load_state.m_session ? load_state.m_session->storage_id : ""},
@@ -191,7 +194,9 @@ def wait(predicate, message, timeout=30):
         assert app.poll() is None, 'GUI exited early'
         time.sleep(.04)
     raise AssertionError(message+'; '+str(snapshot()))
-def click(at): command('mousemove','--window',window,at['x'],at['y'],'click','1'); time.sleep(.12)
+def click(at):
+    s=snapshot()
+    command('mousemove',s['window_x']+at['x'],s['window_y']+at['y'],'click','1');time.sleep(.12)
 def ready(page):
     value=wait(lambda: snapshot() if snapshot()['menu'] and snapshot()['page']==page and not snapshot()['switching'] else None,'Missing menu '+str(page))
     assert value['log_path']==session_log,'Space operation split the session log'
@@ -219,12 +224,17 @@ def restart():
     window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
     command('windowfocus','--sync',window)
     session_log=snapshot()['log_path']
+# A real window manager is required: Wine otherwise reports a maximized
+# client while X11 keeps the original surface size and clips toolbar buttons.
+window_manager=subprocess.Popen(['openbox'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+time.sleep(.4)
 app=subprocess.Popen(['wine64',sys.argv[1]])
 try:
     wait(lambda:Path('spaces-ui.json').exists(),'GUI failed to start')
     window=command('search','--onlyvisible','--name','wWinMain.engine').splitlines()[0]
     command('windowfocus','--sync',window)
     assert snapshot()['label']=='空間' and not snapshot()['session']
+    assert snapshot()['maximized'],'Application did not start maximized'
     session_log=snapshot()['log_path']
     def logfile(value):return Path(value.replace('\\','/'))
     original_log=logfile(session_log)
@@ -410,6 +420,7 @@ try:
     print('PASS: one log per process across settings/space operations, directory-change continuation, closed settings dropdown, rendered space/user/project/service menus, named provisioning, managed-key filtering, linking, login/logout/restart, typed removals, retained cloud identities and clear warning.')
 finally:
     if app.poll() is None: app.kill();app.wait()
+    if window_manager.poll() is None: window_manager.terminate();window_manager.wait(timeout=5)
 '''
 
 
@@ -459,6 +470,7 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
         if (std::filesystem::exists("resize-window")) {
             const auto size=nlohmann::json::parse(storage_read("resize-window"));
             std::filesystem::remove("resize-window");
+            glfwRestoreWindow(engine.window_get());
             glfwSetWindowSize(engine.window_get(),size.at(0).get<int>(),size.at(1).get<int>());
         }
         if (std::filesystem::exists("open-terms-test")) {

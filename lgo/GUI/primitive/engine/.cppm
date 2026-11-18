@@ -135,7 +135,7 @@ export namespace lgo
         )
         -> std::ranges::iterator_t<std::vector<vk::QueueFamilyProperties2>>;
     public:
-        engine_t(size_2D window_size, std::string name);
+        engine_t(size_2D window_size, std::string name, bool maximized = false);
         engine_t(const engine_t&) = delete;
         ~engine_t() noexcept;
         auto operator=(const engine_t&) = delete;

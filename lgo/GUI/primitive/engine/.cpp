@@ -255,7 +255,8 @@ namespace lgo {
     engine_t::engine_t
     (
         size_2D window_size,
-        std::string name
+        std::string name,
+        bool maximized
     ):
     m_window_size{ window_size }, m_name{ vulkan_names_enabled ? name : std::string{} }
     {
@@ -268,6 +269,7 @@ namespace lgo {
                 m_context.enumerateInstanceVersion() < Vulkan_version_encode(0, 1, 3, 0))
                 throw vulkan_unsupported_t{ "The Vulkan loader must support Vulkan 1.3 or later." };
             glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            glfwWindowHint(GLFW_MAXIMIZED, maximized);
             // GLFW windows are resizable by default, including maximize and restore.
             m_window = glfwCreateWindow
             (

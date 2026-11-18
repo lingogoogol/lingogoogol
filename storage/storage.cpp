@@ -54,7 +54,7 @@ auto app() -> void
     std::map<std::string,std::size_t> font_cache{{settings.font_path,0}};
     fonts.push_back(std::make_unique<lgo::font_face_t>(settings.font_path, lgo::std_font_size.x));
     lgo::font_preference_t::default_get().assign(1, fonts.back().get());
-    lgo::engine_t engine{lgo::size_2D{1536, 1024}, "wWinMain.engine"};
+    lgo::engine_t engine{lgo::size_2D{1536, 1024}, "wWinMain.engine", true};
     struct font_cleanup_t
     {
         lgo::engine_t& engine;
