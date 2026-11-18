@@ -388,7 +388,7 @@ auto app() -> void
         {
             persistent.m_dialog=std::make_unique<lgo::modal_dialog_t>(&engine,&depth,"設定並行上傳",
                 std::vector<std::string>{user->address()+"  ·  "+name,"輸入一個帳戶數套用全部，或以逗號逐一指定。"},
-                std::vector<std::pair<std::string,std::string>>{{"新增專案數","2"},{"每個專案的服務帳戶數","2"}},"下一步");
+                std::vector<std::pair<std::string,std::string>>{{"新增專案數","4"},{"每個專案的服務帳戶數","8"}},"下一步");
             persistent.m_dialog_done=[&,user,target,name](bool ok,const auto& values)
             {
                 if (!ok) return true;
