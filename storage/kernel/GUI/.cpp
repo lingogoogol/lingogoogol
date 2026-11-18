@@ -498,8 +498,8 @@ namespace
         auto text{preparing ? "準備" + label : std::move(label)};
         if (task->m_journal)
         {
-            const auto saved=task->m_journal->progress("task");
-            task->m_saved_progress=saved ? saved->value("progress",std::uint64_t{}) : 0;
+            const auto saved=task->m_journal->saved_progress();
+            task->m_saved_progress=saved.is_null() ? 0 : saved.value("progress",std::uint64_t{});
             task->m_control->user_paused=task->m_journal->field("user_paused").value_or(false).get<bool>();
             if (task->m_saved_progress)
                 text = "續傳：" + std::to_string(task->m_saved_progress) + "B " + text;
@@ -1071,6 +1071,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
           std::shared_ptr<lgo::divy_soft_t>* progress_column, load_state_t* load_state,
           curl_multi_worker_t* multi, blob_queue_t* blob_queue, std::string* pos) -> void
 {
+    storage_gui_thread_set();
     if (persistent->m_close_accounts) persistent->m_close_accounts();
     persistent->m_account_buttons.clear();
     state->clear_state();
@@ -1203,8 +1204,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         bool reset_view{};
         if (task.m_kind == "directory-delete")
         {
-            const auto saved = task.m_journal->data();
-            const auto ids = saved.value("delete_ids", std::vector<std::string>{});
+            const auto ids = task.m_journal->field("delete_ids").value_or(nlohmann::json::array()).get<std::vector<std::string>>();
             if (persistent->m_clipboard && persistent->m_clipboard->session == task.m_session &&
                 std::ranges::find(ids, persistent->m_clipboard->entity.at("id").get<std::string>()) != ids.end())
                 persistent->m_clipboard.reset();

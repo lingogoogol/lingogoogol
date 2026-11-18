@@ -93,6 +93,7 @@ export
         auto control_set(std::shared_ptr<request_control_t> control) -> void;
         auto runnable() -> bool;
         auto replay() -> bool;
+        auto prepare_checkpoint_key() -> void;
         auto checkpoint() -> void;
         virtual auto failed(std::string reason) -> void;
         virtual auto saved_response() -> std::string;

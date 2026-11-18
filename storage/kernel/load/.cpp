@@ -52,7 +52,21 @@ auto finish_task(load_task_t& task, task_result_t result, std::string text) -> v
     if (result != task_result_t::completed) task.m_control->cancel();
     // Sign-out interrupts work like process shutdown: keep its last durable
     // checkpoint, including the user's explicit pause state, for next login.
-    if (task.m_journal && result != task_result_t::signed_out) task.m_journal->finish();
+    if(task.m_journal && result!=task_result_t::signed_out)
+    {
+        if(!task.m_finishing)
+        {
+            task.m_terminal_result=result;task.m_terminal_text=std::move(text);
+            task.m_finish_epoch=task.m_control->epoch;task.m_finishing=true;
+            task.m_journal->finish();
+        }
+        if(task.m_finish_epoch!=task.m_control->epoch)
+        {task.m_finish_epoch=task.m_control->epoch;task.m_journal->retry_writes();}
+        try{if(!task.m_journal->ready())return;}
+        catch(const std::exception& error){task.m_control->fail(error.what());return;}
+        // Publish terminal UI state only after the index removal is durable.
+        result=task.m_terminal_result;text=std::move(task.m_terminal_text);task.m_finishing=false;
+    }
     if (result == task_result_t::signed_out) task.m_dismissed = true;
     task.m_result = result == task_result_t::cancelled ? task_result_t::cancelling : result;
     if (result == task_result_t::cancelled && text.starts_with("已取消："))
@@ -72,7 +86,13 @@ auto finish_task(load_task_t& task, task_result_t result, std::string text) -> v
 auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> void
 {
     using namespace std::chrono_literals;
-    for (auto entry{state.m_finished_tasks.begin()}; entry != state.m_finished_tasks.end();)
+    for(auto i=state.m_task_list.begin();i!=state.m_task_list.end();)
+    {
+        auto task=*i++;
+        if(task->m_finishing)finish_task(*task,task->m_terminal_result,task->m_terminal_text);
+    }
+    auto remaining=std::min<std::size_t>(32,state.m_finished_tasks.size());
+    for (auto entry{state.m_finished_tasks.begin()}; remaining-- && entry != state.m_finished_tasks.end();)
     {
         auto& task{**entry};
         if (task.m_result != task_result_t::cancelling && !task.m_dismissed)
@@ -453,7 +473,7 @@ auto transfer_begin(load_state_t* state, curl_multi_worker_t& multi, curl_easy_t
         auto task_ptr{*entry};
         if (++entry==state->m_task_list.end()) entry=state->m_task_list.begin();
         state->m_next_transfer=*entry;
-        if (task_ptr->m_control->cancelled || task_ptr->m_control->paused || task_ptr->m_control->user_paused ||
+        if (task_ptr->m_finishing || task_ptr->m_control->cancelled || task_ptr->m_control->paused || task_ptr->m_control->user_paused ||
             (task_ptr->m_session && task_ptr->m_session->clearing))
             continue;
         if (task_ptr->m_session)

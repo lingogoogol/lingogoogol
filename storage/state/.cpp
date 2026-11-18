@@ -295,19 +295,10 @@ task_journal_t::task_journal_t(std::filesystem::path path, nlohmann::json intent
 }
 auto task_journal_t::save_locked() -> void
 {
-    if (!m_initial_saved)
-    {
-        storage_atomic_write(m_path/"state",m_data.dump());
-        m_initial_saved=true;
-    }
-    else
-    {
-        // Persist only this change, never the accumulated entity/routing table.
-        // Atomic files make interrupted writes ignorable (.tmp); the initial
-        // intent plus the ordered records reconstruct the in-memory snapshot.
-        storage_atomic_write(m_path/std::format("{:020}.record",m_next_record),m_pending.dump());
-        ++m_next_record;
-    }
+    auto value=std::make_shared<nlohmann::json>(m_initial_saved ? std::move(m_pending) : m_data);
+    const auto path=m_initial_saved ? m_path/std::format("{:020}.record",m_next_record++) : m_path/"state";
+    m_writes.push([path,value]{storage_atomic_write(path,value->dump());});
+    m_initial_saved=true;
     m_pending=nlohmann::json::object();
     m_dirty=false;
 }
@@ -315,6 +306,24 @@ auto task_journal_t::data() const -> nlohmann::json
 {
     std::lock_guard lock{m_mutex};
     return m_data;
+}
+auto task_journal_t::intent() const -> nlohmann::json
+{
+    std::lock_guard lock{m_mutex};
+    auto result=nlohmann::json::object();
+    for(const auto* key:{"kind","path","pos","account_path","account_email","account_namespace",
+                         "root_directory","root","blob_version","time","entity","destination","declined","destination_ready"})
+        if(m_data.contains(key))result[key]=m_data.at(key);
+    return result;
+}
+auto task_journal_t::retire_memory() -> void
+{
+    std::lock_guard lock{m_mutex};
+    m_data=nlohmann::json::object();m_task_progress=nullptr;
+}
+auto task_journal_t::saved_progress() const -> nlohmann::json
+{
+    std::lock_guard lock{m_mutex};return m_task_progress;
 }
 auto task_journal_t::field(std::string_view key) const -> std::optional<nlohmann::json>
 {
@@ -324,21 +333,28 @@ auto task_journal_t::field(std::string_view key) const -> std::optional<nlohmann
 }
 auto task_journal_t::progress(std::string_view key) const -> std::optional<nlohmann::json>
 {
-    std::lock_guard lock{m_mutex};
-    if (m_finished) return std::nullopt;
+    {std::lock_guard lock{m_mutex};if(m_finished)return std::nullopt;}
+    m_writes.wait();
     const auto path=m_path/(storage_digest(key)+".progress");
-    if (!std::filesystem::exists(path)) return std::nullopt;
+    if(!std::filesystem::exists(path))return std::nullopt;
     return nlohmann::json::parse(storage_read(path));
 }
-auto task_journal_t::progress(std::string_view key, const nlohmann::json& value) -> void
+auto task_journal_t::progress(std::string_view key,const nlohmann::json& value) -> void
 {
-    std::lock_guard lock{m_mutex};
-    if (!m_finished) storage_atomic_write(m_path/(storage_digest(key)+".progress"),value.dump());
+    {
+        std::lock_guard lock{m_mutex};
+        if(m_finished)return;
+        if(key=="task")m_task_progress=value;
+        const auto path=m_path/(storage_digest(key)+".progress");
+        auto saved=std::make_shared<nlohmann::json>(value);
+        m_writes.push([path,saved]{storage_atomic_write(path,saved->dump());});
+    }
+    if(!storage_is_gui_thread())m_writes.wait();
 }
 auto task_journal_t::record_routing(const std::vector<std::string>& ids, const std::string& address,
                                    const std::string& type) -> void
 {
-    std::lock_guard lock{m_mutex};
+    std::unique_lock lock{m_mutex};
     if (m_finished) return;
     for (const auto& id : ids)
     {
@@ -353,10 +369,12 @@ auto task_journal_t::record_routing(const std::vector<std::string>& ids, const s
         }
     }
     if (m_dirty) save_locked();
+    lock.unlock();
+    if(!storage_is_gui_thread())m_writes.wait();
 }
 auto task_journal_t::set(std::string key, nlohmann::json value) -> void
 {
-    std::lock_guard lock{m_mutex};
+    std::unique_lock lock{m_mutex};
     if (m_finished)
         return;
     const auto found=m_data.find(key);
@@ -364,13 +382,16 @@ auto task_journal_t::set(std::string key, nlohmann::json value) -> void
     { m_pending["fields"][key]=value; m_data[std::move(key)] = std::move(value); m_dirty=true; }
     // A failed flush must remain dirty even if a retry supplies the same value.
     if (m_dirty) save_locked();
+    lock.unlock();
+    if(!storage_is_gui_thread())m_writes.wait();
 }
 auto task_journal_t::allocate(std::string key, std::size_t count,
                               const std::function<std::vector<std::string>(std::size_t)>& reserve,
                               const nlohmann::json& fields, const std::string& address, const std::string& type)
     -> std::vector<std::string>
 {
-    std::lock_guard lock{m_mutex};
+    std::lock_guard allocation{m_allocation_mutex};
+    std::unique_lock lock{m_mutex};
     if (m_finished)
         throw std::runtime_error{"Task cancelled."};
     auto& entries{m_data["allocations"]};
@@ -383,7 +404,10 @@ auto task_journal_t::allocate(std::string key, std::size_t count,
     }
     else
     {
+        lock.unlock();
         result=reserve(count);
+        lock.lock();
+        if(m_finished)throw std::runtime_error{"Task cancelled."};
         if (result.size()!=count) throw std::runtime_error{"Incomplete ID reservation."};
         m_pending["allocations"][key]=result;
         entries[std::move(key)]=result;
@@ -404,36 +428,45 @@ auto task_journal_t::allocate(std::string key, std::size_t count,
             }
         }
     if (m_dirty) save_locked();
+    lock.unlock();
+    if(!storage_is_gui_thread())m_writes.wait();
     return result;
 }
 auto task_journal_t::response(std::string_view key) const -> std::optional<std::string>
 {
-    std::lock_guard lock{m_mutex};
-    if (m_finished) return std::nullopt;
-    const auto path{m_path / (std::string{key} + ".response")};
-    if (!std::filesystem::exists(path))
-        return std::nullopt;
+    {std::lock_guard lock{m_mutex};if(m_finished)return std::nullopt;}
+    m_writes.wait();
+    const auto path=m_path/(std::string{key}+".response");
+    if(!std::filesystem::exists(path))return std::nullopt;
     return storage_read(path);
 }
-auto task_journal_t::response(std::string_view key, std::string_view value) -> void
+auto task_journal_t::response(std::string_view key,std::string_view value) -> void
 {
-    std::lock_guard lock{m_mutex};
-    if (m_finished)
-        return;
-    storage_atomic_write(m_path / (std::string{key} + ".response"), value);
+    {
+        std::lock_guard lock{m_mutex};if(m_finished)return;
+        const auto path=m_path/(std::string{key}+".response");
+        auto saved=std::make_shared<std::string>(value);
+        m_writes.push([path,saved]{storage_atomic_write(path,*saved);});
+    }
+    if(!storage_is_gui_thread())m_writes.wait();
 }
 auto task_journal_t::finish() -> void
 {
-    std::lock_guard lock{m_mutex};
-    if (m_finished)
-        return;
-    update_index(m_path.filename().string(), false);
-    m_finished = true;
-    // The small index must be durable before publishing completion. Removing
-    // tens of thousands of response files must not block input/rendering.
-    // m_finished and the journal mutex prevent late writers from recreating
-    // files while the independent worker deletes them.
-    journal_cleanup().add(std::filesystem::absolute(m_path));
+    {
+        std::lock_guard lock{m_mutex};
+        if(!m_finished)
+        {
+            const auto path=std::filesystem::absolute(m_path);
+            m_writes.push([path]
+            {
+                storage_atomic_write(path/"retired","");
+                update_index(path.filename().string(),false);
+                journal_cleanup().add(path);
+            });
+            m_finished=true;
+        }
+    }
+    if(!storage_is_gui_thread())m_writes.wait();
 }
 auto task_journal_t::create(nlohmann::json intent) -> std::shared_ptr<task_journal_t>
 {
@@ -445,7 +478,8 @@ auto task_journal_t::create(nlohmann::json intent) -> std::shared_ptr<task_journ
         std::lock_guard lock{result->m_mutex};
         result->save_locked();
     }
-    update_index(id, true);
+    result->m_writes.push([id]{update_index(id,true);});
+    if(!storage_is_gui_thread())result->m_writes.wait();
     return result;
 }
 auto task_journal_t::restore() -> std::vector<std::shared_ptr<task_journal_t>>

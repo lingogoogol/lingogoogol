@@ -213,9 +213,11 @@ auto app() -> void
         if (found==settings.spaces.end()) throw std::runtime_error{"空間已移除"};
         return *found;
     };
+    storage_write_queue_t settings_writes;
     auto sync_settings = [&]
     {
-        settings.save();
+        settings_writes.retry();
+        settings_writes.push([copy=settings]{copy.save();});
         load_state.m_settings = settings;
     };
     auto suspend_space = [&](const std::string& id)
@@ -243,7 +245,11 @@ auto app() -> void
         persistent.m_switching=true;
         settings_job=std::async(std::launch::async,
             [candidate=std::move(candidate),work=std::move(work),reopen_space_menu,finished_setup=std::move(finished_setup)]
-            { return settings_result_t{candidate,work(),reopen_space_menu,finished_setup}; });
+            {
+                auto session=work();
+                candidate.save();
+                return settings_result_t{candidate,std::move(session),reopen_space_menu,finished_setup};
+            });
     };
     persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
@@ -805,7 +811,6 @@ auto app() -> void
                 auto result{settings_job.get()};
                 auto next_font{
                     std::make_unique<lgo::font_face_t>(result.settings.font_path, lgo::std_font_size.x)};
-                result.settings.save();
                 const auto next_log_path = log_path(result.settings);
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
@@ -967,7 +972,8 @@ auto app() -> void
         lgo::text_line_t::pending_load();
     }
     // Space membership and sign-in state are durable independently of tasks.
-    settings.save();
+    sync_settings();
+    settings_writes.wait();
     engine.flush();
     state.clear_state();
     if (!engine.gpu_failure_reason().empty())

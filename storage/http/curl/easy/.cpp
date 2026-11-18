@@ -701,6 +701,7 @@ auto curl_easy_t::runnable() -> bool
             m_epoch = m_control->epoch;
             m_failures = 0;
             m_retry_at = {};
+            if(m_journal)m_journal->retry_writes();
             manual_retry();
         }
         if (m_control->cancelled || m_control->paused || m_control->user_paused)
@@ -751,10 +752,9 @@ auto curl_easy_t::request_body() const -> const std::string&
     return m_read->m_payload;
 }
 
-auto curl_easy_t::replay() -> bool
+auto curl_easy_t::prepare_checkpoint_key() -> void
 {
-    if (!m_journal)
-        return false;
+    if(!m_journal)return;
     if (m_cache_key.empty())
     {
         std::string request{m_verb + " " + m_host + m_path + "\n"};
@@ -763,6 +763,11 @@ auto curl_easy_t::replay() -> bool
         request += request_body();
         m_cache_key = storage_digest(request);
     }
+}
+auto curl_easy_t::replay() -> bool
+{
+    if(!m_journal)return false;
+    prepare_checkpoint_key();
     if (auto saved{m_journal->response(m_cache_key)})
     {
         restore_response(*saved);

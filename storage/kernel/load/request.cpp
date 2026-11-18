@@ -61,11 +61,12 @@ auto task_batch_submit(load_state_t& state, curl_multi_worker_t& multi, google_b
 {
     const bool batched = state.m_settings.batch_request;
     const auto count = batched ? state.m_settings.batch_size : std::size_t{1};
-    if ((batched && request.part_count()<=count) || request.replay())
+    if (batched && request.part_count()<=count)
     {
         multi.add(std::move(request));
         return;
     }
+    request.prepare_checkpoint_key();
     auto callback = state.m_end.extract(request.interface_get());
     if (callback.empty()) throw std::logic_error{"Missing task request callback."};
     auto group = std::make_shared<request_group_t>();

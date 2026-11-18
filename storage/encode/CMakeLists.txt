@@ -44,6 +44,9 @@ if(LGO_BUILD_CONTENT_TESTS)
     add_executable(folder-metadata-test "${PROJECT_SOURCE_DIR}/tests/folder_metadata.cpp")
     target_link_libraries(folder-metadata-test PRIVATE common)
     add_test(NAME folder-metadata COMMAND folder-metadata-test)
+    add_executable(async-state-test "${PROJECT_SOURCE_DIR}/tests/async_state.cpp")
+    target_link_libraries(async-state-test PRIVATE common storage.state)
+    add_test(NAME async-state COMMAND async-state-test)
 endif()
 
 target_link_libraries(

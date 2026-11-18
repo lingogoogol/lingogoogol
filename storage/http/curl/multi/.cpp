@@ -116,6 +116,7 @@ auto curl_multi_t::run(const std::atomic_bool* cancelled) -> std::uint64_t
         }
         try
         {
+            if(easy.m_journal && !easy.m_journal->ready()){++entry;continue;}
             if (easy.replay())
             {
                 m_ready.emplace(*entry);

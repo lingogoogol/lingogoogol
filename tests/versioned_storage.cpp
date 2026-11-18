@@ -43,6 +43,22 @@ int main()
         auto pump=[&]{check(!message_loop(&engine,&persistent,&multi,&loads,session->queue.get()),"Window closed");lgo::text_line_t::pending_load();std::this_thread::sleep_for(1ms);};
         auto wait=[&](auto done){const auto deadline=std::chrono::steady_clock::now()+45s;while(!done()){check(std::chrono::steady_clock::now()<deadline,"Timed out");pump();}};
         wait([&]{return persistent.m_listings.empty();});
+        // Deliberately block the journal writer: input/rendering and enqueueing
+        // a new intent/pause must remain independent of a slow disk.
+        for(int i=0;i<20;++i)pump();
+        storage_write_queue_t disk;
+        auto started=std::make_shared<std::atomic_bool>(false);
+        disk.push([started]{*started=true;std::this_thread::sleep_for(350ms);});
+        wait([&]{return started->load();});
+        const auto queued=std::chrono::steady_clock::now();
+        auto intent=task_journal_t::create({{"kind","upload-file"},{"path","latency-fixture"}});
+        intent->set("user_paused",true);
+        check(std::chrono::steady_clock::now()-queued<150ms,"GUI waited for blocked journal I/O");
+        check(!intent->ready(),"Intent was sent past a blocked durability barrier");
+        unsigned responsive_frames{};
+        while(!intent->ready()){pump();++responsive_frames;}
+        check(responsive_frames>=2,"Render loop did not continue while saving state");
+        intent->finish();wait([&]{return intent->ready();});
         google_easy_t request;
         auto entries=[&](std::string id){return list_folder_content(request,&id,session.get());};
         auto name=[&](const std::string& id){session->bind(request,id);return json::parse(blob_get_name_run(request,id));};

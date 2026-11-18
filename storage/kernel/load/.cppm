@@ -175,6 +175,10 @@ export
         std::string m_paused_text;
         std::uint64_t m_saved_progress{};
         task_result_t m_result{task_result_t::active};
+        bool m_finishing{};
+        task_result_t m_terminal_result{task_result_t::completed};
+        std::string m_terminal_text;
+        unsigned m_finish_epoch{};
         bool m_dismissed{};
         bool m_row_removed{};
         bool m_preparation_failed{};

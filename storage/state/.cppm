@@ -4,6 +4,22 @@ export module storage.state;
 import std;
 
 export {
+    // The render thread only enqueues ordered state writes. Network workers
+    // wait for the corresponding journal before sending remote mutations.
+    auto storage_gui_thread_set() -> void;
+    auto storage_is_gui_thread() -> bool;
+    auto storage_background(std::function<void()> work) -> std::shared_future<void>;
+    class storage_write_queue_t
+    {
+        struct implementation_t;
+        std::shared_ptr<implementation_t> m_impl;
+      public:
+        storage_write_queue_t();
+        auto push(std::function<void()> work) -> void;
+        auto ready() const -> bool;
+        auto wait() const -> void;
+        auto retry() -> void;
+    };
     // All snapshots are replaced atomically, after flushing their temporary file.
     auto storage_atomic_write(const std::filesystem::path& path, std::string_view content) -> void;
     auto storage_flush_file(const std::filesystem::path& path) -> void;
@@ -71,6 +87,9 @@ export {
     {
         std::filesystem::path m_path;
         mutable std::mutex m_mutex;
+        std::mutex m_allocation_mutex;
+        storage_write_queue_t m_writes;
+        nlohmann::json m_task_progress;
         nlohmann::json m_data;
         nlohmann::json m_pending=nlohmann::json::object();
         std::uint64_t m_next_record{};
@@ -82,6 +101,13 @@ export {
       public:
         task_journal_t(std::filesystem::path path, nlohmann::json intent);
         auto data() const -> nlohmann::json;
+        auto intent() const -> nlohmann::json;
+        auto saved_progress() const -> nlohmann::json;
+        // Only a retired task may discard its in-memory replay tables.
+        auto retire_memory() -> void;
+        auto ready() const -> bool { return m_writes.ready(); }
+        auto wait() const -> void { m_writes.wait(); }
+        auto retry_writes() -> void { m_writes.retry(); }
         auto field(std::string_view key) const -> std::optional<nlohmann::json>;
         auto progress(std::string_view key) const -> std::optional<nlohmann::json>;
         auto progress(std::string_view key, const nlohmann::json& value) -> void;
