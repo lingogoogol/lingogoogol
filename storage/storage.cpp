@@ -580,12 +580,12 @@ auto app() -> void
         std::vector<action_t> actions;
         if (menu_page==menu_page_t::spaces)
         {
-            if (std::filesystem::exists(parallel_checkpoint))
-            {
-                actions.emplace_back("繼續配置",[&] { resume_parallel(); });
-            }
-            else if (auto current=load_state.m_session)
-                actions.emplace_back("擴充並行",[&,id=current->storage_id] { start_parallel(id); });
+            const bool pending=std::filesystem::exists(parallel_checkpoint);
+            actions.emplace_back("繼續配置",std::function<void()>{});
+            if(pending)actions.back().second=[&] { resume_parallel(); };
+            actions.emplace_back("擴充並行",std::function<void()>{});
+            if(!pending && load_state.m_session)
+                actions.back().second=[&,id=load_state.m_session->storage_id] { start_parallel(id); };
             actions.emplace_back("新增空間",[&]
             {
                 name_dialog("新增空間","空間名稱",[&](std::string name)
@@ -611,8 +611,9 @@ auto app() -> void
             });
             if (menu_page==menu_page_t::links)
             {
-                if (!std::filesystem::exists(parallel_checkpoint))
-                    actions.emplace_back("擴充並行",[&] { start_parallel(editing_space); });
+                actions.emplace_back("擴充並行",std::function<void()>{});
+                if(!std::filesystem::exists(parallel_checkpoint))
+                    actions.back().second=[&] { start_parallel(editing_space); };
                 actions.emplace_back("新增帳戶",[&] { menu_page=menu_page_t::users; show_menu(); });
             }
             else if (menu_page==menu_page_t::users || menu_page==menu_page_t::parallel_users)

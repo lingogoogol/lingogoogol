@@ -139,10 +139,10 @@ observation = r'''
                         if (auto text=dynamic_cast<lgo::text_line_scroll_std_t*>(&child)) value["text"]=text->get_text();
                         if (auto rect=dynamic_cast<lgo::rect_t*>(&child); rect && rect->get_size()==lgo::size_2D{32,32}) value["photo"]=true;
                         if (auto button=dynamic_cast<progress_button_t*>(&child)) {
-                            auto at=point(*button); at["text"]=button->get_text(); value["actions"].push_back(at);
+                            auto at=point(*button); at["enabled"]=button->enabled(); at["text"]=button->get_text(); value["actions"].push_back(at);
                         }
                         if (auto button=dynamic_cast<lgo::button_classic_std_t*>(&child)) {
-                            auto at=point(*button);
+                            auto at=point(*button); at["enabled"]=button->enabled();
                             std::function<void(lgo::GUI_object_t&)> label=[&](auto& object) {
                                 if (auto text=dynamic_cast<lgo::text_line_t*>(&object)) at["text"]=text->get_text();
                                 object.visit_children(label);
@@ -269,6 +269,10 @@ try:
     assert 'session-log-after-settings' in original_log.read_text()
     assert set(changed_log.parent.glob('*.txt'))=={changed_log}
     menu=open_menu();assert not menu['rows']
+    assert [(a['text'],a['enabled']) for a in menu['footer']]==[
+        ('繼續配置',False),('擴充並行',False),('新增空間',True)]
+    footer('繼續配置');assert snapshot()['menu'] and not snapshot()['switching']
+    footer('擴充並行');assert snapshot()['menu'] and not snapshot()['dialog']
     footer('新增空間');dialog('');assert snapshot()['dialog'],'Empty space name accepted'
     dialog('My Space');closed();ready(0)
     settings=json.loads(Path('settings.json').read_text());space=settings['spaces'][0]

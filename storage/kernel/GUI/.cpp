@@ -1611,7 +1611,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
         if (persistent->m_space_menu_actions)
             for (const auto& [label,action] : persistent->m_space_menu_actions())
-                footer->add_object<lgo::button_classic_std_t>(content,[defer,action] { defer(action); },label);
+            {
+                auto button=footer->add_object_shared<lgo::button_classic_std_t>(content,[defer,action] { defer(action); },label);
+                button->set_enabled(bool(action));
+            }
         persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
         {
             const auto window = engine->get_window_size();
