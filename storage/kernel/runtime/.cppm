@@ -22,6 +22,7 @@ export {
         std::vector<std::shared_ptr<storage_session_t>> m_sessions;
         std::map<std::string, std::shared_ptr<blob_queue_t>> m_queues;
         std::map<std::string, std::shared_ptr<google_account_t>> m_accounts;
+        std::shared_ptr<blob_reserve_budget_t> m_reserve_budget{std::make_shared<blob_reserve_budget_t>()};
 
       public:
         std::atomic_bool batch_request{true};

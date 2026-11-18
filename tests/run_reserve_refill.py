@@ -41,6 +41,10 @@ class Handler(fixture['Handler']):
     def do_POST(self):
         try:
             data = self.body()
+            if self.server.mode == 'root-first' and self.path == '/drive/v3/files?fields=id':
+                assert self.server.attempts == 0, 'Reserves started before the root request'
+                self.server.roots += 1
+                return self.reply(200, {'id':'root-first-fixture'})
             assert self.path == '/batch/drive/v3'
             assert self.headers.get('X-Fixture-Account') == 'user1@storage-ai-project1.iam.gserviceaccount.com'
             boundary = self.headers['Content-Type'].split('boundary=')[1]
@@ -84,13 +88,15 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
     for dll in (fixture['runtime']/'bin').glob('*.dll'):
         shutil.copy2(dll, test/dll.name)
     for mode, initial, batches in [('full', 20000, 0), ('near-full', 19999, 1),
-                                   ('partial-gap', 13450, 66), ('empty-retry', 0, 201)]:
+                                   ('partial-gap', 13450, 66), ('empty-retry', 0, 201),
+                                   ('shared-budget',0,64),('root-first',0,None)]:
         server = Server(('127.0.0.1', 0), Handler)
         server.lock = threading.Lock()
         server.release = threading.Semaphore(0)
         server.errors = []
         server.mode = mode
         server.attempts = server.active = server.maximum = 0
+        server.roots=0
         server.part_counts = Counter()
         # Each scenario replaces the complete queue, including its tail edit.
         (test/'test-queue.tail').unlink(missing_ok=True)
@@ -103,7 +109,8 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
             assert run.returncode == 0, (run.stdout, run.stderr, server.errors)
             assert not server.errors, server.errors
             assert server.maximum <= 64, (mode, server.maximum)
-            assert server.attempts == batches, (mode, server.attempts)
+            if batches is not None: assert server.attempts == batches, (mode, server.attempts)
+            if mode == 'root-first': assert server.roots==1
             if mode == 'partial-gap': assert server.maximum == 64
             if mode == 'empty-retry': assert server.part_counts == {100: 200, 1: 1}, server.part_counts
             print(run.stdout, end='', flush=True)

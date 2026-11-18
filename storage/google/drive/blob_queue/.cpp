@@ -23,6 +23,11 @@ auto blob_queue_t::process() -> void
     constexpr std::size_t batch_size{100}, batch_limit{64}, reserve_target{20000};
     std::vector<google_batch_t> batch_idle_arr(batch_limit);
     std::size_t in_flight{};
+    struct release_t
+    {
+        blob_reserve_budget_t& budget; std::size_t& pending; curl_multi_worker_t& worker;
+        ~release_t(){worker.stop();budget.active.fetch_sub(pending);}
+    } release{*m_budget,in_flight,m_worker};
     for (auto& batch : batch_idle_arr)
     {
         batch = google_batch_t{ curl_easy_t{} };
@@ -57,6 +62,7 @@ auto blob_queue_t::process() -> void
             auto response{multi.ready_get_unique()};
             google_batch_t batch{std::move(dynamic_cast<google_batch_t &>(*response))};
             --in_flight;
+            m_budget->active.fetch_sub(1);
             std::unique_lock lock{ m_mutex };
             if (m_stopped)
                 return;
@@ -87,6 +93,9 @@ auto blob_queue_t::process() -> void
         lock.unlock();
         for (std::size_t submitted{};submitted<submit_count;++submitted)
         {
+            if(in_flight>=m_budget->per_queue.load() || !m_budget->acquire())break;
+            // Count the lease before building/submitting so every exception path releases it.
+            ++in_flight;
             google_batch_t batch{ std::move(batch_idle_arr.back()) };
             batch_idle_arr.pop_back();
 
@@ -97,15 +106,15 @@ auto blob_queue_t::process() -> void
             }
             batch.method_post();
             multi.add(std::move(batch));
-            ++in_flight;
             m_planned_creations.fetch_add(batch_size,std::memory_order_relaxed);
         }
     }
     return;
 }
 
-blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close)
-: m_path{ path }, m_account{ account }, m_close{ close }
+blob_queue_t::blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close,
+                         std::shared_ptr<blob_reserve_budget_t> budget)
+: m_path{ path }, m_account{ account }, m_close{ close },m_budget{std::move(budget)}
 {
     recover_locked();
     m_thread = std::thread{ [this]

@@ -7,6 +7,19 @@ import storage.http.curl.worker;
 import storage.state;
 
 export {
+    struct blob_reserve_budget_t
+    {
+        std::atomic_size_t active{};
+        std::atomic_size_t per_queue{64};
+        static constexpr std::size_t limit{64};
+        auto acquire() -> bool
+        {
+            auto count=active.load();
+            while(count<limit)
+                if(active.compare_exchange_weak(count,count+1))return true;
+            return false;
+        }
+    };
     class blob_queue_t
     {
       private:
@@ -32,6 +45,7 @@ export {
 
         curl_multi_worker_t m_worker;
         std::shared_ptr<request_control_t> m_control{std::make_shared<request_control_t>()};
+        std::shared_ptr<blob_reserve_budget_t> m_budget;
         auto recover_locked() -> void;
         auto write_tail_locked(std::uint64_t offset, const std::string& tail) -> void;
         auto append_locked(const std::vector<std::string>& ids) -> void;
@@ -39,7 +53,8 @@ export {
         auto process() -> void;
 
       public:
-        blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close);
+        blob_queue_t(std::filesystem::path path, google_account_t* account, const std::atomic_bool* close,
+                     std::shared_ptr<blob_reserve_budget_t> budget = std::make_shared<blob_reserve_budget_t>());
         ~blob_queue_t();
         auto request_stop() -> void;
         auto stop() -> void;

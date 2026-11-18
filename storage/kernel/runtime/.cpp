@@ -53,8 +53,7 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
             for (const auto& address : checkpoint.at("accounts"))
                 clearing_accounts.insert(address.get<std::string>());
         }
-    // Start queue workers in project rounds as well: association order must not
-    // start every worker in one project before any worker in the next project.
+    // Interleave projects so one project does not occupy every reserve slot.
     std::map<std::string,std::deque<std::string>> by_project;
     for (const auto& address : space.accounts) by_project[address.substr(address.find('@')+1)].push_back(address);
     std::vector<std::string> interleaved;
@@ -70,15 +69,10 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
         std::lock_guard lock{m_mutex};
         auto& account = m_accounts[address];
         if (!account) account = std::make_shared<google_account_t>(address,credential.at("private_key").get<std::string>());
-        auto& reserve = m_queues[address];
-        if (!reserve) reserve = std::make_shared<blob_queue_t>(queue_path(address),account.get(),m_close);
-        if (clearing_accounts.contains(address)) reserve->stop();
         session->accounts[address] = account;
-        session->queues[address] = reserve;
     }
     if (session->accounts.empty()) throw std::runtime_error{"請先編輯空間並新增服務帳戶"};
     session->account = session->accounts.begin()->second;
-    session->queue = session->queues.begin()->second;
     std::filesystem::create_directories(settings.root_path);
     if (std::filesystem::exists(session->root_path))
     {
@@ -95,6 +89,25 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
         session->root = folder_root_create(request);
         storage_atomic_write(session->root_path,nlohmann::json{{"account",session->root_account},{"id",session->root}}.dump());
     }
+    // Establish the root before reserves compete for DNS/TLS connections.
+    // One shared budget caps total background batches across every account.
+    {
+        std::lock_guard lock{m_mutex};
+        auto total=m_queues.size();
+        for(const auto& address:interleaved)total+=!m_queues.contains(address);
+        m_reserve_budget->per_queue=std::max<std::size_t>(1,blob_reserve_budget_t::limit/std::max<std::size_t>(1,total));
+    }
+    for(const auto& address:interleaved)
+    {
+        if(control->cancelled)throw std::runtime_error{"Operation cancelled."};
+        std::lock_guard lock{m_mutex};
+        auto& reserve=m_queues[address];
+        if(!reserve)reserve=std::make_shared<blob_queue_t>(queue_path(address),session->accounts.at(address).get(),m_close,m_reserve_budget);
+        reserve->control()->retry_limit=settings.network_retries;
+        if(clearing_accounts.contains(address))reserve->stop();
+        session->queues[address]=reserve;
+    }
+    session->queue=session->queues.begin()->second;
     session->remember(session->root,session->root_account,"folder");
     session->clearing = std::ranges::any_of(space.accounts,[&](const auto& address)
         { return clearing_accounts.contains(address); });
@@ -225,7 +238,7 @@ auto storage_runtime_t::cleared(const std::shared_ptr<storage_session_t>& sessio
     // previous reserve ID was deleted, so replace all references together.
     for (auto& [address,reserve] : session->queues)
     {
-        auto replacement=std::make_shared<blob_queue_t>(queue_path(address),session->accounts.at(address).get(),m_close);
+        auto replacement=std::make_shared<blob_queue_t>(queue_path(address),session->accounts.at(address).get(),m_close,m_reserve_budget);
         m_queues[address]=replacement;
         for (auto& context : m_sessions)
             if (context->queues.contains(address))
@@ -269,6 +282,8 @@ auto storage_runtime_t::sign_out(const std::string& storage_id) -> void
         entry.second->stop();
         return true;
     });
+    m_reserve_budget->per_queue=std::max<std::size_t>(1,
+        blob_reserve_budget_t::limit/std::max<std::size_t>(1,m_queues.size()));
 }
 
 auto storage_runtime_t::retry_accounts() -> void

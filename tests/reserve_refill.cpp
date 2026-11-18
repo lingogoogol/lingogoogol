@@ -17,7 +17,22 @@ int main(int argc,char** argv)
         const std::string mode=argv[1];
         auto account=std::make_shared<google_account_t>("user1@storage-ai-project1.iam.gserviceaccount.com","synthetic-key");
         std::atomic_bool close{};
-        auto queue=std::make_shared<blob_queue_t>("test-queue",account.get(),&close);
+        if(mode=="root-first")
+        {
+            storage_atomic_write("key/test.json",json{{"private_key","synthetic-key"}}.dump());
+            storage_atomic_write("key/accounts.json",json{{account->address(),"key/test.json"}}.dump());
+            storage_settings_t settings;settings.root_path="test-root";
+            storage_space_t space{"root-first","fixture",{account->address()},true};
+            storage_runtime_t runtime{&close};
+            auto session=runtime.open_space(settings,space,std::make_shared<request_control_t>());
+            check(session->root=="root-first-fixture","Root was not saved before reserve startup.");
+            check(std::filesystem::exists("test-root/root-first"),"Root checkpoint is missing.");
+            runtime.stop();
+            std::println("PASS: root-first");return 0;
+        }
+        auto budget=std::make_shared<blob_reserve_budget_t>();
+        if(mode=="shared-budget")budget->per_queue=16;
+        auto queue=std::make_shared<blob_queue_t>("test-queue",account.get(),&close,budget);
         auto wait=[&](auto done)
         {
             const auto deadline=std::chrono::steady_clock::now()+15s;
@@ -34,7 +49,20 @@ int main(int argc,char** argv)
             easy.path_set(path); easy.method_get(); easy.run();
             return json::parse(easy.payload());
         };
-        if (mode=="full")
+        if(mode=="shared-budget")
+        {
+            std::vector<std::shared_ptr<blob_queue_t>> others;
+            for(int i=0;i<3;++i)
+                others.push_back(std::make_shared<blob_queue_t>("shared-queue-"+std::to_string(i),account.get(),&close,budget));
+            wait([&]{return request("/fixture/status").at("active")==64;});
+            std::this_thread::sleep_for(300ms);
+            check(budget->active==64,"Queues exceeded the shared reserve budget.");
+            check(queue->planned_creations()==1600,"One queue monopolized the budget.");
+            for(const auto& other:others)check(other->planned_creations()==1600,"Shared queue did not receive its fair budget.");
+            close=true;queue->stop();for(auto& other:others)other->stop();
+            check(budget->active==0,"Shutdown leaked shared reserve slots.");
+        }
+        else if (mode=="full")
         {
             std::this_thread::sleep_for(400ms);
             check(queue->planned_creations()==0,"A full reserve started replenishing.");
