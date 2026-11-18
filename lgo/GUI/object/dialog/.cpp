@@ -1,5 +1,6 @@
 module lgo.GUI.object.dialog;
 import std;
+import external.GLFW;
 import lgo.math.vec;
 import lgo.GUI.primitive;
 import lgo.GUI.object.state;
@@ -76,6 +77,13 @@ namespace lgo
         m_children.emplace_back(cancel, pos_2D{480, m_height - 48});
         m_children.emplace_back(confirm, pos_2D{600, m_height - 48});
         resize(engine->get_window_size());
+        // Set a decision only; the owner validates and closes after input dispatch.
+        // Ignore key repeats so holding Enter cannot accept a subsequent dialog.
+        m_key=engine->callback_key_add([this](int key,int action,int)
+        {
+            if(action==GLFW_PRESS && (key==GLFW_KEY_ENTER || key==GLFW_KEY_KP_ENTER))
+                m_decision=true;
+        });
     }
     auto modal_dialog_t::resize(size_2D size) -> void
     {

@@ -55,6 +55,10 @@ constexpr auto GLFW_KEY_RIGHT_SHIFT_export{ GLFW_KEY_RIGHT_SHIFT };
 
 constexpr auto GLFW_MAXIMIZED_export{ GLFW_MAXIMIZED };
 #undef GLFW_MAXIMIZED
+constexpr auto GLFW_KEY_ENTER_export{ GLFW_KEY_ENTER };
+#undef GLFW_KEY_ENTER
+constexpr auto GLFW_KEY_KP_ENTER_export{ GLFW_KEY_KP_ENTER };
+#undef GLFW_KEY_KP_ENTER
 
 export
 {
@@ -104,6 +108,8 @@ export
 
     constexpr auto GLFW_REPEAT{ GLFW_REPEAT_export };
     constexpr auto GLFW_MAXIMIZED{ GLFW_MAXIMIZED_export };
+    constexpr auto GLFW_KEY_ENTER{ GLFW_KEY_ENTER_export };
+    constexpr auto GLFW_KEY_KP_ENTER{ GLFW_KEY_KP_ENTER_export };
     constexpr auto GLFW_KEY_BACKSPACE{ GLFW_KEY_BACKSPACE_export };
     constexpr auto GLFW_KEY_DELETE{ GLFW_KEY_DELETE_export };
     constexpr auto GLFW_MOD_CONTROL{ GLFW_MOD_CONTROL_export };

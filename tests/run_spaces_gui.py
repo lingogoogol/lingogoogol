@@ -207,13 +207,14 @@ def open_menu(): click(snapshot()['toolbar']); return ready(0)
 def paste(text):
     subprocess.run(['wine64',sys.argv[2],text],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     command('windowfocus','--sync',window);command('key','ctrl+a');command('key','ctrl+v');time.sleep(.12)
-def dialog(value, lines=0, accept=True, fields=1):
+def dialog(value, lines=0, accept=True, fields=1, key=None):
     s=wait(lambda:snapshot() if snapshot()['dialog'] else None,'Missing dialog')
     height=152+28*lines+68*fields
     left=(s['window_w']-720)//2; top=(s['window_h']-height)//2
     if value is not None:
         click({'x':left+200,'y':top+80+28*lines}); paste(value)
-    click({'x':left+(600 if accept else 480),'y':top+height-48})
+    if key is not None: command('key',key)
+    else: click({'x':left+(600 if accept else 480),'y':top+height-48})
 def closed(): wait(lambda:not snapshot()['dialog'],'Dialog stayed open')
 def restart():
     global app,window,session_log
@@ -283,8 +284,8 @@ try:
         ('繼續配置',False),('擴充並行',False),('新增空間',True)]
     footer('繼續配置');assert snapshot()['menu'] and not snapshot()['switching']
     footer('擴充並行');assert snapshot()['menu'] and not snapshot()['dialog']
-    footer('新增空間');dialog('');assert snapshot()['dialog'],'Empty space name accepted'
-    dialog('My Space');closed();ready(0)
+    footer('新增空間');dialog('',key='Return');assert snapshot()['dialog'],'Enter bypassed empty-name validation'
+    dialog('My Space',key='KP_Enter');closed();ready(0)
     settings=json.loads(Path('settings.json').read_text());space=settings['spaces'][0]
     assert space['name']=='My Space' and not space['signed_in'] and not space['accounts']
     assert [a['text'] for a in snapshot()['rows'][0]['actions']]==['登入','登出','編輯','移除']

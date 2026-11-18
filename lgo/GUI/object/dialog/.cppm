@@ -34,6 +34,7 @@ export namespace lgo
         std::shared_ptr<text_line_std_t> m_error;
         std::optional<bool> m_decision;
         std::int64_t m_height{};
+        engine_t::callback_key_t* m_key{};
 
       public:
         modal_dialog_t(engine_t* engine, depth_tracker_t* depth, std::string title,
@@ -42,6 +43,7 @@ export namespace lgo
                        std::vector<std::pair<std::string, bool>> checkboxes = {});
         ~modal_dialog_t()
         {
+            if(m_key)m_state.get_engine()->callback_key_remove(m_key);
             m_state.clear_state();
         }
         auto resize(size_2D size) -> void;
