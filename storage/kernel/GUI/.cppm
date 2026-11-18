@@ -33,7 +33,7 @@ export {
         };
         std::function<std::vector<menu_row_t>()> m_space_menu_rows;
         std::function<std::vector<std::pair<std::string,std::function<void()>>>()> m_space_menu_actions;
-        std::shared_ptr<lgo::text_line_std_t> m_directory_status;
+        std::shared_ptr<lgo::text_line_scroll_t> m_directory_status;
         std::vector<std::unique_ptr<lgo::font_face_t>> m_directory_header_faces;
         std::map<std::string,std::size_t> m_directory_header_paths;
         lgo::font_preference_t m_directory_header_font;

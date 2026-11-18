@@ -162,6 +162,12 @@ observation = r'''
                 {"session",load_state.m_session ? load_state.m_session->storage_id : ""},
                 {"root",load_state.m_session ? load_state.m_session->root : ""},
                 {"status",persistent.m_directory_status->get_text()},
+                {"status_width",persistent.m_directory_status->get_size().x},
+                {"status_y",persistent.m_directory_status->get_pos().y},
+                {"status_x",persistent.m_directory_status->get_pos().x},
+                {"status_height",persistent.m_directory_status->get_size().y},
+                {"status_text_width",persistent.m_directory_status->get_text_size().x},
+                {"status_scroll",persistent.m_directory_status->scroll_offset()},
                 {"cloud_task",settings_text ? settings_text->get_text() : ""},
                 {"window_w",engine.get_window_size().x},{"window_h",engine.get_window_size().y}};
             storage_atomic_write("spaces-ui.json",value.dump());
@@ -302,6 +308,16 @@ try:
             wait(lambda:snapshot()['status']=='同意條款後，請按「繼續配置」。',
                  'Missing complete terms status message')
             command('key','Escape');wait(lambda:not snapshot()['menu'],'Terms menu did not close')
+            for width in (800,1536):
+                Path('resize-window').write_text(json.dumps([width,1024]))
+                s=wait(lambda:snapshot() if snapshot()['window_w']==width and
+                    0<snapshot()['status_width']<=320 else None,'Status width did not fit the toolbar')
+                assert abs(s['status_y']+s['status_height']//2-s['toolbar']['y'])<=4, 'Status left the toolbar'
+                if width==1536: assert s['status_width']==320,'Status was not widened'
+            if s['status_text_width']>s['status_width']:
+                click({'x':s['status_x']+s['status_width']-1,
+                       'y':s['status_y']+s['status_height']-1})
+                wait(lambda:snapshot()['status_scroll']>0,'Status horizontal scrollbar did not move')
         else:
             time.sleep(.2)
             assert not Path('terms-opened').exists(),'Cancel opened a browser'
@@ -429,6 +445,11 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
         }
         if (std::filesystem::exists("open-settings")) {
             std::filesystem::remove("open-settings"); load_state.m_settings_page();
+        }
+        if (std::filesystem::exists("resize-window")) {
+            const auto size=nlohmann::json::parse(storage_read("resize-window"));
+            std::filesystem::remove("resize-window");
+            glfwSetWindowSize(engine.window_get(),size.at(0).get<int>(),size.at(1).get<int>());
         }
         if (std::filesystem::exists("open-terms-test")) {
             std::filesystem::remove("open-terms-test");

@@ -79,6 +79,11 @@ export namespace lgo
         auto text_layout_changed() -> void override
         {
             if (!m_initialized) return;
+            // Right-aligned overflow must start at canvas x=0. Keep the layout
+            // canvas wide enough for all glyphs, but the viewport fixed in place.
+            const auto height=std::max<std::int64_t>(0,m_size.y-bar_height);
+            this->resize_text({std::max(m_size.x,this->get_text_size().x),height});
+            this->set_clip_size({m_size.x,height});
             set_scroll_offset(-this->get_text_offset().x);
         }
       public:
@@ -132,7 +137,7 @@ export namespace lgo
             GUI_object_t::set_size(size);
             m_size = size;
             this->resize_text({size.x, std::max<std::int64_t>(0, size.y - bar_height)});
-            set_scroll_offset(scroll_offset());
+            text_layout_changed();
             if (this->status() == this->shown) m_depth_tracker->update(m_depth_id, get_pos(), size);
         }
         auto set_text(std::string text, bool load_now = true) -> void

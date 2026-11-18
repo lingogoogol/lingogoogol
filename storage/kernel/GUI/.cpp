@@ -1164,8 +1164,12 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         storage_content_depth, lgo::div_create_from_member{}, lgo::std_forward, lgo::std_margin,
         main_div->space_x(lgo::std_margin),
         lgo::alignment_2D{lgo::alignment_x::right, lgo::alignment_y::center})};
-    persistent->m_directory_status = menu_right->add_object_shared<lgo::text_line_std_t>(
-        storage_content_depth, "", lgo::std_red_light, lgo::size_1D{96});
+    persistent->m_directory_status = menu_right->add_object_shared<lgo::text_line_scroll_t>(
+        storage_content_depth, "", lgo::size_2D{std::clamp<std::int64_t>(
+            menu_right->get_size().x-40-7*(lgo::button_classic_std_impl_t::size.x+lgo::std_margin.x),
+            0,320),lgo::std_forward.x}, lgo::std_red_light,
+        lgo::std_margin, lgo::font_preference_t::default_get(), lgo::std_red_light,
+        lgo::alignment_2D{lgo::alignment_x::right,lgo::alignment_y::center});
     auto header_line = main_div->add_object_shared<lgo::std_linex_t>(
         storage_content_depth, main_div->space_x(lgo::std_margin), lgo::std_white);
     auto work_div{main_div->add_object_shared<lgo::divx_soft_t>(
@@ -1637,16 +1641,15 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             }
             main_div->set_size(size);
             menu_left->set_size(lgo::size_2D{main_div->space_x(lgo::std_margin).x, menu_left->get_size().y});
-            // Reserve the left edge for directory status on narrow windows;
-            // all seven toolbar actions still fit at the 800-pixel minimum.
+            // All seven toolbar actions still fit at the 800-pixel minimum.
             if (size.x < 1000) menu_left->hide();
             else menu_left->show();
             menu_right->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, menu_right->get_size().y});
-            // Keep all seven standard-size buttons visible at the minimum width.
+            // Preserve toolbar actions while letting longer status text scroll horizontally.
             persistent->m_directory_status->set_size({std::clamp<std::int64_t>(
                 menu_right->get_size().x - 40 - 7 * (lgo::button_classic_std_impl_t::size.x + lgo::std_margin.x),
-                0, 96), persistent->m_directory_status->get_size().y});
+                0, 320), persistent->m_directory_status->get_size().y});
             header_line->set_size(
                 lgo::size_2D{main_div->space_x(lgo::std_margin).x, header_line->get_size().y});
             // space_2D() reserves a gap for another child. These are replacements
