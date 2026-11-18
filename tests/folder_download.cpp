@@ -74,11 +74,12 @@ int main()
         curl_multi_worker_t multi{};
         home(&engine, &gui, &persistent, &column, &loads, &multi, &queue, &pos);
         check(queue.count() == 0, "This test requires an empty blob reserve.");
-        // A queued upload must not prevent downloads from using otherwise idle connections.
+        // ID allocation now belongs to asynchronous preparation. Model an upload
+        // still waiting for reserves, rather than marking an empty entity list
+        // ready and dispatching uninitialized progress iterators.
         auto blocked_upload{ std::make_shared<upload_task_t>() };
         blocked_upload->m_type = "upload";
         std::promise<void> prepared;
-        prepared.set_value();
         blocked_upload->m_prepared = prepared.get_future();
         auto upload_i{ loads.m_task_list.emplace(loads.m_task_list.end(), blocked_upload) };
 
@@ -110,6 +111,7 @@ int main()
         check(loads.m_end.empty(), "A completed download still has pending callbacks.");
         check(loads.m_task_list.front() == blocked_upload && queue.count() == 0,
             "An upload ran without enough reserved blobs.");
+        prepared.set_value();
         loads.m_task_list.erase(upload_i);
         for (const auto& directory : { "output/nested", "output/concurrent" })
         {
@@ -181,6 +183,7 @@ int main()
         column.reset();
         loads.m_progress_column.reset();
         lgo::text_line_t::free();
+        lgo::log_file("finished_all!\n");
         return 0;
     }
     catch (const std::exception& error)

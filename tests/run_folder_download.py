@@ -125,6 +125,11 @@ with tempfile.TemporaryDirectory(prefix='storage-folder-test-') as directory:
                     print(stdout, end='', flush=True)
                     if process.returncode:
                         raise RuntimeError(f'{mode} test failed ({process.returncode}): {stderr}')
+                    if mode == 'download':
+                        log_text = (test / 'logfile/folder-download.txt').read_text(errors='replace')
+                        assert 'uncaught exception:' not in log_text, 'GUI logged an uncaught exception.'
+                        assert 'finished_all!' in log_text, 'GUI did not finish normally.'
+
             with urllib.request.urlopen(f'http://127.0.0.1:{port}/report', timeout=5) as response:
                 report = json.load(response)
             assert not any(event[0] == 'PATCH' for event in report['events']), 'Downloads modified mock cloud data.'
