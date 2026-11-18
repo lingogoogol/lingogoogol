@@ -1,5 +1,6 @@
 module;
 #include <nlohmann/json.hpp>
+#include "storage/blob_format.hpp"
 module storage.kernel.load;
 import std;
 
@@ -31,6 +32,7 @@ auto storage_session_t::bind(curl_easy_t& request, const std::string& id) const 
 auto storage_session_t::observe(const std::string& id, const nlohmann::json& name,
                                 const nlohmann::json& content) -> void
 {
+    storage_format::version(name);
     const auto type = kind(id);
     remember(name.at("parent"),name.at("parent_account"),type == "data" ? "chunk" : type == "chunk" ? "file" : "folder");
     if (name.contains("next")) remember(name.at("next"),name.at("next_account"),type);

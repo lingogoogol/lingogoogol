@@ -21,22 +21,23 @@
 
 這些資料需要透過本程式還原；在 Google Drive 網頁上看到的物件不會是原始檔案的直接副本。請保留其名稱、描述與索引關係。
 
-### 固定切片與片內壓縮
+### Blob 格式版本、大小與時間
 
-設定表單與 `settings.json` 支援 `content_zstd`（預設 `false`）。只影響新上傳任務；每個任務會在配置 ID 前保存壓縮選項，暫停、重啟或改設定後續傳仍使用原選項。所有任務固定以 18,750 bytes 切片；舊任務沒有選項時不壓縮。
+所有新 blob（含 root、資料夾／檔案索引頁、chunk、content 與預備 blob）的 name JSON 保存整數 `version`。全域常數在 `storage/blob_format.hpp` 的 `storage_format::current_version`，目前為 **2**；任一種 blob 格式變更時統一加一。讀取沒有 version 的舊資料視為 0，支援版本 0、1、2，拒絕未知新版本與非法版本值。
 
-| 模式 | 每個完整 content blob 的原始檔案 bytes | description 字元上限 |
-| --- | ---: | ---: |
-| base64url | 18,750 | 25,000 |
-| base64url + content_zstd | 18,750，不擴大切片 | 壓縮有效時減少 |
+- **版本 0**：沒有 version 欄位的 content 一律不壓縮，只做 Base64URL 編解碼。不相容早期 PR 的 e／n／c／r 格式標記，也不靠標記或 payload 特徵推測壓縮方式。
+- **版本 1**：content 一律先 zstd level 3，再 Base64URL，不使用 e／n／c／r 格式標記。原始長度由 zstd frame 自帶的大小取得。
+- **版本 2**：content 與版本 1 相同，加入以下資料夾／檔案 metadata。新上傳一律使用此版本；zstd 為必要建置相依，不再提供 content_zstd 開關。
 
-`content_zstd=true` 在每個固定原始切片內使用 zstd level 3，只有變小才保存壓縮結果。它減少 payload／傳輸 bytes；與 `batch_gzip` 合用後的最終節省依資料而異，**不會進一步減少請求數**。CMake 可選偵測 zstd；缺少時表單停用並忽略新上傳選項，日誌說明原因。下載已有 zstd 資料或續傳曾啟用 zstd 的任務需要支援 zstd 的建置；Windows 發布需附 `libzstd.dll`。
+每個新 content 切片最多 18,600 原始 bytes，預留 zstd 對不可壓縮資料的膨脹空間，確保 Base64URL description 不超過 25,000 字元；仍使用固定原始切片，壓縮不會減少 content 請求數。解碼驗證單一完整 frame、大小與尾隨資料，限制解壓記憶體；舊版每片 18,750 bytes 的資料仍可讀。沒有 blob_version 的舊上傳工作恢復時保留原 18,750-byte 切片，只寫入未壓縮 Base64URL；舊 content_zstd 設定不再使用，新工作使用版本 2。
 
-content blob 的 name JSON 若壓縮則存 `"c":"zstd"`、`"r":原始切片 bytes`。缺少標記表示 Base64URL／未壓縮；description 一律使用 Base64URL。下載逐 blob 判斷，不依目前設定；驗證容量、原始長度與壓縮框架。壓縮格式需要新版程式下載，舊版不識別這些標記。
+資料夾與檔案的 name JSON 保存 `version_min`，為自身各頁與所有後代 blob 的最低版本；空資料夾／空檔案使用自身版本。複製、搬移保留來源資料版本；貼上、上傳、新增資料夾及刪除後，依序重算所有父資料夾的總大小與最低版本。使用絕對總和而非增量，失敗重試不會重複累加。修改既有資料夾 metadata 時升為版本 2，後代舊 content 保持原格式，父資料夾因此可能是 version=2、version_min=0。
 
-離線測試：configure 加 `-DLGO_BUILD_CONTENT_TESTS=ON`，build 後執行 `ctest --test-dir <build> -R content-codec --output-on-failure`，確認 PATH 含執行時 DLL。測試涵蓋 0–200 bytes、18,750 bytes 完整切片、JSON 往返、舊格式、zstd 標記、raw fallback、無效資料，以及設定／任務紀錄持久化；可加 `-DCMAKE_DISABLE_FIND_PACKAGE_zstd=TRUE` 驗證無 zstd 建置。
+資料夾 name 的 `size` 是所有後代檔案原始 bytes 的總和，與檔案共用「大小」欄位。舊資料夾缺少 size 時遞迴掃描計算，單純瀏覽不改寫雲端資料。新版資料夾以 `type=folder` 辨識，避免因新增 size 而被當成檔案。顯示清單會讀取子項目 metadata；瀏覽舊資料夾可能因此增加請求量。
 
-實際使用前請以隨機檔、可壓縮檔、空檔與跨 chunk 大檔，分別測壓縮關／開；上傳、下載後以 `compare.exe` 逐位元組比對。另測中途暫停／重啟並切換設定後續傳，以及舊資料下載；本次沒有接觸 Google 或讀取憑證。
+檔案上傳、資料夾建立／上傳時間存於 name 的 `time`，格式為 UTC Unix 秒數；清單在大小右側顯示「時間」，轉為本機時區的 `YYYY-MM-DD HH:MM:SS`。工作重試與續傳保留原時間；複製／搬移保留來源時間。舊 metadata 寫入版本 2 時，缺少 time 就補上該次升級時間，已有 time 則保留；尚未升級且無 time 的資料顯示「—」。窄視窗依序隱藏時間、大小欄，保留操作按鈕。
+
+離線測試：configure 加 `-DLGO_BUILD_CONTENT_TESTS=ON`，建置 `content-codec-test` 與 `folder-metadata-test`。前者驗證版本 0／1／2、zstd、舊資料與損壞輸入；後者驗證多頁資料夾、舊資料大小、混合版本、祖先更新、失敗重試、時間保留、循環與溢位。
 
 ## 功能
 
@@ -104,7 +105,7 @@ Google 的專案搜尋索引可能延遲更新。程式會依 OAuth 用戶端與
 
 程式啟用選定專案的 Drive API，將新金鑰保存在 `key/<project ID>-<account ID>.json`，另將 address 與金鑰位置登記於 `key/accounts.json`。**不掃描或使用外部放進 `key/` 的私鑰**；請一併保留程式建立的金鑰與登記檔。建立金鑰遇到 HTTP 404 時，會以退避方式等待新帳戶同步，最多五分鐘，期間可取消；結果未知的請求不自動重送。本機保存失敗時嘗試撤銷本次金鑰。Google 使用者授權由 Windows CNG 加密保存，照片使用本機快取；移除使用者只刪除此電腦的 Cloud 授權與照片。
 
-金鑰含有私鑰，請勿提交到 Git、Issue 或 Pull Request。本版本使用新的空間設定與 blob 格式，不提供舊帳戶、root 或 blob 格式的自動轉換。
+金鑰含有私鑰，請勿提交到 Git、Issue 或 Pull Request。本版本使用新的空間設定；支援上述版本 0／1／2 的 blob 讀取，不自動轉換舊帳戶或 root 設定。
 
 ### 3. 啟動程式
 
@@ -142,7 +143,7 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 
 - **傳輸狀態**：顯示已完成大小、總大小與進度條，支援暫停、繼續、重試及取消。未完成的工作可在重新啟動後接續；失敗時保留原因與已完成的進度。檔案與資料夾的上下載在取消收尾時顯示「取消中」，收尾完成後顯示「已取消」及「確定」；取消與網路失敗訊息使用操作名稱與路徑，不會沿用「準備上傳／下載」的階段文字。
 - **上傳與下載**：上傳完成內容及索引後才加入目的目錄，並自動刷新清單；進度達到總大小時，仍需等待「已完成」。下載遇到同名目的地會先確認是否刪除，空檔案與空資料夾也會保留；失敗或取消後的部分下載不代表完整檔案。
-- **目錄瀏覽**：上方路徑列可返回任一父目錄；根目錄顯示空間名稱。清單分成「檔名／大小／操作」三欄，窄視窗優先保留右側操作按鈕；長名稱、路徑及目錄清單均可捲動，支援橫向滾輪與 Shift＋滾輪。
+- **目錄瀏覽**：上方路徑列可返回任一父目錄；根目錄顯示空間名稱。清單分成「檔名／大小／時間／操作」四欄，窄視窗優先保留右側操作按鈕；長名稱、路徑及目錄清單均可捲動，支援橫向滾輪與 Shift＋滾輪。
 - **目錄管理**：新增、移動、複製與刪除在背景執行，顯示進度並保存中斷恢復紀錄。剪下保留原有內容，複製建立獨立副本；刪除會永久移除項目及其子內容。目錄操作開始後不提供暫停或取消，網路失敗時可重試。
 - **空間選單**：右上角固定顯示「空間」。各列依序為空間名稱、「登入」「登出」「編輯」「移除」，底部為「新增空間」。編輯清單顯示關聯帳戶的 address 前半部及「移除」，底部有「新增帳戶」及「返回」。所有層級均支援長清單捲動、縮放、Esc 與點選外側關閉。
 - **登入與登出**：登入選取該空間瀏覽，其他已登入空間的傳輸繼續執行。登出保存並暫停該空間的未完成工作；再次登入後續傳。完整空間清單、關聯與登入狀態保存在 `settings.json`，重啟後恢復。
@@ -215,6 +216,8 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 可選的 batch 請求 gzip、前景 batch 大小、下載請求數與 `files.list` 預取限制，見[傳輸效率調查](TRANSFER_EFFICIENCY.md)。MinGW／MSYS2 的 libcurl 通常已依賴 zlib，可使用工具鏈內對應的標頭與 libz；CMake 未找到時只停用 gzip，也可用 `-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE` 驗證無 zlib 的建置。若連結動態 zlib，發布時需一併帶上工具鏈對應的 zlib DLL。沒有新增 list 預取。
 
 ### 相依工具
+
+zstd 開發套件為必要相依，CMake 先查找工具鏈套件，也支援 `../lib/zstd/lib/cmake/zstd` 的 Windows 跨編譯套件；優先連結靜態版本，僅有動態版本時須隨程式發布對應 zstd DLL。
 
 | 工具／相依 | 需求或目前驗證版本 |
 | --- | --- |
@@ -301,6 +304,7 @@ python3 tests/run_task_lifecycle.py
 python3 tests/run_gui_settings.py
 python3 tests/run_text_scroll.py
 python3 tests/run_directory_operations.py
+python3 tests/run_versioned_storage.py
 ```
 
 測試需要 Wine、Xvfb、xauth 與可用的 Vulkan 驅動（可使用 Mesa Lavapipe），會在暫存目錄中注入 Vulkan 失敗，檢查畫面狀態保留、重新呈現、重建重試上限及關閉時的佇列保存，並以本機模擬 Drive 驗證上下載內容、發布與目錄刷新。只複製字型、shader 與 DLL，不讀取金鑰或連線至雲端；GPU 與 Vulkan 啟動測試可用 `--build` 與 `--runtime` 指定其他建置及安裝目錄。這些測試模擬 API 錯誤，實際驅動重設或硬體移除仍需在 Windows 環境驗證。

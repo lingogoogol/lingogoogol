@@ -103,6 +103,15 @@ auto folder_upload
         else if (std::filesystem::is_directory(child))
             folder->m_entity_arr.push_back(folder_upload(blob_queue, task, child, folder.get()));
     }
+    for (const auto index : folder->m_entity_arr)
+    {
+        const auto& child = task->m_entity_arr[index];
+        const auto size = child->m_type == "file" ? static_cast<upload_file_t&>(*child).m_size :
+                                                   static_cast<upload_folder_t&>(*child).m_size;
+        if (size > std::numeric_limits<std::uint64_t>::max()-folder->m_size)
+            throw std::runtime_error{"Folder size overflow."};
+        folder->m_size += size;
+    }
     folder->m_entity_load_end.resize(folder->m_entity_arr.size());
     upload_progress_restore(*folder);
     return folder->m_self_i;

@@ -1,6 +1,7 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "storage/folder_metadata.hpp"
 
 module storage.kernel.load;
 
@@ -156,6 +157,7 @@ auto list_folder_content(google_easy_t& easy, std::string* pos, storage_session_
 		if (session) session->bind(easy,next);
         nlohmann::json response_data = blob_get_run(easy, next, "name,description");
 		nlohmann::json response_content = nlohmann::json::parse(response_data["description"].get<std::string>());
+        storage_format::version(nlohmann::json::parse(response_data.at("name").get<std::string>()));
 		if (session) session->observe(next,nlohmann::json::parse(response_data["name"].get<std::string>()),response_content);
         entity_arr.insert(entity_arr.end(), response_content.begin(), response_content.end());
 		next = nlohmann::json::parse(response_data["name"].get<std::string>())["next"];
@@ -181,7 +183,9 @@ auto file_download
     if (!restored)
     {
         if (task->m_session) task->m_session->bind(*easy,pos);
-        file.m_size = nlohmann::json::parse(blob_get_name_run(*easy, pos))["size"];
+        const auto name = nlohmann::json::parse(blob_get_name_run(*easy, pos));
+        storage_format::version(name);
+        file.m_size = name.at("size");
         file.m_next_id = pos;
     }
     if (restored && file.m_complete)
@@ -293,6 +297,25 @@ auto folder_add
 )
 -> void
 {
+    const auto parent_id = pos;
+    const auto refresh = [&]
+    {
+        if (!session) return;
+        storage_format::refresh_ancestors(parent_id,
+            [&](const std::string& id)
+            {
+                session->bind(easy,id);
+                auto blob = blob_get_run(easy,id,"name,description");
+                session->observe(id,nlohmann::json::parse(blob.at("name").get<std::string>()),
+                    nlohmann::json::parse(blob.at("description").get<std::string>()));
+                return blob;
+            },
+            [&](const std::string& id,const auto& name,const auto&)
+            {
+                session->bind(easy,id);
+                blob_update_name_run(easy,id,name.dump());
+            });
+    };
 	nlohmann::json folder{};
 	nlohmann::json folder_name{};
 	while (true)
@@ -304,7 +327,7 @@ auto folder_add
         if (session) session->observe(pos,folder_name,existing);
         for (const auto& entry : existing)
             if (entry.at("id") == entity.at("id"))
-                return;
+                { refresh(); return; }
         if (folder_name["next"] == "null")
         {
             break;
@@ -342,6 +365,7 @@ auto folder_add
 	{
 		blob_update_content_run(easy, pos, content);
 	}
+	refresh();
 	return;
 }
 
@@ -353,6 +377,11 @@ auto folder_root_create(google_easy_t& easy) -> std::string
 		nlohmann::json
 		{
 			{ "name", folder_root_name },
+            { "version", storage_format::current_version },
+            { "version_min", storage_format::current_version },
+            { "type", "folder" },
+            { "size", 0 },
+            { "time", storage_format::now() },
 			{ "parent", "null" },
             { "parent_account", "null" },
             { "next_account", "null" },
@@ -778,6 +807,9 @@ auto upload_complete(upload_entity_t* entity) -> void
         {
             link["id"] = dynamic_cast<upload_folder_t*>(root)->m_main_id;
         }
+        link["size"] = root->m_type == "file" ? static_cast<upload_file_t*>(root)->m_size : static_cast<upload_folder_t*>(root)->m_size;
+        link["time"] = task->m_time;
+        link["version_min"] = task->m_blob_version;
         if (task->m_session) link["account"] = task->m_session->owner(link.at("id"));
         task->m_progress_text->set_text("上傳：更新目錄 " + task->m_name, false);
         //Each worker owns its easy handle. Waiting for the previous publication prevents
@@ -840,6 +872,10 @@ auto upload_file_load_begin
 		{
 			{ "name", std::filesystem::path{ file->m_path_local }.filename().string() },
 			{ "size", file->m_size },
+            { "version", storage_format::current_version },
+            { "version_min", file->m_size ? file->m_task->m_blob_version : storage_format::current_version },
+            { "type", "file" },
+            { "time", file->m_task->m_time },
 			{ "parent", file->m_parent->m_main_id },
 			{ "next", next }
 		};
@@ -947,6 +983,7 @@ auto upload_chunk_load_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, upl
             {
                 nlohmann::json
                 {
+                    { "version", storage_format::current_version },
                     { "parent", file->m_main_id },
                     { "parent_account", file->m_task->m_session->owner(file->m_main_id) },
                     { "account", file->m_task->m_session->owner(chunk.m_content_id.front()) }
@@ -1025,9 +1062,9 @@ auto upload_chunk_transfer_begin
         file->m_chunk_arr.push_back({.m_file=file,.m_id=task_reserve(*file->m_task,key,1,owner,"chunk").front()});
     }
     auto& chunk=file->m_chunk_arr[index];
-    std::uint64_t batch_size{ existing ? chunk.m_size : std::min(file->m_size - file->m_chunk_cover_progress, content_size_max_base64 * 100) };
+    std::uint64_t batch_size{ existing ? chunk.m_size : std::min(file->m_size - file->m_chunk_cover_progress, file->m_task->m_bytes_per_content * 100) };
     //Divide and round up.
-    std::uint64_t content_count{ (batch_size + content_size_max_base64 - 1) / content_size_max_base64 };
+    std::uint64_t content_count{ (batch_size + file->m_task->m_bytes_per_content - 1) / file->m_task->m_bytes_per_content };
     if (chunk.m_content_id.empty()) chunk.m_content_id = task_reserve(*file->m_task,"content:"+chunk.m_id,content_count,{},"data");
     file->m_task->m_session->bind(easy,chunk.m_content_id.front());
     chunk.m_size = batch_size;
@@ -1066,7 +1103,7 @@ auto upload_chunk_transfer_begin
             throw lgo::error_t{ "The upload source could not be read completely: " + file->m_path_local };
         }
         auto name = nlohmann::json::parse(*blob.m_name);
-        blob.m_content = content_blob_encode(std::move(content), file->m_task->m_content_zstd, name);
+        blob.m_content = content_blob_encode(std::move(content), file->m_task->m_blob_version, name);
         blob.m_name = name.dump();
         blob_update(batch, blob);
     }
@@ -1164,6 +1201,10 @@ auto upload_folder_load_begin
         {
             throw;
         }
+        auto& entry = blob.m_content->back();
+        entry["size"] = element_entity->m_type == "file" ? static_cast<upload_file_t*>(element_entity)->m_size : static_cast<upload_folder_t*>(element_entity)->m_size;
+        entry["time"] = folder->m_task->m_time;
+        entry["version_min"] = folder->m_task->m_blob_version;
         if (!replay && (blob.m_content.value().size() == 100 || blob.m_content.value().dump().size() > content_size_max))
         {
             blob.m_content.value().erase(blob.m_content.value().end() - 1);
@@ -1178,6 +1219,11 @@ auto upload_folder_load_begin
 		nlohmann::json
 		{
 			{ "name", folder->m_name },
+            { "version", storage_format::current_version },
+            { "version_min", folder->m_size ? folder->m_task->m_blob_version : storage_format::current_version },
+            { "type", "folder" },
+            { "size", folder->m_size },
+            { "time", folder->m_task->m_time },
 			{ "parent", folder->m_parent->m_main_id },
 			{ "next", next }
 		};
@@ -1331,6 +1377,7 @@ auto download_file_load_end(std::unique_ptr<curl_easy_t>& easy, std::vector<down
 {
     nlohmann::json payload = nlohmann::json::parse(easy->payload());
     nlohmann::json blob_name = nlohmann::json::parse(payload["name"].get<std::string>());
+    storage_format::version(blob_name);
     nlohmann::json blob_content = nlohmann::json::parse(payload["description"].get<std::string>());
     if (!blob_content.is_array() || blob_content.size() > 100)
         throw std::runtime_error{ "File chunk index must be an array of at most 100 IDs." };
@@ -1419,6 +1466,7 @@ auto download_chunk_load_end
     {
         download_chunk_t& chunk{ file_i->m_chunk_arr[i_begin + i] };
         nlohmann::json payload = nlohmann::json::parse(batch.response_get(i).body_get());
+        storage_format::version(nlohmann::json::parse(payload.at("name").get<std::string>()));
         nlohmann::json content_id_arr = nlohmann::json::parse(payload["description"].get<std::string>());
         if (!content_id_arr.is_array() || content_id_arr.empty() || content_id_arr.size() > 100)
             throw std::runtime_error{ "Chunk content index must contain 1 to 100 IDs." };

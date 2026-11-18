@@ -216,7 +216,6 @@ auto storage_settings_t::load() -> storage_settings_t
     parse_http_log_codes(result.http_log_codes);
     result.batch_request = data.value("batch_request", true);
     result.batch_gzip = data.value("batch_gzip", false);
-    result.content_zstd = data.value("content_zstd", false);
     // Parse the JSON representation as an integer too: typed JSON conversion
     // to size_t would silently wrap negative values and truncate decimals.
     result.worker_count = parse_worker_count(data.value("worker_count",nlohmann::json(64)).dump());
@@ -239,7 +238,6 @@ auto storage_settings_t::save() const -> void
                                                          {"network_retries", network_retries},
                                                          {"batch_request", batch_request},
                                                          {"batch_gzip", batch_gzip},
-                                                         {"content_zstd", content_zstd},
                                                          {"batch_size", batch_size},
                                                          {"worker_count", worker_count}};
     data["spaces"] = nlohmann::json::array();

@@ -1,5 +1,6 @@
 module;
 #include <nlohmann/json.hpp>
+#include "storage/folder_metadata.hpp"
 module storage.kernel.load;
 import std;
 import storage.google;
@@ -151,7 +152,7 @@ namespace
             if (id == session.root)
                 return;
             const auto name = nlohmann::json::parse(easy.get_name(id));
-            if (name.contains("size"))
+            if (!storage_format::folder(name))
                 throw std::runtime_error{"目的地必須是資料夾"};
             id = name.at("parent").get<std::string>();
         }
@@ -182,6 +183,8 @@ namespace
         {
             const auto id{reserve(task, "directory-page:" + parent)};
             auto name = last.name;
+            name["version"] = storage_format::current_version;
+            name["type"] = "folder";
             name["next"] = "null";
             name["next_account"] = "null";
             easy.update(blob_str_opt_t{id, name.dump(), nlohmann::json::array({entry}).dump()});
@@ -283,9 +286,16 @@ auto directory_validate_name(std::string_view name) -> void
 auto directory_execute(directory_task_t& task) -> void
 {
     directory_io_t easy{task};
+    const auto refresh = [&](const std::string& parent)
+    {
+        storage_format::refresh_ancestors(parent,
+            [&](const std::string& id) { return easy.get(id,"name,description"); },
+            [&](const std::string& id,const auto& name,const auto&) { easy.update_name(id,name.dump()); });
+    };
     // Do not cache mutable directory GETs: retry/restore must read the latest
     // pages. Explicit journal phases and stable IDs make writes replayable.
     auto saved = task.m_journal->data();
+    if (!saved.contains("time")) { saved["time"] = storage_format::now(); task.m_journal->set("time",saved.at("time")); }
     check_destination(easy, *task.m_session, task.m_source);
     if (task.m_kind == "directory-create")
     {
@@ -296,6 +306,8 @@ auto directory_execute(directory_task_t& task) -> void
         {
             const auto name =
                 nlohmann::json{{"name", task.m_name}, {"parent", task.m_source},
+                    {"version",storage_format::current_version},{"version_min",storage_format::current_version},
+                    {"type","folder"},{"size",0},{"time",saved.at("time")},
                     {"parent_account",task.m_session->owner(task.m_source)}, {"next", "null"},{"next_account","null"}};
             easy.update({id, name.dump(), "[]"});
             task.m_journal->set("initialized", true);
@@ -303,6 +315,7 @@ auto directory_execute(directory_task_t& task) -> void
         task.m_completed = 1;
         insert(easy, task, task.m_source,
                nlohmann::json{{"type", "folder"}, {"id", id}, {"account",task.m_session->owner(id)}, {"name", task.m_name}});
+        refresh(task.m_source);
         task.m_completed = 2;
         return;
     }
@@ -328,7 +341,7 @@ auto directory_execute(directory_task_t& task) -> void
         for (const auto& page : moved_pages)
         {
             if ((page.name.at("parent") != task.m_source && page.name.at("parent") != task.m_destination) ||
-                page.name.contains("size") != (task.m_entity.at("type") == "file"))
+                storage_format::folder(page.name) != (task.m_entity.at("type") == "folder"))
                 throw std::runtime_error{"項目索引與來源資料夾不一致"};
         }
         // Publish the destination first. A crash can temporarily leave two
@@ -343,6 +356,8 @@ auto directory_execute(directory_task_t& task) -> void
         }
         task.m_completed = 2;
         unlink(easy, task.m_source, id);
+        refresh(task.m_source);
+        refresh(task.m_destination);
         task.m_completed = 3;
         return;
     }
@@ -461,6 +476,7 @@ auto directory_execute(directory_task_t& task) -> void
         // Publish only after every cloned page/chunk/data blob has succeeded.
         // Stable reserved IDs make an interrupted PATCH or publication replayable.
         insert(easy, task, task.m_destination, entry);
+        refresh(task.m_destination);
         task.m_completed = task.m_total.load();
         return;
     }
@@ -479,6 +495,7 @@ auto directory_execute(directory_task_t& task) -> void
     }
     unlink(easy, task.m_source, id);
     task.m_source_unlinked = true;
+    refresh(task.m_source);
     task.m_total = ids.size();
     auto begin{saved.value("delete_index", std::size_t{})};
     task.m_completed = begin;

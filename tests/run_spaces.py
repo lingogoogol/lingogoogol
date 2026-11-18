@@ -44,6 +44,8 @@ def link(output, entry, easy, gui=False):
 
 
 def kind(name):
+    if name.get('type') == 'folder':
+        return 'folder'
     if 'next' in name:
         return 'file' if 'size' in name else 'folder'
     return 'chunk' if 'account' in name else 'data'
@@ -282,7 +284,8 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-') as directory:
         assert 'outside' not in server.blobs, 'Clear failed to delete files outside the space root.'
         assert 'peer-root' not in server.blobs, 'Clear did not include other spaces sharing linked accounts.'
         assert server.blobs['not-linked']['description'] == 'must survive'
-        assert all(identifier == 'not-linked' or value.get('description') == '[]' or not value.get('name')
+        assert all(identifier == 'not-linked' or value.get('description') == '[]' or
+                   (value.get('description') == '' and json.loads(value.get('name') or '{}') in ({},{'version':2}))
                    for identifier, value in server.blobs.items()), 'Clear retained account data'
         for method in ('GET', 'PATCH', 'DELETE'):
             assert server.counts[method, False] > 0, server.counts

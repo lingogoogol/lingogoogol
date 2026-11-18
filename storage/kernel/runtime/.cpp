@@ -1,5 +1,6 @@
 module;
 #include <nlohmann/json.hpp>
+#include "storage/blob_format.hpp"
 module storage.kernel.runtime;
 import std;
 import storage.kernel.load;
@@ -141,7 +142,7 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
                     // folder metadata needs a direct request; all other files
                     // remain eligible for same-account deletion batches.
                     const auto name=nlohmann::json::parse(file.value("name",std::string{}),nullptr,false);
-                    const bool folder=name.is_object() && name.contains("next") && !name.contains("size");
+                    const bool folder=name.is_object() && storage_format::folder(name);
                     ids.push_back({{"id",file.at("id")},{"account",address},{"kind",folder ? "folder" : "file"}});
                 }
                 page=response.value("nextPageToken",std::string{});

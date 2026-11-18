@@ -45,8 +45,6 @@ auto app() -> void
     lgo::init_logfile(log_path(settings));
     http_error_log_codes_set(storage_settings_t::parse_http_log_codes(settings.http_log_codes));
     google_batch_t::gzip_enabled_set(settings.batch_gzip);
-    if (settings.content_zstd && !content_zstd_available())
-        lgo::log_file("content_zstd ignored: this build has no zstd.\n");
     google_account_t::token_retry_limit_set(settings.network_retries);
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
@@ -812,8 +810,6 @@ auto app() -> void
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
                 google_batch_t::gzip_enabled_set(result.settings.batch_gzip);
-                if (result.settings.content_zstd && !content_zstd_available())
-                    lgo::log_file("content_zstd ignored: this build has no zstd.\n");
                 google_account_t::token_retry_limit_set(result.settings.network_retries);
                 const bool changed_location{!result.session || !load_state.m_session ||
                     result.session->storage_id != load_state.m_session->storage_id ||

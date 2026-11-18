@@ -1,6 +1,7 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "storage/blob_format.hpp"
 
 module storage.google.drive.blob_queue;
 
@@ -91,7 +92,7 @@ auto blob_queue_t::process() -> void
             batch.path_set("/drive/v3");
             for (std::size_t i{};i<batch_size;++i)
             {
-                blob_upload(batch, "", "");
+                blob_upload(batch, nlohmann::json{{"version",storage_format::current_version}}.dump(), "");
             }
             batch.method_post();
             multi.add(std::move(batch));

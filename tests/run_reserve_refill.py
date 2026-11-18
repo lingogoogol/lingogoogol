@@ -61,7 +61,7 @@ class Handler(fixture['Handler']):
                 first = request.split('\r\n', 1)[0]
                 assert first == 'POST /drive/v3/files?fields=id HTTP/1.1', first
                 value = json.loads(request.split('\r\n\r\n', 1)[1])
-                assert value == {'name': '', 'description': ''}
+                assert json.loads(value['name']) == {'version': 2} and value['description'] == ''
                 status = 503 if self.server.mode == 'empty-retry' and attempt == 1 and i == 0 else 200
                 value = {'error': 'retry once'} if status == 503 else {'id': f'created-{attempt}-{identifier}'}
                 responses.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\n'

@@ -1,6 +1,7 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "storage/blob_format.hpp"
 
 export module storage.kernel.load;
 
@@ -45,10 +46,13 @@ import storage.google;
 //{
 //  "parent": the chunk blob id this content belongs to (str),
 //  "parent_account": owner of parent chunk,
-//  "c": "zstd" (absent = raw), "r": uncompressed byte length
+//  "version": global format version (absent = 0; >=1 means zstd then Base64URL)
 //}
 
-//A file content blob's description contains Base64URL of a fixed raw slice, optionally compressed.
+// Content is Base64URL; version >= 1 contains one complete zstd frame.
+// All names carry version. File/folder names also carry version_min, time (UTC
+// Unix seconds), and size (original bytes; recursive total for folders).
+// Version 2 folders carry type="folder"; size no longer distinguishes kinds.
 
 //Structure of a folder blob's name:
 //{
@@ -265,6 +269,7 @@ export
 
     struct upload_folder_t: public upload_entity_t
     {
+        std::uint64_t m_size{};
         std::string m_main_id{};
         std::string m_next_id{};
         //The total number of entities that began linking to a folder blob.
@@ -281,7 +286,9 @@ export
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
     struct upload_task_t: public load_task_t
     {
-        bool m_content_zstd{};
+        std::uint64_t m_blob_version{storage_format::current_version};
+        std::uint64_t m_bytes_per_content{storage_format::content_capacity};
+        std::int64_t m_time{};
         ~upload_task_t() override
         {
             // Preparation captures this task and writes its containers. Join before member destruction.

@@ -1,4 +1,5 @@
 #include <nlohmann/json.hpp>
+#include "storage/blob_format.hpp"
 import std;
 import storage.encode;
 import storage.state;
@@ -6,74 +7,34 @@ import storage.state;
 namespace
 {
     auto check(bool value, const char* message) -> void
-    {
-        if (!value) throw std::runtime_error{message};
-    }
+    { if (!value) throw std::runtime_error{message}; }
     auto reject(auto action) -> void
     {
         bool rejected{};
-        try { action(); } catch (const std::exception&) { rejected = true; }
-        check(rejected, "Malformed input was accepted");
+        try { action(); } catch (const std::exception&) { rejected=true; }
+        check(rejected,"Malformed input was accepted");
     }
     auto blob(const nlohmann::json& name, const std::string& content) -> nlohmann::json
-    {
-        return {{"name",name.dump()},{"description",content}};
-    }
-    auto roundtrip(const std::string& input, bool compress) -> void
+    { return {{"name",name.dump()},{"description",content}}; }
+    auto roundtrip(const std::string& input) -> void
     {
         auto name = nlohmann::json{{"parent","chunk"},{"parent_account","owner"}};
-        const auto content = content_blob_encode(input, compress, name);
-        check(content_blob_decode(blob(name,content)) == input, "Content roundtrip failed");
-        const auto wire = blob(name,content).dump();
-        check(content_blob_decode(nlohmann::json::parse(wire)) == input, "UTF-8 JSON roundtrip failed");
-        check(content_blob_decode(nlohmann::json::parse(blob(name,content).dump(-1,' ',true))) == input,
-              "Escaped Unicode JSON roundtrip failed");
-        check(content.size() <= 25000, "Character limit exceeded");
-        check(!name.contains("e") && !name.contains("n"), "Unexpected encoding tags");
-        if (name.contains("c"))
-            check(compress && content_zstd_available() && name.at("c") == "zstd" &&
-                  name.at("r") == input.size(), "Compression tags mismatch");
-    }
-
-    auto persistence() -> void
-    {
-        const auto previous = std::filesystem::current_path();
-        const auto scratch = previous / ("content-codec-fixture-" +
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        check(std::filesystem::create_directory(scratch), "Cannot create isolated test directory");
-        struct cleanup_t
-        {
-            std::filesystem::path previous, scratch;
-            ~cleanup_t()
-            {
-                std::filesystem::current_path(previous);
-                std::filesystem::remove_all(scratch);
-            }
-        } cleanup{previous,scratch};
-        std::filesystem::current_path(scratch);
-        auto settings = storage_settings_t::load();
-        check(!settings.content_zstd, "Wrong settings defaults");
-        settings.content_zstd = true;
-        settings.save();
-        settings = storage_settings_t::load();
-        check(settings.content_zstd, "Settings did not persist");
-        auto journal = task_journal_t::create({{"kind","upload-file"},
-            {"content_zstd",settings.content_zstd}});
-        const auto id = journal->path();
-        journal.reset();
-        settings.content_zstd = false;
-        settings.save();
-        const auto restored = task_journal_t::restore();
-        check(restored.size() == 1 && restored.front()->path() == id, "Task journal was not restored");
-        const auto intent = restored.front()->data();
-        check(intent.at("content_zstd") == true, "Saved task compression changed with settings");
-        auto legacy = task_journal_t::create({{"kind","upload-file"}});
-        check(!legacy->data().value("content_zstd",false), "Legacy journal defaults changed");
-        storage_atomic_write("settings.json",R"({"content_zstd":"true"})");
-        reject([] { storage_settings_t::load(); });
-        storage_atomic_write("settings.json","{}");
-        settings = storage_settings_t::load();
-        check(!settings.content_zstd, "Legacy settings defaults changed");
+        const auto content = content_blob_encode(input,name);
+        check(name.at("version")==storage_format::current_version,"Missing current version");
+        check(!name.contains("e") && !name.contains("n") && !name.contains("c") && !name.contains("r"),"Unexpected tags");
+        check(content.size()<=25000,"Description limit exceeded");
+        check(content_blob_decode(blob(name,content))==input,"Roundtrip failed");
+        name["version"]=1;
+        check(content_blob_decode(nlohmann::json::parse(blob(name,content).dump()))==input,"Version 1 read failed");
+        const auto frame=base64url_decode(content);
+        check(!frame.empty(),"Empty input still requires a complete zstd frame");
+        check(content_blob_decode(blob(nlohmann::json::object(),content))==frame,
+              "Unversioned content was incorrectly decompressed");
+        check(content_blob_decode(blob({{"e","unused"},{"n",-1},{"c","zstd"},{"r",input.size()}},content))==frame,
+              "Discarded format tags changed unversioned decoding");
+        reject([&]{content_blob_decode(blob({{"version",2}},base64url_encode(frame+"x")));});
+        reject([&]{content_blob_decode(blob({{"version",2}},base64url_encode(frame+frame)));});
+        reject([&]{content_blob_decode(blob({{"version",2}},base64url_encode(frame.substr(0,frame.size()-1))));});
     }
 }
 
@@ -81,65 +42,47 @@ auto main() -> int
 {
     try
     {
-        persistence();
         std::mt19937 random{0x14c0de};
-        for (std::size_t size{}; size <= 200; ++size)
+        for (std::size_t size=0;size<=200;++size)
         {
-            std::string input(size, '\0');
-            for (auto& c : input) c = static_cast<char>(random() & 255);
-            for (bool compress : {false,true})
-            {
-                roundtrip(input,compress);
-                roundtrip(std::string(size,'x'),compress);
-            }
+            std::string input(size,'\0');
+            for(auto& byte:input) byte=static_cast<char>(random()&255);
+            roundtrip(input); roundtrip(std::string(size,'x'));
         }
-        {
-            constexpr std::size_t capacity{18750};
-            std::string input(capacity,'\0');
-            for (auto& c : input) c = static_cast<char>(random() & 255);
-            for (bool compress : {false,true})
-            {
-                roundtrip(input,compress);
-                roundtrip(std::string(capacity,'A'),compress);
-            }
-            auto name = nlohmann::json::object();
-            content_blob_encode(input,true,name);
-            check(!name.contains("c"), "Incompressible data must fall back to raw");
-            reject([&] { content_blob_encode(input+'x',false,name); });
-            const auto packed = content_blob_encode(std::string(capacity,'A'),true,name);
-            check(name.contains("c") == content_zstd_available(), "Missing zstd tag");
-            if (content_zstd_available())
-            {
-                auto damaged = name;
-                damaged["r"] = capacity - 1;
-                reject([&] { content_blob_decode(blob(damaged,packed)); });
-                const auto frame = base64url_decode(packed);
-                reject([&] { content_blob_decode(blob(name,base64url_encode(frame + "x"))); });
-                reject([&] { content_blob_decode(blob(name,base64url_encode(frame + frame))); });
-                reject([&] { content_blob_decode(blob(name,base64url_encode(frame.substr(0,frame.size()-1)))); });
-                auto corrupt = packed;
-                corrupt[0] ^= 1;
-                reject([&] { content_blob_decode(blob(name,corrupt)); });
-            }
-        }
-        reject([] { content_blob_decode(blob({{"e","unknown"}},"")); });
-        reject([] { content_blob_decode(blob({{"c","unknown"}},"")); });
-        reject([] { content_blob_decode(blob(nlohmann::json::object(),std::string(25001,'A'))); });
-        reject([] { content_blob_decode(blob(nlohmann::json::object(),"!")); });
-        for (auto value : {nlohmann::json(-1),nlohmann::json(1.0),nlohmann::json("1"),nlohmann::json(18751u)})
-            reject([&] { content_blob_decode(blob({{"c","zstd"},{"r",value}},"")); });
-        reject([] { content_blob_decode(blob({{"c","zstd"}},"")); });
-        if (!content_zstd_available())
-            reject([] { content_blob_decode(blob({{"c","zstd"},{"r",1}},base64url_encode("x"))); });
-        check(content_blob_decode({{"description",base64url_encode("legacy")}}) == "legacy",
-              "Old description-only response is unreadable");
-        std::cout << "PASS: settings/task persistence, lengths 0..200, full 18750-byte blobs, JSON, legacy, tags, raw fallback, malformed inputs; zstd="
-                  << content_zstd_available() << '\n';
+        std::string full(storage_format::content_capacity,'\0');
+        for(auto& byte:full) byte=static_cast<char>(random()&255);
+        roundtrip(full); roundtrip(std::string(full.size(),'A'));
+        auto name=nlohmann::json::object();
+        reject([&]{content_blob_encode(full+'x',name);});
+        // Legacy tasks keep both their 18,750-byte offsets and wire format.
+        std::string legacy(storage_format::legacy_content_capacity,'x');
+        auto old_name=nlohmann::json::object();
+        auto old_payload=content_blob_encode(legacy,old_name,0);
+        check(!old_name.contains("version") && !old_name.contains("c"),"Legacy upload changed format");
+        check(base64url_decode(old_payload)==legacy,"Version 0 upload was compressed");
+        check(content_blob_decode(blob(old_name,old_payload))==legacy,"Version 0 roundtrip failed");
+        check(content_blob_decode({{"description",base64url_encode("legacy")}})=="legacy","Old checkpoint read failed");
+        for(const auto& invalid:{nlohmann::json(-1),nlohmann::json(3),nlohmann::json(1.5),nlohmann::json("2"),nlohmann::json(true)})
+            reject([&]{content_blob_decode(blob({{"version",invalid}},base64url_encode("x")));});
+        reject([]{content_blob_decode(blob({{"version",2}},base64url_encode("not zstd")));});
+        reject([]{content_blob_decode(blob(nlohmann::json::object(),"!"));});
+        reject([]{content_blob_decode(blob(nlohmann::json::object(),std::string(25001,'A')));});
+        reject([]{storage_format::minimum({{"version",2},{"version_min",3}});});
+        const auto previous=std::filesystem::current_path();
+        const auto scratch=std::filesystem::temp_directory_path()/(
+            "versioned-journal-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directory(scratch);
+        struct cleanup_t{std::filesystem::path previous,scratch;~cleanup_t(){std::filesystem::current_path(previous);std::filesystem::remove_all(scratch);}} cleanup{previous,scratch};
+        std::filesystem::current_path(scratch);
+        const auto timestamp=storage_format::now();
+        auto journal=task_journal_t::create({{"kind","upload-file"},{"blob_version",storage_format::current_version},{"time",timestamp}});
+        const auto path=journal->path();journal.reset();
+        auto restored=task_journal_t::restore();
+        check(restored.size()==1 && restored.front()->path()==path && restored.front()->data().at("blob_version")==2 &&
+              restored.front()->data().at("time")==timestamp,"Restored upload lost format or timestamp");
+        restored.front()->finish();restored.clear();
+        std::cout<<"PASS: versions 0/1/2, mandatory zstd, full incompressible slices, empty frames, uncompressed legacy uploads/checkpoints, malformed frames and versions.\n";
         return 0;
     }
-    catch (const std::exception& error)
-    {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+    catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

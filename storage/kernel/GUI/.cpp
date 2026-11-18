@@ -1,6 +1,8 @@
 module;
 
 #include <nlohmann/json.hpp>
+#include "storage/folder_metadata.hpp"
+#include <ctime>
 #include "profile.hpp"
 
 module storage.kernel.GUI;
@@ -149,23 +151,36 @@ namespace
         return std::format("{} {}",size,units[unit]);
     }
 
+    auto entry_time_text(const nlohmann::json& entry) -> std::string
+    {
+        if (!entry.contains("time")) return "—";
+        const auto seconds = entry.at("time").get<std::int64_t>();
+        const auto value = static_cast<std::time_t>(seconds);
+        std::tm local{};
+        if (localtime_s(&local,&value)) return "—";
+        char buffer[32]{};
+        if (!std::strftime(buffer,sizeof(buffer),"%Y-%m-%d %H:%M:%S",&local)) return "—";
+        return buffer;
+    }
+
     // Header and entries share the same column geometry. Reserve the actions
     // first so narrowing the filename clip can never move buttons off-screen.
     class directory_columns_t: public lgo::divx_soft_t
     {
-        std::shared_ptr<lgo::GUI_object_t> m_name, m_size_label, m_actions;
-        std::shared_ptr<lgo::std_liney_t> m_size_line, m_actions_line;
+        std::shared_ptr<lgo::GUI_object_t> m_name, m_size_label, m_time_label, m_actions;
+        std::shared_ptr<lgo::std_liney_t> m_size_line, m_time_line, m_actions_line;
 
         auto layout() -> void
         {
             if (!m_name) return;
-            constexpr std::int64_t name_min{120}, size_width{192};
+            constexpr std::int64_t name_min{120}, size_width{100}, time_width{190};
             const auto gap{2 * lgo::std_margin.x + lgo::std_line_size.x};
             const auto actions_width{4 * 32 + 3 * lgo::std_line_size.x + 6 * lgo::std_margin.x};
             const auto width{get_size().x}, height{get_size().y};
             const bool show_size{width >= name_min + size_width + actions_width + 2 * gap};
+            const bool show_time{width >= name_min + size_width + time_width + actions_width + 3 * gap};
             const auto name_width{std::max<std::int64_t>(0,
-                width - actions_width - gap - (show_size ? size_width + gap : 0))};
+                width - actions_width - gap - (show_size ? size_width + gap : 0) - (show_time ? time_width + gap : 0))};
             const auto at{get_pos()};
             m_name->set_size({name_width, height});
             m_name->set_pos(at);
@@ -176,6 +191,11 @@ namespace
             m_size_line->set_size({show_size ? lgo::std_line_size.x : 0, height});
             m_size_label->set_pos({size_x, at.y});
             m_size_label->set_size({show_size ? size_width : 0, height});
+            const auto time_x = size_x + (show_size ? size_width + gap : 0);
+            m_time_line->set_pos({time_x-lgo::std_margin.x-lgo::std_line_size.x,at.y});
+            m_time_line->set_size({show_time ? lgo::std_line_size.x : 0,height});
+            m_time_label->set_pos({time_x,at.y});
+            m_time_label->set_size({show_time ? time_width : 0,height});
             const auto actions_x{at.x + width - actions_width};
             m_actions_line->set_pos({actions_x - lgo::std_margin.x - lgo::std_line_size.x, at.y});
             m_actions_line->set_size({lgo::std_line_size.x, height});
@@ -190,14 +210,17 @@ namespace
         {
             m_size_line = add_object_ghost_shared<lgo::std_liney_t>(
                 depth, lgo::size_1D{size.y}, lgo::std_dark_gray);
+            m_time_line = add_object_ghost_shared<lgo::std_liney_t>(
+                depth, lgo::size_1D{size.y}, lgo::std_dark_gray);
             m_actions_line = add_object_ghost_shared<lgo::std_liney_t>(
                 depth, lgo::size_1D{size.y}, lgo::std_dark_gray);
         }
         auto columns(std::shared_ptr<lgo::GUI_object_t> name,
                      std::shared_ptr<lgo::GUI_object_t> size,
+                     std::shared_ptr<lgo::GUI_object_t> time,
                      std::shared_ptr<lgo::GUI_object_t> actions) -> void
         {
-            m_name = std::move(name); m_size_label = std::move(size); m_actions = std::move(actions);
+            m_name = std::move(name); m_size_label = std::move(size); m_time_label = std::move(time); m_actions = std::move(actions);
             layout();
         }
         auto set_size(lgo::size_2D size) -> void override
@@ -619,19 +642,19 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                         {"account_path", session->account_path},
                                                         {"account_email", session->address}, {"account_namespace", session->storage_id},
                                                         {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()},
-                                                        {"root", session->root}, {"routing",session->routing()},
-                                                        {"content_zstd",state->m_settings.content_zstd && content_zstd_available()}});
-    if (session && journal) session->restore_routing(journal->data().at("routing"));
+                                                        {"root", session->root}, {"routing",session->routing_for({session->root,pos})},
+                                                        {"blob_version",storage_format::current_version},{"time",storage_format::now()}});
     if (upload)
     {
         auto task{std::make_shared<upload_task_t>()};
         task->m_session = session;
         task->m_journal = journal;
         const auto saved = journal ? journal->data() : nlohmann::json::object();
-        task->m_content_zstd = saved.value("content_zstd",
-            !journal && state->m_settings.content_zstd && content_zstd_available());
-        if (task->m_content_zstd && !content_zstd_available())
-            throw std::runtime_error{"續傳此任務需要支援 zstd 的建置"};
+        task->m_blob_version = saved.value("blob_version",journal ? std::uint64_t{0} : storage_format::current_version);
+        storage_format::version(nlohmann::json{{"version",task->m_blob_version}});
+        task->m_bytes_per_content = task->m_blob_version ? storage_format::content_capacity : storage_format::legacy_content_capacity;
+        task->m_time = saved.value("time",storage_format::now());
+        if (!saved.contains("time") && journal) journal->set("time",task->m_time);
         task->m_type = "upload";
         task->m_name = path;
         task->m_pos.m_main_id = pos;
@@ -905,6 +928,21 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                    request.m_account_context = session->account;
                                request.control_set(control);
                                auto entries = list_folder_content(request, &target, session.get());
+                               for (auto& entry : entries)
+                               {
+                                   const auto summary = storage_format::summarize(entry.at("id"),entry.at("type"),
+                                       [&](const std::string& id) {
+                                           session->bind(request,id);
+                                           auto value = blob_get_run(request,id,"name,description");
+                                           const auto name = nlohmann::json::parse(value.at("name").get<std::string>());
+                                           session->observe(id,name,nlohmann::json::parse(value.at("description").get<std::string>()));
+                                           return value;
+                                       });
+                                   entry["size"] = summary.size;
+                                   entry["version_min"] = summary.minimum;
+                                   if (summary.name.contains("time")) entry["time"] = summary.name.at("time");
+                                   else entry.erase("time");
+                               }
                                auto path = nlohmann::json::array();
                                std::set<std::string> visited;
                                auto ancestor{target};
@@ -981,8 +1019,10 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 },
                 name, folder ? lgo::std_brown_light : lgo::std_green_light, lgo::size_1D{0})};
             auto size_label{columns->add_object_ghost_shared<lgo::text_line_std_t>(
-                storage_content_depth, folder ? "" : file_size_text(entry.at("size").get<std::uint64_t>()),
+                storage_content_depth, file_size_text(entry.at("size").get<std::uint64_t>()),
                 lgo::std_white, lgo::size_1D{0})};
+            auto time_label{columns->add_object_ghost_shared<lgo::text_line_std_t>(
+                storage_content_depth, entry_time_text(entry), lgo::std_white, lgo::size_1D{0})};
             auto actions{columns->add_object_ghost_shared<lgo::divx_soft_t>(
                 storage_content_depth, lgo::div_create_from_member{},
                 lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
@@ -1010,7 +1050,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { delete_dialog(engine, persistent, load_state, session, source, entry); },
                 "刪除", lgo::std_blue_light, lgo::size_1D{32});
-            columns->columns(label, size_label, actions);
+            columns->columns(label, size_label, time_label, actions);
             row->add_object<lgo::std_linex_t>(
                 storage_content_depth, row->space_x(lgo::std_margin), lgo::std_dark_gray);
         }
@@ -1133,8 +1173,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             persistent->m_directory_header_font, lgo::std_white,
             lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::center});
     };
-    auto name_heading{heading("檔名")}, size_heading{heading("大小")}, actions_heading{heading("操作")};
-    directory_header->columns(name_heading, size_heading, actions_heading);
+    auto name_heading{heading("檔名")}, size_heading{heading("大小")}, time_heading{heading("時間")}, actions_heading{heading("操作")};
+    directory_header->columns(name_heading, size_heading, time_heading, actions_heading);
     auto viewer_div{browser_div->add_object_shared<lgo::scroll_t>(
         storage_content_depth, browser_div->space_2D(lgo::std_margin), lgo::scroll_axes_t::y, lgo::std_margin)};
     directory_header->set_size({viewer_div->view_size().x, directory_header->get_size().y});
@@ -1250,11 +1290,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                     "確定", std::vector<std::pair<std::string,bool>>{
                         {"batch_request",settings.batch_request},
                         {google_batch_t::gzip_available() ? "batch_gzip" : "batch_gzip（此建置無 ZLIB）",
-                         settings.batch_gzip && google_batch_t::gzip_available()},
-                        {content_zstd_available() ? "content_zstd" : "content_zstd（此建置無 zstd）",
-                         settings.content_zstd && content_zstd_available()}});
+                         settings.batch_gzip && google_batch_t::gzip_available()}});
                 persistent->m_dialog->set_checkbox_enabled(1,google_batch_t::gzip_available());
-                persistent->m_dialog->set_checkbox_enabled(2,content_zstd_available());
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)
@@ -1285,7 +1322,6 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         settings.batch_size = storage_settings_t::parse_batch_size(values[7]);
                         settings.batch_request = values[8]=="true";
                         settings.batch_gzip = google_batch_t::gzip_available() && values[9]=="true";
-                        settings.content_zstd = content_zstd_available() && values[10]=="true";
                         settings.http_log_codes = values[5];
                         storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)
