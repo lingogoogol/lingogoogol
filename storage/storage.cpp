@@ -556,8 +556,6 @@ auto app() -> void
             }
             else if (auto current=load_state.m_session)
                 actions.emplace_back("擴充並行",[&,id=current->storage_id] { start_parallel(id); });
-            else if (settings.spaces.empty())
-                actions.emplace_back("設定並行上傳",[&] { start_parallel({}); });
             actions.emplace_back("新增空間",[&]
             {
                 name_dialog("新增空間","空間名稱",[&](std::string name)
