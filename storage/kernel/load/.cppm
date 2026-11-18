@@ -272,9 +272,11 @@ export
         //The first chunk that has not finished transfer.
         std::size_t m_chunk_transfer_end_progress{ 0 };
         std::vector<upload_chunk_t> m_chunk_arr{};
+        std::size_t m_saved_chunk_count{};
         //Also required for empty files, whose chunk counters are always zero.
         bool m_load_end{ false };
         std::vector<upload_page_t> m_pages;
+        std::size_t m_saved_page_count{};
     };
 
     struct upload_folder_t: public upload_entity_t
@@ -291,6 +293,7 @@ export
         //An empty folder still needs a successful metadata response.
         bool m_load_end{ false };
         std::vector<upload_page_t> m_pages;
+        std::size_t m_saved_page_count{};
     };
 
     //`upload_task_t` has `upload_folder_t` as a member, so it must be defined after `upload_folder_t`.
@@ -414,6 +417,7 @@ export
         // and `m_chunk_arr` may be modified, invalidating the iterator.
         std::uint64_t m_filesystem_progress{ 0 };
         std::vector<download_chunk_t> m_chunk_arr{};
+        std::size_t m_saved_chunk_count{};
         //`m_next_id` equal to `"null"` indicates that chunk loading has completed.
         std::string m_next_id{};
     };
@@ -580,11 +584,12 @@ export
     -> void;
     auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& easy, download_chunk_t& chunk) -> void;
     auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_file_t* file, std::size_t chunk_i) -> void;
-    auto upload_progress_save(upload_entity_t& entity) -> void;
+    auto upload_progress_save(upload_entity_t& entity, std::size_t changed_begin=SIZE_MAX, std::size_t changed_count=0) -> void;
     auto upload_progress_restore(upload_entity_t& entity) -> void;
+    auto upload_page_completed(upload_entity_t& entity,std::size_t begin) -> void;
     auto upload_progress_ready(upload_task_t& task) -> void;
     auto upload_finished(const upload_entity_t& entity) -> bool;
-    auto download_progress_save(download_file_t& file) -> void;
+    auto download_progress_save(download_file_t& file, std::size_t changed_begin=SIZE_MAX, std::size_t changed_count=0) -> void;
     auto download_progress_restore(download_file_t& file) -> bool;
     auto download_manifest_restore(google_easy_t& easy, download_task_t& task) -> bool;
     auto download_manifest_save(download_task_t& task) -> void;

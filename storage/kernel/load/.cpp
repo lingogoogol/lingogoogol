@@ -970,8 +970,8 @@ auto upload_file_load_end
     {
         file->m_load_end = true;
     }
-    for (auto& p:file->m_pages) if (p.begin==begin_i) p.complete=true;
-    upload_progress_save(*file);
+    upload_page_completed(*file,begin_i);
+    upload_progress_save(*file,begin_i,chunk_count);
     task_progress_save(*file->m_task);
     upload_complete(file);
     return;
@@ -1056,7 +1056,7 @@ auto upload_chunk_load_end
     {
         ++file->m_chunk_load_end_progress;
     }
-    upload_progress_save(*file);
+    upload_progress_save(*file,begin_i,chunk_count);
     task_progress_save(*file->m_task);
     upload_complete(file);
     return;
@@ -1132,7 +1132,7 @@ auto upload_chunk_transfer_begin
     CURL* key{ batch.interface_get() };
     chunk.m_transfer_started=true;
     if (!existing) file->m_chunk_cover_progress += batch_size;
-    upload_progress_save(*file);
+    upload_progress_save(*file,index,1);
 
     file->m_task->m_state->m_end.emplace
     (
@@ -1157,7 +1157,7 @@ auto upload_chunk_transfer_end(std::unique_ptr<curl_easy_t>&, upload_file_t* fil
         ++file->m_chunk_transfer_end_progress;
     }
     task->m_progress += chunk.m_size;
-    upload_progress_save(*file);
+    upload_progress_save(*file,chunk_i,1);
     task_progress_save(*task);
     task_progress(*task, task->m_progress, task->m_size, task->m_name);
     upload_complete(file);
@@ -1312,7 +1312,7 @@ auto upload_folder_load_end
     {
         folder->m_load_end = true;
     }
-    for (auto& p:folder->m_pages) if (p.begin==begin_i) p.complete=true;
+    upload_page_completed(*folder,begin_i);
     upload_progress_save(*folder);
     task_progress_save(*folder->m_task);
     upload_complete(folder);
@@ -1513,7 +1513,7 @@ auto download_chunk_load_end
             ++file_i->m_chunk_load_end_progress;
         }
     }
-    download_progress_save(*file_i);
+    download_progress_save(*file_i,i_begin,batch.part_count());
 
     // A later index batch may finish before the first pending batch. It does
     // not make content runnable until the contiguous loaded prefix advances.

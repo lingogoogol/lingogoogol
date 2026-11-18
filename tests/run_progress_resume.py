@@ -3,6 +3,7 @@
 from collections import Counter
 from http.server import ThreadingHTTPServer
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -29,7 +30,17 @@ class Handler(fixture['Handler']):
         return super().operation(method,path,body,batch)
 
 def checkpoints(test):
-    return [json.loads(p.read_text()) for p in (test/'task.data').glob('*/*.progress')]
+    result=[]
+    for directory in (test/'task.data').iterdir():
+        if not directory.is_dir():continue
+        records={p.stem:json.loads(p.read_text()) for p in directory.glob('*.progress')}
+        for node in records.values():
+            for kind in ('chunk','page'):
+                if kind+'_key' in node:
+                    node[kind+'s']=[records[hashlib.sha256((node[kind+'_key']+str(i)).encode()).hexdigest()]
+                                   for i in range(node[kind+'_count'])]
+            result.append(node)
+    return result
 
 def forbid_upload(server,nodes):
     for s in nodes:
