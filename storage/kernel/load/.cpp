@@ -1065,7 +1065,9 @@ auto upload_chunk_transfer_begin
         {
             throw lgo::error_t{ "The upload source could not be read completely: " + file->m_path_local };
         }
-        blob.m_content = base64url_encode(content);
+        auto name = nlohmann::json::parse(*blob.m_name);
+        blob.m_content = content_blob_encode(std::move(content), file->m_task->m_content_zstd, name);
+        blob.m_name = name.dump();
         blob_update(batch, blob);
     }
     batch.method_post();
@@ -1460,7 +1462,7 @@ auto download_chunk_transfer_begin(curl_multi_worker_t& multi, curl_easy_t&& eas
     batch.path_set("/drive/v3");
     for (std::size_t i{ 0 }; i < request_count; ++i)
     {
-        blob_get(batch, chunk.m_content_id[i], "description");
+        blob_get(batch, chunk.m_content_id[i], "name,description");
     }
     batch.method_post();
     //Get the key to `m_state->m_end` first before `batch` is moved.
@@ -1494,7 +1496,7 @@ auto download_chunk_transfer_end(std::unique_ptr<curl_easy_t>& easy, download_fi
     chunk.m_content.resize(batch.part_count());
     for (std::uint64_t i{ 0 }; i < batch.part_count(); ++i)
     {
-        chunk.m_content[i] = nlohmann::json::parse(batch.response_get(i).body_get())["description"];
+        chunk.m_content[i] = content_blob_decode(nlohmann::json::parse(batch.response_get(i).body_get()));
     }
     chunk.m_received=true;
     chunk.m_response_key=easy->checkpoint_key();
@@ -1527,7 +1529,6 @@ auto download_write_ready(download_file_t& target) -> void
         }
         for (std::uint64_t i{ 0 }; i < chunk_filesystem.m_content.size(); ++i)
         {
-            chunk_filesystem.m_content[i] = base64url_decode(chunk_filesystem.m_content[i]);
             content_stream.write(chunk_filesystem.m_content[i].data(),
                                  chunk_filesystem.m_content[i].size());
             filesystem_size += chunk_filesystem.m_content[i].size();

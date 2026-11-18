@@ -168,10 +168,11 @@ auto storage_runtime_t::clear(const std::shared_ptr<storage_session_t>& session,
         const auto address=item.at("account").get<std::string>();
         const bool single = item.at("kind")=="folder" || !batch_request.load();
         const bool folder=item.at("kind")=="folder";
+        const auto limit = single ? std::size_t{1} : batch_size.load();
         std::vector<std::string> group;
         for (const auto& other : ids)
             if (!completed.contains(other.at("id").get<std::string>()) && other.at("account")==address &&
-                (other.at("kind")=="folder")==folder && group.size()<(single ? 1u : 100u))
+                (other.at("kind")=="folder")==folder && group.size()<limit)
                 group.push_back(other.at("id"));
         if (single)
         {

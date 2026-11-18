@@ -21,3 +21,9 @@ target_link_libraries(
         storage.google.easy
         storage.google.account
 )
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+    target_link_libraries(storage.google.batch PRIVATE ZLIB::ZLIB)
+    target_compile_definitions(storage.google.batch PRIVATE LGO_HAVE_ZLIB=1)
+endif()

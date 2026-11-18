@@ -2,6 +2,7 @@ module;
 #include <nlohmann/json.hpp>
 module storage.kernel.load;
 import std;
+import storage.encode;
 
 namespace
 {
@@ -171,7 +172,7 @@ auto download_progress_restore(download_file_t& file) -> bool
         if (!response) throw std::runtime_error{"Missing saved out-of-order download response."};
         const auto parts=json::parse(*response);
         for (std::size_t part{};part<c.m_content_id.size();++part)
-            c.m_content.push_back(json::parse(parts.at(std::to_string(part)).get<std::string>()).at("description"));
+            c.m_content.push_back(content_blob_decode(json::parse(parts.at(std::to_string(part)).get<std::string>())));
     }
     file.m_chunk_load_end_progress=prefix(file.m_chunk_arr,[](const auto& c) { return c.m_loaded; });
     file.m_chunk_load_begin_progress=file.m_chunk_load_end_progress;

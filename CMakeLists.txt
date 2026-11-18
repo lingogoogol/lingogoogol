@@ -25,6 +25,11 @@ project(
     LANGUAGES CXX
 )
 
+option(LGO_BUILD_CONTENT_TESTS "Build offline content codec tests." OFF)
+if(LGO_BUILD_CONTENT_TESTS)
+    enable_testing()
+endif()
+
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
 set(
     CMAKE_INTERPROCEDURAL_OPTIMIZATION

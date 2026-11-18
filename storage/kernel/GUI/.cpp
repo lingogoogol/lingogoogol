@@ -20,6 +20,7 @@ import storage.dialog;
 import storage.http;
 import storage.google;
 import storage.kernel.load;
+import storage.encode;
 
 namespace
 {
@@ -351,7 +352,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     auto& load_easy_status_map{persistent->m_easy_status};
     const auto slot_limit = load_state->m_settings.worker_count;
     persistent->m_worker_limit = slot_limit;
-    const auto parts = load_state->m_settings.batch_request ? google_batch_t::part_count_max() : 1;
+    const auto parts = load_state->m_settings.batch_request ? load_state->m_settings.batch_size : 1;
     const auto max_window = std::numeric_limits<std::size_t>::max();
     load_state->m_directory_request_window.store(
         slot_limit>max_window/parts ? max_window : slot_limit*parts,std::memory_order_relaxed);
@@ -613,13 +614,19 @@ auto begin_task(load_state_t* state, std::shared_ptr<storage_session_t> session,
                                                         {"account_path", session->account_path},
                                                         {"account_email", session->address}, {"account_namespace", session->storage_id},
                                                         {"root_directory", std::filesystem::path{session->root_path}.parent_path().generic_string()},
-                                                        {"root", session->root}, {"routing",session->routing()}});
+                                                        {"root", session->root}, {"routing",session->routing()},
+                                                        {"content_zstd",state->m_settings.content_zstd && content_zstd_available()}});
     if (session && journal) session->restore_routing(journal->data().at("routing"));
     if (upload)
     {
         auto task{std::make_shared<upload_task_t>()};
         task->m_session = session;
         task->m_journal = journal;
+        const auto saved = journal ? journal->data() : nlohmann::json::object();
+        task->m_content_zstd = saved.value("content_zstd",
+            !journal && state->m_settings.content_zstd && content_zstd_available());
+        if (task->m_content_zstd && !content_zstd_available())
+            throw std::runtime_error{"續傳此任務需要支援 zstd 的建置"};
         task->m_type = "upload";
         task->m_name = path;
         task->m_pos.m_main_id = pos;
@@ -1233,8 +1240,16 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"網路失敗重試次數（整數或無限）",
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
                         {"記錄 HTTP 狀態碼（如 0,200,403；留空停用）", settings.http_log_codes},
-                        {"worker 數量（正整數）", std::to_string(settings.worker_count)}},
-                    "確定", std::vector<std::pair<std::string,bool>>{{"batch_request",settings.batch_request}});
+                        {"worker 數量（正整數）", std::to_string(settings.worker_count)},
+                        {"batch_size（1–100）", std::to_string(settings.batch_size)}},
+                    "確定", std::vector<std::pair<std::string,bool>>{
+                        {"batch_request",settings.batch_request},
+                        {google_batch_t::gzip_available() ? "batch_gzip" : "batch_gzip（此建置無 ZLIB）",
+                         settings.batch_gzip && google_batch_t::gzip_available()},
+                        {content_zstd_available() ? "content_zstd" : "content_zstd（此建置無 zstd）",
+                         settings.content_zstd && content_zstd_available()}});
+                persistent->m_dialog->set_checkbox_enabled(1,google_batch_t::gzip_available());
+                persistent->m_dialog->set_checkbox_enabled(2,content_zstd_available());
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)
@@ -1262,7 +1277,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                             settings.network_retries = count;
                         }
                         settings.worker_count = storage_settings_t::parse_worker_count(values[6]);
-                        settings.batch_request = values[7]=="true";
+                        settings.batch_size = storage_settings_t::parse_batch_size(values[7]);
+                        settings.batch_request = values[8]=="true";
+                        settings.batch_gzip = google_batch_t::gzip_available() && values[9]=="true";
+                        settings.content_zstd = content_zstd_available() && values[10]=="true";
                         settings.http_log_codes = values[5];
                         storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)

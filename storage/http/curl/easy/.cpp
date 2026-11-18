@@ -82,7 +82,7 @@ auto curl_easy_t::log_http_response() const -> void
     }
     request += " HTTP/1.1\r\n";
     for (const auto& [name, value] : m_header) request += name + ": " + value + "\r\n";
-    request += "\r\n" + m_read->m_payload;
+    request += "\r\n" + request_body();
     std::string response{"HTTP " + std::to_string(m_response_code) + "\r\n"};
     curl_header* header{};
     while ((header = curl_easy_nextheader(m_interface, CURLH_HEADER, -1, header)))
@@ -216,7 +216,11 @@ auto curl_easy_t::bind_transport(CURL* handle) -> void
     // here would reset Google authentication retries and batch request state.
     curl_easy_t::method();
     if (m_verb == "POST")
+    {
         api_curl(curl_easy_setopt(handle, CURLOPT_POST, 1L));
+        api_curl(curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE_LARGE,
+            static_cast<curl_off_t>(m_read->m_payload.size())));
+    }
     else if (m_verb == "PATCH")
     {
         api_curl(curl_easy_setopt(handle, CURLOPT_UPLOAD, 1L));
@@ -345,6 +349,8 @@ auto curl_easy_t::method_post(std::string payload) -> void
     api_curl(curl_easy_setopt(m_interface, CURLOPT_POST, 1L));
     m_read->m_progress = 0;
     m_read->m_payload = payload;
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_POSTFIELDSIZE_LARGE,
+        static_cast<curl_off_t>(m_read->m_payload.size())));
     return;
 }
 
@@ -740,6 +746,11 @@ auto curl_easy_t::failed(std::string reason) -> void
         }
     }
 }
+auto curl_easy_t::request_body() const -> const std::string&
+{
+    return m_read->m_payload;
+}
+
 auto curl_easy_t::replay() -> bool
 {
     if (!m_journal)
@@ -749,7 +760,7 @@ auto curl_easy_t::replay() -> bool
         std::string request{m_verb + " " + m_host + m_path + "\n"};
         for (const auto &[name, value] : m_query)
             request += name + "=" + value + "\n";
-        request += m_read->m_payload;
+        request += request_body();
         m_cache_key = storage_digest(request);
     }
     if (auto saved{m_journal->response(m_cache_key)})

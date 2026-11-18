@@ -91,6 +91,7 @@ auto blob_update(google_easy_t& easy, blob_opt_t blob) -> void
     {
         payload["description"] = blob.m_content.value().dump();
     }
+    easy.header_set("Content-Type", "application/json; charset=UTF-8");
 	easy.method_patch(payload.dump());
     return;
 }
@@ -119,6 +120,7 @@ auto blob_update(google_easy_t& easy, blob_str_opt_t blob) -> void
     {
         payload["description"] = blob.m_content;
     }
+    easy.header_set("Content-Type", "application/json; charset=UTF-8");
 	easy.method_patch(payload.dump());
 	return;
 }
@@ -187,6 +189,7 @@ auto blob_update_run(google_easy_t& easy, blob_str_opt_t blob) -> void
     {
         payload["description"] = blob.m_content;
     }
+    easy.header_set("Content-Type", "application/json; charset=UTF-8");
     easy.method_patch(payload.dump());
 	easy.run();
 	return;

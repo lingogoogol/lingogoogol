@@ -15,6 +15,9 @@ export
     public:
         // Importers need the definition when sizing their bounded request windows.
         constexpr static auto part_count_max() -> std::uint64_t { return 100; }
+        static auto gzip_available() -> bool;
+        // Snapshotted by method_post(); existing attempts keep their encoding.
+        static auto gzip_enabled_set(bool enabled) -> void;
 
         google_batch_t();
         google_batch_t(curl_easy_t&& easy);
@@ -41,12 +44,14 @@ export
         auto run_clear_if_full() -> void;
         virtual auto parse() -> void;
         virtual auto valid() -> bool override;
+        auto error_context() const -> std::string override;
         auto failure_reason() const -> std::string override;
         virtual auto resume() -> void override;
         auto saved_response() -> std::string override;
         auto restore_response(std::string_view value) -> void override;
     protected:
         auto authorization_rejected() const -> bool override;
+        auto request_body() const -> const std::string& override;
     private:
         struct part_t
         {
@@ -57,6 +62,7 @@ export
         };
 
         auto body_generate() -> void;
+        auto body_payload() -> std::string;
 
         std::map<std::uint64_t, part_t> m_part{};
         std::string m_boundary{};
@@ -64,6 +70,7 @@ export
         std::string m_body{};
         bool m_auth_rejected{};
         bool m_direct{};
+        bool m_gzip{};
         std::string m_failure;
         //The number of parts generated in `m_body` in the last call to `body_generate`.
         std::uint64_t m_count{};
