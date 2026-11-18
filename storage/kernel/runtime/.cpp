@@ -291,6 +291,8 @@ auto storage_runtime_t::retry_accounts() -> void
     std::lock_guard lock{m_mutex};
     for (auto& [email, account] : m_accounts)
         account->retry();
+    for (auto& [email, queue] : m_queues)
+        queue->control()->retry();
 }
 
 auto storage_runtime_t::signed_in_sessions() -> std::vector<std::shared_ptr<storage_session_t>>

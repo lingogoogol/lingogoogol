@@ -732,9 +732,9 @@ auto curl_easy_t::failed(std::string reason) -> void
         m_control->fail(error.what());
         return;
     }
-    if (m_control && !auth)
+    if (!auth)
     {
-        const int limit{m_control->retry_limit};
+        const int limit{m_control ? m_control->retry_limit.load() : -1};
         if (limit >= 0 && m_failures >= static_cast<unsigned>(limit))
             m_control->fail(std::move(reason));
         else

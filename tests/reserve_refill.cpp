@@ -15,6 +15,11 @@ int main(int argc,char** argv)
     {
         check(argc==2,"Missing mode.");
         const std::string mode=argv[1];
+        {
+            curl_easy_t uncontrolled;
+            uncontrolled.failed("Synthetic connection failure.");
+            check(!uncontrolled.runnable(),"Uncontrolled synchronous requests retried without backoff.");
+        }
         auto account=std::make_shared<google_account_t>("user1@storage-ai-project1.iam.gserviceaccount.com","synthetic-key");
         std::atomic_bool close{};
         if(mode=="root-first")
