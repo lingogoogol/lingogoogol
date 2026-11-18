@@ -22,4 +22,8 @@ export {
                                     const std::shared_ptr<request_control_t>& control,
                                     const std::string& project, const std::string& name,
                                     const std::filesystem::path& directory = "key") -> std::filesystem::path;
+    auto google_cloud_provision(const std::shared_ptr<google_oauth_user_t>& user,
+        const std::shared_ptr<request_control_t>& control, const std::string& setup_id,
+        const std::vector<std::size_t>& account_counts, std::atomic_size_t& completed)
+        -> std::vector<std::string>;
 }
