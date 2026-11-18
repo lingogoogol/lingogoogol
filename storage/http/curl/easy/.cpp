@@ -196,6 +196,7 @@ curl_easy_t::~curl_easy_t()
 
 auto curl_easy_t::free() -> void
 {
+    if(m_control)m_control->wait_clear(reinterpret_cast<std::uintptr_t>(m_interface));
     // Socket callbacks still refer to m_control until the connection cache dies.
     m_sync_multi.reset();
     //Passing in a nullptr makes curl_easy_cleanup return immediately with no action.
@@ -212,6 +213,7 @@ auto curl_easy_t::release() -> void
 
 auto curl_easy_t::take_transport() -> CURL*
 {
+    if(m_control)m_control->wait_clear(reinterpret_cast<std::uintptr_t>(m_interface));
     m_sync_multi.reset();
     return std::exchange(m_interface, nullptr);
 }
@@ -278,6 +280,7 @@ curl_easy_t::operator bool() const
 
 auto curl_easy_t::clear() -> void
 {
+    if(m_control)m_control->wait_clear(reinterpret_cast<std::uintptr_t>(m_interface));
     m_cache_key.clear();
     m_verb.clear();
     m_failures = 0;
@@ -660,6 +663,7 @@ auto curl_easy_t::method_delete() -> void
 }
 auto curl_easy_t::control_set(std::shared_ptr<request_control_t> control) -> void
 {
+    if(m_control && control!=m_control)m_control->wait_clear(reinterpret_cast<std::uintptr_t>(m_interface));
     // Close cached sockets before releasing the callback context that opened
     // them. An easy may be reused with another task/account on its next request.
     if (control != m_control)
@@ -747,6 +751,8 @@ auto curl_easy_t::failed(std::string reason) -> void
             if (m_failures < std::numeric_limits<unsigned>::max()) ++m_failures;
             m_retry_at = std::chrono::steady_clock::now() +
                 std::chrono::seconds{std::min(29u, m_failures) + 1};
+            if(m_control)m_control->wait_set(reinterpret_cast<std::uintptr_t>(m_interface),
+                "網路重試第 "+std::to_string(m_failures)+" 次（"+reason+"）",m_retry_at);
         }
     }
 }

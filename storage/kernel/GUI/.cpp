@@ -387,18 +387,26 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     if (load_state->m_session)
         blob_queue = load_state->m_session->queue.get();
     std::uint64_t queue_count{}, queue_cycles{};
-    std::string queue_error;
+    std::string queue_error,reserve_waits;
     auto inspect_queue=[&](const auto& queue)
     {
         queue->control()->retry_limit=load_state->m_settings.network_retries;
         queue_count+=queue->count();
         queue_cycles+=queue->cycle_rate();
+        const auto wait=queue->control()->wait_status();
+        if(!wait.empty())reserve_waits+=(reserve_waits.empty() ? "" : "；")+wait;
         try { queue->check_error(); }
         catch (const std::exception& error) { if (queue_error.empty()) queue_error=error.what(); }
     };
     if (load_state->m_session)
         for (const auto& [address,queue] : load_state->m_session->queues) inspect_queue(queue);
     else if (blob_queue) inspect_queue(blob_queue);
+    if(persistent->m_reserve_wait_text)
+    {
+        persistent->m_reserve_wait_text->set_text(reserve_waits.empty() ? "" : "預備 blob（"+reserve_waits+"）",false);
+        if(reserve_waits.empty())persistent->m_reserve_wait_text->hide();
+        else persistent->m_reserve_wait_text->show();
+    }
 
     auto& easy_idle_arr{persistent->m_easy_idle};
     auto& load_easy_status_map{persistent->m_easy_status};
@@ -479,6 +487,31 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         transfer_end(load_state, easy);
         load_easy_status_map[easy->interface_get()].m_add_time = {};
         easy_idle_arr.push_back(std::move(dynamic_cast<google_easy_t&>(*easy.get())));
+    }
+    for(const auto& task:load_state->m_task_list)
+    {
+        if(!task->m_progress_text || task->m_finishing || task->m_control->paused ||
+            task->m_control->user_paused || task->m_control->cancelled)continue;
+        const auto current=task->m_progress_text->get_text();
+        if(task->m_wait_display.empty() || current!=task->m_wait_display)task->m_before_wait_text=current;
+        auto wait=task->m_control->wait_status();
+        // A shared reserve can block upload allocation without owning its task's requests.
+        if(task->m_session && task->m_type=="upload")
+            for(const auto& [address,queue]:task->m_session->queues)
+            {
+                const auto reserve_wait=queue->control()->wait_status();
+                if(!reserve_wait.empty())wait+=(wait.empty() ? "" : "；")+std::string{"預備 blob "+address+" "+reserve_wait};
+            }
+        if(wait.empty())
+        {
+            if(current==task->m_wait_display)task->m_progress_text->set_text(task->m_before_wait_text,false);
+            task->m_wait_display.clear();
+        }
+        else
+        {
+            task->m_wait_display=task->m_before_wait_text+"（"+wait+"）";
+            task->m_progress_text->set_text(task->m_wait_display,false);
+        }
     }
     return engine->message_loop();
 }
@@ -1232,6 +1265,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         lgo::std_margin, lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::bottom}, true);
     (*progress_column)->smooth_children_set(true);
     load_state->m_progress_column = *progress_column;
+    persistent->m_reserve_wait_text=(*progress_column)->add_object_shared<lgo::text_line_scroll_std_t>(
+        storage_content_depth,"",lgo::std_red_light,lgo::size_1D{256},false);
+    persistent->m_reserve_wait_text->hide();
     auto column_line = work_div->add_object_shared<lgo::std_liney_t>(
         storage_content_depth, work_div->space_y(lgo::std_margin), lgo::std_white);
     auto browser_div{work_div->add_object_shared<lgo::divy_soft_t>(

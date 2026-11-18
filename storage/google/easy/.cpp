@@ -36,7 +36,16 @@ auto google_easy_t::prepare() -> bool
     if (!m_account_context)
         m_account_context = google_account_t::default_shared();
     auto token{std::static_pointer_cast<google_account_t>(m_account_context)->try_token()};
-    if (!token) return false;
+    if (!token)
+    {
+        if(m_control)m_control->retry_status_set("等待服務帳戶授權："+
+            std::static_pointer_cast<google_account_t>(m_account_context)->address());
+        if(m_control)m_control->wait_set(reinterpret_cast<std::uintptr_t>(interface_get()),"服務帳戶授權重試",
+            std::static_pointer_cast<google_account_t>(m_account_context)->retry_deadline());
+        return false;
+    }
+    if(m_control)m_control->retry_status_set("");
+    if(m_control)m_control->wait_clear(reinterpret_cast<std::uintptr_t>(interface_get()));
     m_sent_token = std::move(*token);
     header_set("Authorization", "Bearer " + m_sent_token);
     // Rebuild curl_slist as well as the header map, preserving method and body.

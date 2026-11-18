@@ -71,12 +71,49 @@ export {
         mutable std::mutex mutex;
         std::string error;
         std::string activity_text, retry_text;
+        struct wait_t { std::string reason; std::chrono::steady_clock::time_point until; };
+        std::map<std::uintptr_t,wait_t> waits;
+        auto wait_set(std::uintptr_t key,std::string reason,std::chrono::steady_clock::time_point until) -> void
+        {
+            std::lock_guard lock{mutex};
+            const auto now=std::chrono::steady_clock::now();
+            std::erase_if(waits,[&](const auto& entry){return entry.second.until<=now;});
+            waits[key]={std::move(reason),until};
+        }
+        auto wait_clear(std::uintptr_t key) -> void {std::lock_guard lock{mutex};waits.erase(key);}
+        auto wait_deadline() const -> std::chrono::steady_clock::time_point
+        {
+            std::lock_guard lock{mutex};std::chrono::steady_clock::time_point until{};
+            for(const auto& [key,wait]:waits)until=std::max(until,wait.until);
+            return until;
+        }
+        auto wait_status() const -> std::string
+        {
+            std::lock_guard lock{mutex};
+            const auto now=std::chrono::steady_clock::now();
+            std::map<std::pair<std::string,std::int64_t>,std::size_t> groups;
+            for(const auto& [key,wait]:waits)if(wait.until>now)
+                ++groups[{wait.reason,std::chrono::ceil<std::chrono::seconds>(wait.until-now).count()}];
+            std::string text;
+            for(const auto& [group,count]:groups)
+            {
+                if(!text.empty())text+="；";
+                text+=group.first+"：剩餘 "+std::to_string(group.second)+" 秒";
+                if(count>1)text+="（"+std::to_string(count)+" 個請求）";
+            }
+            return text;
+        }
         auto activity_set(std::string text) -> void
         { std::lock_guard lock{mutex}; activity_text=std::move(text); retry_text.clear(); }
         auto retry_status_set(std::string text) -> void
         { std::lock_guard lock{mutex}; retry_text=std::move(text); }
         auto activity() const -> std::string
-        { std::lock_guard lock{mutex}; return activity_text+(retry_text.empty() ? "" : " · "+retry_text); }
+        {
+            std::string text;
+            {std::lock_guard lock{mutex};text=activity_text+(retry_text.empty() ? "" : " · "+retry_text);}
+            const auto wait=wait_status();if(!wait.empty())text+=" · "+wait;
+            return text;
+        }
         std::set<std::uintptr_t> sockets;
         auto cancel() -> void;
         auto pause(bool value) -> void;

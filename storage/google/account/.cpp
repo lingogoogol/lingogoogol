@@ -26,13 +26,14 @@ namespace
         std::string m_last_failure;
         std::chrono::steady_clock::time_point m_retry_at{};
         std::chrono::steady_clock::time_point m_attempt_started{};
+        std::shared_ptr<request_control_t> m_wait_control;
     public:
         std::string token;
         std::chrono::steady_clock::time_point expires_at{};
         std::chrono::steady_clock::time_point refresh_at{};
 
-        token_request_t(std::string address, std::string key)
-            : m_address{ std::move(address) }, m_key{ std::move(key) }
+        token_request_t(std::string address, std::string key,std::shared_ptr<request_control_t> wait_control)
+            : m_address{ std::move(address) }, m_key{ std::move(key) },m_wait_control{std::move(wait_control)}
         {
             api_curl(curl_easy_setopt(interface_get(), CURLOPT_VERBOSE, 0L));
         }
@@ -43,6 +44,7 @@ namespace
         auto prepare() -> bool override
         {
             if (std::chrono::steady_clock::now() < m_retry_at) return false;
+            m_wait_control->wait_clear(reinterpret_cast<std::uintptr_t>(interface_get()));
             // Unlimited retries can outlive a JWT's one-hour validity. Sign
             // each attempt on this background worker instead of reusing it.
             const auto now{ std::time(nullptr) };
@@ -103,6 +105,7 @@ namespace
             curl_easy_t::resume();
             m_retry_at = std::chrono::steady_clock::now() +
                 std::chrono::seconds{std::min(29u, m_retries) + 1};
+            m_wait_control->wait_set(reinterpret_cast<std::uintptr_t>(interface_get()),"服務帳戶授權重試",m_retry_at);
         }
     };
 }
@@ -269,7 +272,7 @@ auto google_account_t::try_token() -> std::optional<std::string>
         if (m_impl->address.empty() || m_impl->key.empty())
             throw std::runtime_error{ "Google account credentials are not configured." };
         if (!m_impl->worker) m_impl->worker = std::make_unique<curl_multi_worker_t>();
-        m_impl->worker->add(token_request_t{ m_impl->address, m_impl->key });
+        m_impl->worker->add(token_request_t{ m_impl->address, m_impl->key,m_impl->oauth_control });
         m_impl->refreshing = true;
     }
     if (usable) return m_impl->token;
@@ -331,6 +334,10 @@ auto google_account_t::address() const -> std::string
 {
     std::lock_guard lock{m_impl->mutex};
     return m_impl->address;
+}
+auto google_account_t::retry_deadline() const -> std::chrono::steady_clock::time_point
+{
+    std::lock_guard lock{m_impl->mutex};return m_impl->oauth_control->wait_deadline();
 }
 
 auto google_account_t::appdata() const -> bool

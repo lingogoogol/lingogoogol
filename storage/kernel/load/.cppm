@@ -179,6 +179,7 @@ export
         // GUI-thread snapshot: pause must retain the current progress/phase,
         // rather than replacing it with the original preparation label.
         std::string m_paused_text;
+        std::string m_before_wait_text,m_wait_display;
         std::uint64_t m_saved_progress{};
         task_result_t m_result{task_result_t::active};
         bool m_finishing{};
@@ -193,7 +194,10 @@ export
         {
             const bool changed{value != m_control->user_paused.load()};
             if (value && changed && m_progress_text)
-                m_paused_text = m_progress_text->get_text();
+            {
+                const auto current=m_progress_text->get_text();
+                m_paused_text = current==m_wait_display ? m_before_wait_text : current;
+            }
             // Persist first: restarting the application must not restart a task
             // that the user explicitly paused.
             if (m_journal)

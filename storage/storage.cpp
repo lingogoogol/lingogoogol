@@ -795,11 +795,17 @@ auto app() -> void
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
         using namespace std::chrono_literals;
-        if (cloud_job.valid() && parallel_total && parallel_displayed!=parallel_completed->load())
+        if (cloud_job.valid() && parallel_total)
         {
             parallel_displayed=parallel_completed->load();
             settings_text->set_text("建立並行配置（服務帳戶 "+std::to_string(parallel_displayed)+
-                "/"+std::to_string(parallel_total)+"）",false);
+                "/"+std::to_string(parallel_total)+"）"+
+                (settings_control->wait_status().empty() ? "" : " · "+settings_control->wait_status()),false);
+        }
+        else if(cloud_job.valid())
+        {
+            const auto wait=settings_control->wait_status();
+            settings_text->set_text(settings_task_name+"（"+(wait.empty() ? "處理中" : wait)+"）",false);
         }
         if (cloud_job.valid() && cloud_job.wait_for(0s)==std::future_status::ready)
         {
@@ -1058,7 +1064,8 @@ auto app() -> void
                 clear_separator->hide();
                 clear_cancel->set_pos(clear_retry->get_pos());
                 clear_text->set_text("清除：" + std::to_string(clear_progress.load()) + "/" +
-                                         std::to_string(clear_total.load()), false);
+                                         std::to_string(clear_total.load())+
+                                         (clear_control->wait_status().empty() ? "" : "（"+clear_control->wait_status()+"）"), false);
             }
             if (clear_job.wait_for(0s) == std::future_status::ready)
             {

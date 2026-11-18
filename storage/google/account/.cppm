@@ -33,6 +33,7 @@ export
         // Poll cached credentials. Starts a shared background refresh when needed;
         // nullopt means callers should keep pumping their event/transfer loop.
         auto try_token() -> std::optional<std::string>;
+        auto retry_deadline() const -> std::chrono::steady_clock::time_point;
         // Compatibility helper for synchronous callers; never used to prepare GUI requests.
         auto get_token() -> std::string;
         // A late 401 for an old token must not invalidate a newer cached token.

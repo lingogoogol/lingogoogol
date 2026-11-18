@@ -288,6 +288,12 @@ try:
     height=152+28*2+68*2
     click({'x':(s['window_w']-720)//2+480,'y':(s['window_h']-height)//2+height-48})
     closed()
+    Path('countdown-test').touch()
+    for seconds in (3,2,1):
+        wait(lambda:('剩餘 '+str(seconds)+' 秒') in snapshot()['cloud_task'],
+             'Task countdown did not tick: '+str(seconds))
+    wait(lambda:not snapshot()['switching'],'Countdown task did not finish')
+    assert '剩餘' not in snapshot()['cloud_task'],'Completed task retained countdown text'
     # Simulate a prerequisite failure after the durable provisioning checkpoint.
     checkpoint=Path('cloud_project/parallel-setup.json')
     checkpoint.parent.mkdir(exist_ok=True)
@@ -458,6 +464,17 @@ with tempfile.TemporaryDirectory(prefix='storage-spaces-gui-') as directory:
                 throw std::runtime_error{"Expected the terms prerequisite error"};
             });
         }
+        if (std::filesystem::exists("countdown-test")) {
+            std::filesystem::remove("countdown-test");
+            start_settings(settings,"倒數測試",[control=settings_control,current=load_state.m_session] {
+                const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds{3200};
+                control->wait_set(1,"測試退避",until);
+                while(std::chrono::steady_clock::now()<until) {
+                    if(control->cancelled)throw std::runtime_error{"Countdown cancelled"};
+                    std::this_thread::sleep_for(std::chrono::milliseconds{10});
+                }
+                control->wait_clear(1);return current;
+            },false);
         }
         if (std::filesystem::exists("emit-log")) {
             lgo::log_file(storage_read("emit-log")+"\\n"); std::filesystem::remove("emit-log");

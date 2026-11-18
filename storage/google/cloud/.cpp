@@ -18,6 +18,19 @@ namespace
     auto check(bool ok, const char* message) -> void
     { if (!ok) throw std::runtime_error{message}; }
 
+    auto wait_backoff(const std::shared_ptr<request_control_t>& control,
+        std::chrono::steady_clock::time_point until,std::string reason) -> void
+    {
+        const auto key=reinterpret_cast<std::uintptr_t>(&until);
+        control->wait_set(key,std::move(reason),until);
+        struct clear_t{request_control_t& control;std::uintptr_t key;~clear_t(){control.wait_clear(key);}} clear{*control,key};
+        while(std::chrono::steady_clock::now()<until)
+        {
+            check(!control->cancelled,"操作已取消");
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        }
+    }
+
     auto encode(std::string_view value) -> std::string
     {
         constexpr char hex[] = "0123456789ABCDEF";
@@ -105,11 +118,7 @@ namespace
             check(name.starts_with("operations/") && name.find("..") == std::string::npos &&
                 name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-._")==std::string::npos,
                 "Google Cloud 傳回無效的操作 ID");
-            for (int i{};i<20;++i)
-            {
-                check(!control->cancelled,"操作已取消");
-                std::this_thread::sleep_for(std::chrono::milliseconds{50});
-            }
+            wait_backoff(control,std::chrono::steady_clock::now()+std::chrono::seconds{1},"等待 Google Cloud 操作");
             check(std::chrono::steady_clock::now()<deadline,"Google Cloud 操作逾時，請稍後重試");
             value = call(user,control,"GET",host+name);
         }
@@ -427,11 +436,7 @@ static auto create_account(const std::shared_ptr<google_oauth_user_t>& user,
                 }
         const auto wake = std::chrono::steady_clock::now()+delay;
         if (wake>account_deadline) break;
-        while (std::chrono::steady_clock::now()<wake)
-        {
-            check(!control->cancelled,"操作已取消");
-            std::this_thread::sleep_for(std::chrono::milliseconds{50});
-        }
+        wait_backoff(control,wake,"服務帳戶配額重試（HTTP 429）");
     }
     const auto account = !key_attempt.empty() && created.status==409
         ? call(user,control,"GET",account_url) : response_value(created,"POST",base);
@@ -454,11 +459,7 @@ static auto create_account(const std::shared_ptr<google_oauth_user_t>& user,
         if (response.status!=404 || std::chrono::steady_clock::now()>=deadline) break;
         const auto wake = std::min(deadline,std::chrono::steady_clock::now()+delay+
             std::chrono::milliseconds{random()%1000});
-        while (std::chrono::steady_clock::now()<wake)
-        {
-            check(!control->cancelled,"操作已取消");
-            std::this_thread::sleep_for(std::chrono::milliseconds{50});
-        }
+        wait_backoff(control,wake,"等待 IAM 同步（HTTP 404）");
         delay=std::min(delay*2,std::chrono::milliseconds{30000});
     }
     const auto key = response_value(response,"POST",key_url);

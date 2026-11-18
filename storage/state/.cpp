@@ -274,6 +274,7 @@ auto request_control_t::retry() -> void
     std::lock_guard lock{mutex};
     error.clear();
     retry_text.clear();
+    waits.clear();
     ++epoch;
     paused = false;
 }
@@ -548,6 +549,7 @@ auto request_control_t::cancel() -> void
 {
     std::lock_guard lock{mutex};
     cancelled = true;
+    waits.clear();
     for (const auto socket : sockets)
         ::shutdown(static_cast<SOCKET>(socket), SD_BOTH);
 }

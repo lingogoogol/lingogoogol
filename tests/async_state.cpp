@@ -7,6 +7,19 @@ int main()
     try
     {
         auto check=[](bool value,const char* text){if(!value)throw std::runtime_error{text};};
+        {
+            request_control_t control;
+            const auto now=std::chrono::steady_clock::now();
+            control.wait_set(1,"retry",now+3s);control.wait_set(2,"retry",now+3s);
+            check(control.wait_status().find("3 秒（2 個請求）")!=std::string::npos,"Concurrent retry waits were lost");
+            control.wait_set(1,"retry",now+1s);
+            const auto status=control.wait_status();
+            check(status.find("1 秒")!=std::string::npos && status.find("3 秒")!=std::string::npos,"Independent deadlines were overwritten");
+            control.wait_clear(1);control.wait_set(2,"retry",now-1s);
+            check(control.wait_status().empty(),"Expired countdown remained visible");
+            control.wait_set(3,"retry",now+3s);control.retry();
+            check(control.wait_status().empty(),"Manual retry retained a stale countdown");
+        }
         const auto previous=std::filesystem::current_path();
         const auto scratch=std::filesystem::temp_directory_path()/("storage-async-state-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directory(scratch);std::filesystem::current_path(scratch);
