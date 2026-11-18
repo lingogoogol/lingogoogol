@@ -11,6 +11,7 @@ export {
     {
       private:
         std::deque<std::string> m_id{};
+        std::atomic_uint64_t m_count_snapshot{},m_rate_snapshot{};
         mutable std::mutex m_mutex{};
         std::mutex m_stop_mutex;
         std::exception_ptr m_error{};

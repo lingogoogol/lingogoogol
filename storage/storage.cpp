@@ -51,6 +51,7 @@ auto app() -> void
     lgo::font_face_t::freetype_set(&freetype);
     // Visible glyphs and the GPU cache retain face pointers across live changes.
     std::vector<std::unique_ptr<lgo::font_face_t>> fonts;
+    std::map<std::string,std::size_t> font_cache{{settings.font_path,0}};
     fonts.push_back(std::make_unique<lgo::font_face_t>(settings.font_path, lgo::std_font_size.x));
     lgo::font_preference_t::default_get().assign(1, fonts.back().get());
     lgo::engine_t engine{lgo::size_2D{1536, 1024}, "wWinMain.engine"};
@@ -123,7 +124,7 @@ auto app() -> void
     std::shared_ptr<progress_button_t> clear_cancel, clear_confirm;
     // Completed clear rows remain independent of later clears. Input callbacks
     // only mark rows; removing their controls during input dispatch is unsafe.
-    std::vector<std::pair<std::uint64_t, std::shared_ptr<bool>>> clear_rows;
+    std::deque<std::pair<std::uint64_t, std::shared_ptr<bool>>> clear_rows;
     std::shared_ptr<bool> clear_dismissed;
     bool clear_restart{};
     struct shutdown_t
@@ -152,7 +153,7 @@ auto app() -> void
     } shutdown{runtime, load_state, multi, persistent, settings_control, clear_control};
     home(&engine, &state, &persistent, &progress_column, &load_state, &multi, session ? session->queue.get() : nullptr, &pos);
     std::string settings_task_name;
-    std::vector<std::pair<std::uint64_t,std::shared_ptr<bool>>> settings_rows;
+    std::deque<std::pair<std::uint64_t,std::shared_ptr<bool>>> settings_rows;
     bool restore_after_login{};
     auto begin_settings_row = [&](std::string name, bool cancellable)
     {
@@ -245,7 +246,6 @@ auto app() -> void
     };
     persistent.m_apply_settings = [&](storage_settings_t candidate)
     {
-        auto next_font=std::make_unique<lgo::font_face_t>(candidate.font_path,lgo::std_font_size.x);
         start_settings(candidate,"更新設定",[&,candidate,current=load_state.m_session]
         {
             std::filesystem::create_directories(candidate.logfile_path);
@@ -814,8 +814,14 @@ auto app() -> void
             try
             {
                 auto result{settings_job.get()};
-                auto next_font{
-                    std::make_unique<lgo::font_face_t>(result.settings.font_path, lgo::std_font_size.x)};
+                const bool font_changed=result.settings.font_path!=settings.font_path;
+                if(font_changed && !font_cache.contains(result.settings.font_path))
+                {
+                    // FreeType and glyph/GPU caches are GUI-owned. Keep this
+                    // operation here, but never rebuild fonts on a space switch.
+                    font_cache[result.settings.font_path]=fonts.size();
+                    fonts.push_back(std::make_unique<lgo::font_face_t>(result.settings.font_path,lgo::std_font_size.x));
+                }
                 const auto next_log_path = log_path(result.settings);
                 if (next_log_path!=lgo::get_logfile_path()) lgo::init_logfile(next_log_path);
                 http_error_log_codes_set(storage_settings_t::parse_http_log_codes(result.settings.http_log_codes));
@@ -845,10 +851,12 @@ auto app() -> void
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
                 update_account_status();
                 restore_after_login = bool(result.session);
-                fonts.push_back(std::move(next_font));
-                lgo::font_preference_t::default_get().assign(1, fonts.back().get());
-                persistent.set_directory_header_font(settings.font_path);
-                lgo::text_line_t::reload_fonts();
+                if(font_changed)
+                {
+                    lgo::font_preference_t::default_get().assign(1,fonts.at(font_cache.at(settings.font_path)).get());
+                    persistent.set_directory_header_font(settings.font_path);
+                    lgo::text_line_t::reload_fonts();
+                }
                 settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_refresh();
                 // Only operations started from the space menu return to it.
@@ -899,24 +907,25 @@ auto app() -> void
                 settings_cancel->set_pos(settings_retry->get_pos());
             }
         }
-        std::erase_if(settings_rows,[&](const auto& row)
+        const auto retire_rows=[&](auto& rows)
         {
-            if (!*row.second) return false;
-            progress_column->remove_object(row.first);
-            return true;
-        });
+            const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds{2};
+            auto remaining=std::min<std::size_t>(32,rows.size());
+            while(remaining-- && !rows.empty() && std::chrono::steady_clock::now()<deadline)
+            {
+                auto row=std::move(rows.front());rows.pop_front();
+                if(*row.second)progress_column->remove_object(row.first);
+                else rows.push_back(std::move(row));
+            }
+        };
+        retire_rows(settings_rows);
         if (clear_restart)
         {
             clear_restart = false;
             *clear_dismissed = true;
             persistent.m_clear_account();
         }
-        std::erase_if(clear_rows, [&](const auto& row)
-        {
-            if (!*row.second) return false;
-            progress_column->remove_object(row.first);
-            return true;
-        });
+        retire_rows(clear_rows);
         if (clear_job.valid())
         {
             const auto second_slot{clear_separator->get_pos() +

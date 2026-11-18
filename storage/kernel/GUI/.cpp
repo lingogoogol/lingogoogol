@@ -240,7 +240,8 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     for (const auto& task : load_state->m_task_list)
         if (auto operation{std::dynamic_pointer_cast<directory_task_t>(task)})
             directory_notify_unlinked(*operation);
-    while (!persistent->m_deferred.empty())
+    const auto deferred_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds{3};
+    while (!persistent->m_deferred.empty() && std::chrono::steady_clock::now()<deferred_deadline)
     {
         auto action{std::move(persistent->m_deferred.front())};
         persistent->m_deferred.pop_front();
@@ -268,6 +269,12 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
     {
         if (entry->control->paused && entry->generation == persistent->m_listing_generation)
             persistent->m_directory_status->set_text("目錄更新失敗");
+        if(entry->applied)
+        {
+            if(entry->generation==persistent->m_listing_generation && persistent->m_listing_builder)
+            {++entry;continue;}
+            entry=persistent->m_listings.erase(entry);continue;
+        }
         if (entry->future.wait_for(0s) != std::future_status::ready)
         {
             ++entry;
@@ -280,6 +287,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
                 entry->session == load_state->m_session)
             {
                 entry->apply(std::move(result));
+                entry->applied=true;
                 persistent->m_directory_status->set_text("");
             }
         }
@@ -293,6 +301,7 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         }
         if (entry->control->paused && entry->generation == persistent->m_listing_generation)
             persistent->m_directory_status->set_text("目錄更新失敗");
+        if(entry->applied && persistent->m_listing_builder){++entry;continue;}
         entry = persistent->m_listings.erase(entry);
     }
     for (const auto& button : persistent->m_account_buttons)
@@ -401,10 +410,13 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         slot_limit>max_window/parts ? max_window : slot_limit*parts,std::memory_order_relaxed);
     // Retain idle handles when reducing the limit. In-flight handles and their
     // request mode are never reconstructed or cancelled by a settings change.
-    while (load_easy_status_map.size()<slot_limit)
+    for(std::size_t created=0;created<8 && load_easy_status_map.size()<slot_limit;++created)
     {
         easy_idle_arr.emplace_back();
-        load_easy_status_map[easy_idle_arr.back().interface_get()].m_text_index = load_easy_status_map.size();
+        const auto index=load_easy_status_map.size();
+        const auto key=easy_idle_arr.back().interface_get();
+        load_easy_status_map[key].m_text_index=index;
+        persistent->m_slot_keys.push_back(key);
     }
 
     persistent->m_blob_queue_cycle_rate->set_text("blob_queue_cycle_rate: " +
@@ -413,8 +425,11 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
                                                  ? "blob_queue_count: " + std::to_string(queue_count)
                                                  : "預備佇列失敗：" + queue_error);
     persistent->show_diagnostics(glfwGetKey(engine->window_get(), GLFW_KEY_F3));
-    for (auto& load_easy_status : load_easy_status_map)
+    for(auto slot=persistent->m_diagnostics_page*persistent->m_diagnostics_page_size;
+        persistent->m_diagnostics_visible && slot<persistent->m_slot_keys.size() &&
+        slot<(persistent->m_diagnostics_page+1)*persistent->m_diagnostics_page_size;++slot)
     {
+        auto& load_easy_status=*load_easy_status_map.find(persistent->m_slot_keys[slot]);
         const auto index = load_easy_status.second.m_text_index;
         if (!persistent->m_diagnostics_visible ||
             index / persistent->m_diagnostics_page_size != persistent->m_diagnostics_page) continue;
@@ -917,6 +932,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
 {
     // Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
     // and wraps the returned array into a 1-element outer array `[expr]`.
+    if(persistent->m_listing_builder){*persistent->m_listing_builder={};persistent->m_listing_builder.reset();}
     const auto generation{++persistent->m_listing_generation};
     for (auto& pending : persistent->m_listings)
         pending.control->cancel();
@@ -1014,9 +1030,18 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 }, ancestor.at("name").get<std::string>(), lgo::std_brown_light, lgo::size_1D{0})};
             button->set_size(button->get_text_size());
         }
-        std::map<std::string, std::uint64_t> rows;
-        for (const auto& entry : result.at("entries"))
+        auto rows=std::make_shared<std::map<std::string,std::uint64_t>>();
+        auto entries=std::make_shared<nlohmann::json>(std::move(result.at("entries")));
+        auto next=std::make_shared<std::size_t>(0);
+        auto build=std::make_shared<std::function<void()>>();
+        persistent->m_listing_builder=build;
+        *build=[=]() mutable
         {
+            if(generation!=persistent->m_listing_generation || session!=load_state->m_session)
+            {*build={};return;}
+            if(*next<entries->size())
+            {
+            const auto entry=entries->at((*next)++);
             const bool folder{entry.at("type") == "folder"};
             if (!folder && entry.at("type") != "file") throw lgo::internal_error_t{"obj type"};
             const auto id{entry.at("id").get<std::string>()};
@@ -1024,7 +1049,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             const auto row_id{contents->add_object<lgo::divy_flex_soft_t>(storage_content_depth,
                 lgo::size_1D{viewer_div->view_size().x}, lgo::std_margin,
                 lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::top})};
-            rows.emplace(id, row_id);
+            rows->emplace(id,row_id);
             auto row{contents->get_object_shared<lgo::divy_flex_soft_t>(row_id)};
             const auto height{lgo::font_preference_t::default_get()[0]->leading_get() + 2};
             auto columns{row->add_object_shared<directory_columns_t>(
@@ -1071,15 +1096,45 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             columns->columns(label, size_label, time_label, actions);
             row->add_object<lgo::std_linex_t>(
                 storage_content_depth, row->space_x(lgo::std_margin), lgo::std_dark_gray);
-        }
+            row->hide();
+            persistent->m_directory_status->set_text("建立目錄清單："+std::to_string(*next)+"/"+std::to_string(entries->size()));
+            persistent->m_deferred.push_back([build,persistent,control]
+            {
+                auto step=*build;
+                try{if(step)step();}
+                catch(const std::exception& error)
+                {
+                    control->fail(error.what());*build={};persistent->m_listing_builder.reset();
+                    persistent->m_directory_status->set_text("目錄更新失敗");
+                    lgo::log_file(std::string{"Directory construction failed: "}+error.what()+"\n");
+                }
+            });
+            return;
+            }
         const bool same_path{persistent->m_breadcrumb_folder == source};
         const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};
         persistent->m_breadcrumbs->set_content(std::move(path));
         persistent->m_breadcrumb_folder = source;
-        persistent->m_directory_rows = std::move(rows);
+        persistent->m_directory_rows = std::move(*rows);
         persistent->m_breadcrumbs->set_scroll_offset(same_path ? path_offset : lgo::size_2D{});
+        contents->show();
         viewer_div->set_content(std::move(contents));
         viewer_div->set_scroll_offset(offset);
+        persistent->m_directory_status->set_text("");
+        persistent->m_listing_builder.reset();
+        *build={};
+        };
+        persistent->m_deferred.push_back([build,persistent,control]
+            {
+                auto step=*build;
+                try{if(step)step();}
+                catch(const std::exception& error)
+                {
+                    control->fail(error.what());*build={};persistent->m_listing_builder.reset();
+                    persistent->m_directory_status->set_text("目錄更新失敗");
+                    lgo::log_file(std::string{"Directory construction failed: "}+error.what()+"\n");
+                }
+            });
     };
     persistent->m_listings.push_back({generation, session, control, std::move(future), std::move(apply)});
     return;
@@ -1206,6 +1261,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         // A completed future may still be waiting for the GUI to collect it.
         // Invalidate it even if cancellation arrived after its last HTTP request.
         ++persistent->m_listing_generation;
+        if(persistent->m_listing_builder){*persistent->m_listing_builder={};persistent->m_listing_builder.reset();}
         persistent->m_breadcrumbs->set_content({});
         persistent->m_breadcrumb_folder.clear();
         persistent->m_directory_rows.clear();
@@ -1685,6 +1741,7 @@ auto GUI_persistent_t::show_diagnostics(bool show) -> void
 
 GUI_persistent_t::~GUI_persistent_t()
 {
+    if(m_listing_builder)*m_listing_builder={};
     for (auto& listing : m_listings)
         listing.control->cancel();
     m_dialog_done = {};
@@ -1696,6 +1753,10 @@ auto GUI_persistent_t::set_directory_header_font(const std::string& path) -> voi
 {
     // Glyph caches retain face pointers. Keep prior 12px faces alive through
     // settings changes, just as storage.cpp retains the normal-size faces.
-    m_directory_header_faces.push_back(std::make_unique<lgo::font_face_t>(path, 12));
-    m_directory_header_font.assign(1, m_directory_header_faces.back().get());
+    if(!m_directory_header_paths.contains(path))
+    {
+        m_directory_header_paths[path]=m_directory_header_faces.size();
+        m_directory_header_faces.push_back(std::make_unique<lgo::font_face_t>(path,12));
+    }
+    m_directory_header_font.assign(1,m_directory_header_faces.at(m_directory_header_paths.at(path)).get());
 }

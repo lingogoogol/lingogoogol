@@ -115,7 +115,8 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
         auto& task{**entry};
         if (task.m_result != task_result_t::cancelling && !task.m_dismissed)
         {
-            ++entry;
+            auto checked=entry++;
+            state.m_finished_tasks.splice(state.m_finished_tasks.end(),state.m_finished_tasks,checked);
             continue;
         }
         // Upload callbacks contain raw entity pointers. Removing a row must not

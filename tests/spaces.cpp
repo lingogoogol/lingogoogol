@@ -67,7 +67,11 @@ int main(int argc,char** argv)
         {
             check(!message_loop(&engine,&persistent,&multi,&loads,session->queue.get()),"Window closed early.");
             lgo::text_line_t::pending_load();
-            check(persistent.m_easy_idle.size()+loads.m_end.size()==settings.worker_count,"A request escaped the shared transfer pool.");
+            // Handles are created in bounded batches per frame. Account for
+            // every created slot while retaining the configured upper limit.
+            check(persistent.m_slot_keys.size()<=settings.worker_count &&
+                persistent.m_easy_idle.size()+loads.m_end.size()==persistent.m_slot_keys.size(),
+                "A request escaped the shared transfer pool.");
             for (const auto& task:loads.m_task_list)
                 if (task->m_control->paused) throw std::runtime_error{task->m_control->reason()};
         };

@@ -35,6 +35,7 @@ export {
         std::function<std::vector<std::pair<std::string,std::function<void()>>>()> m_space_menu_actions;
         std::shared_ptr<lgo::text_line_std_t> m_directory_status;
         std::vector<std::unique_ptr<lgo::font_face_t>> m_directory_header_faces;
+        std::map<std::string,std::size_t> m_directory_header_paths;
         lgo::font_preference_t m_directory_header_font;
         auto set_directory_header_font(const std::string& path) -> void;
         std::shared_ptr<lgo::scroll_t> m_breadcrumbs;
@@ -71,9 +72,11 @@ export {
             std::shared_ptr<request_control_t> control;
             std::future<nlohmann::json> future;
             std::function<void(nlohmann::json)> apply;
+            bool applied{};
         };
         std::uint64_t m_listing_generation{};
         std::list<listing_t> m_listings;
+        std::shared_ptr<std::function<void()>> m_listing_builder;
         bool m_switching{};
         ~GUI_persistent_t();
         std::shared_ptr<lgo::text_line_std_t> m_frame_rate{};
@@ -92,6 +95,7 @@ export {
         // Handle ownership and status belong to this GUI/worker pair, never static storage.
         std::vector<google_easy_t> m_easy_idle{};
         std::map<CURL*, easy_status_t> m_easy_status{};
+        std::vector<CURL*> m_slot_keys;
     };
 
     auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker_t* multi,

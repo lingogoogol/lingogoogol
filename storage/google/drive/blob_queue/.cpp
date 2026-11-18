@@ -44,6 +44,7 @@ auto blob_queue_t::process() -> void
         {
             m_cycle_time.pop_front();
         }
+        m_rate_snapshot.store(m_cycle_time.size(),std::memory_order_relaxed);
         cycle_lock.unlock();
 
         multi.run();
@@ -183,7 +184,9 @@ auto blob_queue_t::get(std::uint64_t count, const std::atomic_bool *cancelled) -
 
 auto blob_queue_t::check_error() const -> void
 {
-    std::unique_lock lock{ m_mutex };
+    std::unique_lock lock{m_mutex,std::defer_lock};
+    if(storage_is_gui_thread()){if(!lock.try_lock())return;}
+    else lock.lock();
     if (m_error) std::rethrow_exception(m_error);
     if (m_control->paused)
         throw std::runtime_error{m_control->reason()};
@@ -191,14 +194,12 @@ auto blob_queue_t::check_error() const -> void
 
 auto blob_queue_t::count() -> std::uint64_t
 {
-    std::unique_lock lock{ m_mutex };
-    return m_id.size();
+    return m_count_snapshot.load(std::memory_order_relaxed);
 }
 
 auto blob_queue_t::cycle_rate() const -> std::uint64_t
 {
-    std::unique_lock lock{ m_mutex };
-    return m_cycle_time.size();
+    return m_rate_snapshot.load(std::memory_order_relaxed);
 }
 
 auto blob_queue_t::clear_begin() -> void
@@ -237,6 +238,7 @@ auto blob_queue_t::recover_locked() -> void
     const auto canonical=nlohmann::json(ids).dump();
     if (content!=canonical) write_tail_locked(0,canonical);
     m_id=ids;
+    m_count_snapshot.store(m_id.size(),std::memory_order_relaxed);
     m_needs_recovery=false;
 }
 auto blob_queue_t::write_tail_locked(std::uint64_t offset, const std::string& tail) -> void
@@ -259,6 +261,7 @@ auto blob_queue_t::append_locked(const std::vector<std::string>& ids) -> void
     if (!m_id.empty()) tail.insert(tail.begin(),',');
     write_tail_locked(m_file_size-1,tail);
     m_id.insert(m_id.end(),ids.begin(),ids.end());
+    m_count_snapshot.store(m_id.size(),std::memory_order_relaxed);
 }
 auto blob_queue_t::trim_locked(std::size_t count) -> void
 {
@@ -269,6 +272,7 @@ auto blob_queue_t::trim_locked(std::size_t count) -> void
     if (count==m_id.size()) size=2;
     write_tail_locked(size-1,"]");
     m_id.erase(m_id.end()-count,m_id.end());
+    m_count_snapshot.store(m_id.size(),std::memory_order_relaxed);
 }
 
 auto blob_queue_t::retry() -> void
