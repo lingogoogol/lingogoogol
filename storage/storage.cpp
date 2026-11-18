@@ -98,13 +98,14 @@ auto app() -> void
     struct cloud_result_t
     {
         enum class kind_t { login, projects, accounts, created_project, created_account, remove,
-                            parallel_login, parallel_ready } kind;
+                            parallel_users, parallel_login, parallel_ready } kind;
         std::shared_ptr<google_oauth_user_t> user;
         std::string project;
         std::vector<cloud_project_t> projects;
         std::vector<cloud_service_account_t> accounts;
         nlohmann::json setup;
         std::vector<std::string> addresses;
+        std::vector<oauth_saved_account_t> users;
         cloud_result_t(kind_t value, std::shared_ptr<google_oauth_user_t> identity = {}, std::string id = {})
             : kind{value}, user{std::move(identity)}, project{std::move(id)} {}
     };
@@ -212,12 +213,14 @@ auto app() -> void
         settings_confirm->set_pos(settings_retry->get_pos());
         if (!cancellable) settings_cancel->hide();
     };
-    enum class menu_page_t { spaces, links, users, projects, services };
+    enum class menu_page_t { spaces, links, users, projects, services, parallel_users };
     auto menu_page = menu_page_t::spaces;
     std::string editing_space, selected_project;
     std::shared_ptr<google_oauth_user_t> cloud_user;
     std::vector<cloud_project_t> projects;
     std::vector<cloud_service_account_t> services;
+    std::vector<oauth_saved_account_t> parallel_users;
+    std::string parallel_target;
     auto show_menu = [&] { persistent.m_open_accounts(false); };
     auto space_by_id = [&](const std::string& id) -> storage_space_t&
     {
@@ -445,12 +448,10 @@ auto app() -> void
     };
     auto start_parallel = [&](std::string target)
     {
-        begin_cloud("登入 Google",[path=settings.account_path,target=std::move(target),control=settings_control]
+        begin_cloud("讀取 Google 使用者",[path=settings.account_path,target=std::move(target)]
         {
-            const auto users=google_oauth_user_t::saved_accounts(path,oauth_purpose_t::cloud);
-            auto user=users.size()==1 ? google_oauth_user_t::restore(path,users.front().address,oauth_purpose_t::cloud)
-                : google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
-            cloud_result_t result{cloud_result_t::kind_t::parallel_login,std::move(user)};
+            cloud_result_t result{cloud_result_t::kind_t::parallel_users};
+            result.users=google_oauth_user_t::saved_accounts(path,oauth_purpose_t::cloud);
             result.setup=target;
             return result;
         });
@@ -501,6 +502,20 @@ auto app() -> void
                         "將登出此空間並暫停傳輸。存在此帳戶的資料及依賴其索引的內容可能無法存取。",
                         "重新關聯同一服務帳戶後可恢復存取。"},"移除關聯",[&,address] { sign_out(editing_space,false,address); });
                 }}}});
+        else if (menu_page==menu_page_t::parallel_users)
+        {
+            for (const auto& user : parallel_users)
+                rows.push_back({user.address,user.portrait,true,{{"使用",[&,email=user.address,target=parallel_target]
+                {
+                    begin_cloud("選擇 Google 使用者",[path=settings.account_path,email,target]
+                    {
+                        cloud_result_t result{cloud_result_t::kind_t::parallel_login,
+                            google_oauth_user_t::restore(path,email,oauth_purpose_t::cloud)};
+                        result.setup=target;
+                        return result;
+                    });
+                }}}});
+        }
         else if (menu_page==menu_page_t::users)
         {
             if (!std::filesystem::exists(settings.account_path)) return rows;
@@ -573,7 +588,8 @@ auto app() -> void
         {
             actions.emplace_back("返回",[&]
             {
-                menu_page=menu_page==menu_page_t::links ? menu_page_t::spaces :
+                menu_page=menu_page==menu_page_t::parallel_users ? menu_page_t::spaces :
+                    menu_page==menu_page_t::links ? menu_page_t::spaces :
                     menu_page==menu_page_t::users ? menu_page_t::links :
                     menu_page==menu_page_t::projects ? menu_page_t::users : menu_page_t::projects;
                 show_menu();
@@ -584,14 +600,23 @@ auto app() -> void
                     actions.emplace_back("擴充並行",[&] { start_parallel(editing_space); });
                 actions.emplace_back("新增帳戶",[&] { menu_page=menu_page_t::users; show_menu(); });
             }
-            else if (menu_page==menu_page_t::users)
+            else if (menu_page==menu_page_t::users || menu_page==menu_page_t::parallel_users)
                 actions.emplace_back("新增使用者",[&]
                 {
-                    begin_cloud("新增 Google 使用者",[path=settings.account_path,control=settings_control]
+                    const bool parallel=menu_page==menu_page_t::parallel_users;
+                    begin_cloud("新增 Google 使用者",[path=settings.account_path,control=settings_control,
+                        parallel,target=parallel_target]
                     {
                         auto user=google_oauth_user_t::login(path,control,oauth_purpose_t::cloud);
                         user->download_picture(control);
-                        return cloud_result_t{cloud_result_t::kind_t::login,user};
+                        cloud_result_t result{parallel ? cloud_result_t::kind_t::parallel_users :
+                            cloud_result_t::kind_t::login,user};
+                        if (parallel)
+                        {
+                            result.users=google_oauth_user_t::saved_accounts(path,oauth_purpose_t::cloud);
+                            result.setup=target;
+                        }
+                        return result;
                     });
                 });
             else if (menu_page==menu_page_t::projects)
@@ -776,7 +801,15 @@ auto app() -> void
                 settings_text->set_text("已完成："+settings_task_name,false);
                 persistent.m_directory_status->set_text("");
                 if (result.user) cloud_user=result.user;
-                if (result.kind==cloud_result_t::kind_t::parallel_login)
+                if (result.kind==cloud_result_t::kind_t::parallel_users)
+                {
+                    parallel_users=std::move(result.users);
+                    parallel_target=result.setup.get<std::string>();
+                    menu_page=menu_page_t::parallel_users;
+                    glfwFocusWindow(engine.window_get());
+                    show_menu();
+                }
+                else if (result.kind==cloud_result_t::kind_t::parallel_login)
                     configure_parallel(result.user,result.setup.get<std::string>());
                 else if (result.kind==cloud_result_t::kind_t::parallel_ready)
                 {

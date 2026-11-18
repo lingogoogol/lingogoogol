@@ -267,6 +267,17 @@ try:
     footer('新增使用者');ready(2)
     assert snapshot()['rows'][0]['text']=='oauth@example.invalid' and snapshot()['rows'][0]['photo']
     assert [a['text'] for a in snapshot()['rows'][0]['actions']]==['使用','移除']
+    # Parallel expansion must ask for an identity even with one saved user.
+    footer('返回');ready(1);footer('擴充並行');ready(5)
+    assert not snapshot()['dialog'], 'Parallel expansion skipped identity selection'
+    assert [r['text'] for r in snapshot()['rows']]==['oauth@example.invalid']
+    assert [a['text'] for a in snapshot()['rows'][0]['actions']]==['使用']
+    action('使用')
+    s=wait(lambda:snapshot() if snapshot()['dialog'] else None,'Missing parallel count dialog')
+    height=152+28*2+68*2
+    click({'x':(s['window_w']-720)//2+480,'y':(s['window_h']-height)//2+height-48})
+    closed()
+    open_menu();action('編輯');ready(1);footer('新增帳戶');ready(2)
     action('使用');ready(3);assert not snapshot()['rows'],'Project ID/state filtering failed'
     for status in (403, 503):
         footer('新增專案');dialog('My Project');closed();ready(3)
