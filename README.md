@@ -213,7 +213,7 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 
 目前驗證的流程是在 Linux 上使用 llvm-mingw 跨平台編譯 Windows PE 執行檔。
 
-可選的 batch 請求 gzip、前景 batch 大小、下載請求數與 `files.list` 預取限制，見[傳輸效率調查](TRANSFER_EFFICIENCY.md)。MinGW／MSYS2 的 libcurl 通常已依賴 zlib，可使用工具鏈內對應的標頭與 libz；CMake 未找到時只停用 gzip，也可用 `-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE` 驗證無 zlib 的建置。若連結動態 zlib，發布時需一併帶上工具鏈對應的 zlib DLL。沒有新增 list 預取。
+可選的 batch 請求 gzip、前景 batch 大小、下載請求數與 `files.list` 預取限制，見[傳輸效率調查](TRANSFER_EFFICIENCY.md)。MinGW／MSYS2 的 libcurl 通常已依賴 zlib，可使用工具鏈內對應的標頭與 libz；CMake 未找到時只停用 gzip，也可用 `-DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=TRUE` 驗證無 zlib 的建置。Windows 跨編譯 zlib 也可安裝於 `../lib/zlib`（include、lib、bin）；本環境使用 zlib 1.3.1 的動態版本。CMake 會將對應 runtime DLL 一併安裝至 `install/.../bin/`，目前名稱為 `libzlib.dll`，與 storage.exe 放在同一目錄；只複製 DLL 不會讓未編入 ZLIB 支援的舊執行檔啟用 gzip。沒有新增 list 預取。
 
 ### 相依工具
 
