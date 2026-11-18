@@ -231,7 +231,7 @@ auto storage_settings_t::load() -> storage_settings_t
     result.http_log_codes = data.value("http_log_codes", std::string{});
     parse_http_log_codes(result.http_log_codes);
     result.batch_request = data.value("batch_request", true);
-    result.batch_gzip = data.value("batch_gzip", false);
+    result.batch_gzip = data.value("batch_gzip", true);
     // Parse the JSON representation as an integer too: typed JSON conversion
     // to size_t would silently wrap negative values and truncate decimals.
     result.worker_count = parse_worker_count(data.value("worker_count",nlohmann::json(64)).dump());

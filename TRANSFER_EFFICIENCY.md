@@ -14,7 +14,7 @@
 
 curl 內部能處理 gzip 回應，不代表程式可直接呼叫其內部 zlib。[CURLOPT_ACCEPT_ENCODING](https://curl.se/libcurl/c/CURLOPT_ACCEPT_ENCODING.html) 用於協商及解壓回應；[curl_mime_encoder](https://curl.se/libcurl/c/curl_mime_encoder.html) 支援的 MIME 編碼也不包含 gzip。現有 [external.curl](external/curl/.cppm) 沒有提供整個 HTTP 請求 body 的 gzip 編碼介面，因此不能靠新增標頭或這些選項完成本次需求。
 
-`settings.json` 新增布林 `batch_gzip`，預設關閉。表單在 `batch_request` 後加入 checkbox，沿用取消／驗證／背景套用流程；無 ZLIB 時顯示原因並停用，手動設定為 true 也會忽略，啟動及套用設定時寫入原因日誌。程序以 atomic 保存新派送使用的開關，每次 `method_post()` 擷取一次，既有請求的編碼不因設定切換而改變。
+`settings.json` 新增布林 `batch_gzip`，預設開啟；缺少此欄位也視為開啟，既有明確的 false 設定仍保留。表單在 `batch_request` 後加入 checkbox，沿用取消／驗證／背景套用流程；無 ZLIB 時顯示原因並停用，手動設定為 true 也會忽略，啟動及套用設定時寫入原因日誌。程序以 atomic 保存新派送使用的開關，每次 `method_post()` 擷取一次，既有請求的編碼不因設定切換而改變。
 
 ### 編碼、重試與日誌
 

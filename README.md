@@ -159,7 +159,7 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 
 `batch_size` 是 `settings.json` 的整數欄位，可填 1–100，預設仍為 100；表單位於 worker 數量旁，拒絕零、負數、小數及超出範圍的值。它只限制前景上傳、下載、複製、搬移、刪除與清除的每個 HTTP batch 內含幾筆子請求；不改變 chunk／content 的分組、帳戶配置或 worker 數量，`blob_queue` 背景補充仍每批 100 筆。逐筆模式忽略這個值。每個拆分批次的成功回應會保存，原本整組的進度與下載內容仍在整組完成後更新；設定只影響後續建立的批次。類似的 Python 用戶端曾量測到每批 8 筆、64 個並行 worker 比較大的 batch 更快，但這不是本 C++ 程式的量測結果，作者應在自己的網路與資料上比較；預設不變。較小 batch 會增加外層 HTTP 次數，不減少 Drive 邏輯請求數。
 
-`batch_gzip` 是布林欄位，預設 `false`；建置時 CMake 以 `find_package(ZLIB)` 偵測，找到後才啟用壓縮能力。沒有 ZLIB 時仍可建置，checkbox 會停用，手動設定 `true` 也不壓縮，日誌會說明原因。啟用後只壓縮送往 Drive batch endpoint 的 POST multipart body（含背景補充 batch），使用 gzip level 1；Content-Type／boundary 保留，Content-Encoding 為 `gzip`，長度依壓縮後位元組數計算。逐筆模式與其他 endpoint 不壓縮。切換只影響新派送，既有請求及其重試保持原編碼；部分成功重試會重新壓縮尚未完成的子請求。`http_log_codes` 仍記錄未壓縮的 multipart／子請求內容，外層標頭含 `Content-Encoding: gzip`，內層日誌標頭也註記 `gzip`；快取鍵使用未壓縮內容，切換不影響成功回應重播。
+`batch_gzip` 是布林欄位，預設 `true`（新設定及缺少此欄位的舊設定皆啟用；既有明確的 `false` 仍保留）；建置時 CMake 以 `find_package(ZLIB)` 偵測，找到後才啟用壓縮能力。沒有 ZLIB 時仍可建置，checkbox 會停用，手動設定 `true` 也不壓縮，日誌會說明原因。啟用後只壓縮送往 Drive batch endpoint 的 POST multipart body（含背景補充 batch），使用 gzip level 1；Content-Type／boundary 保留，Content-Encoding 為 `gzip`，長度依壓縮後位元組數計算。逐筆模式與其他 endpoint 不壓縮。切換只影響新派送，既有請求及其重試保持原編碼；部分成功重試會重新壓縮尚未完成的子請求。`http_log_codes` 仍記錄未壓縮的 multipart／子請求內容，外層標頭含 `Content-Encoding: gzip`，內層日誌標頭也註記 `gzip`；快取鍵使用未壓縮內容，切換不影響成功回應重播。
 
 同一次程式執行使用啟動時決定的日誌檔名；套用設定、登入／登出或變更空間帳戶關聯不會另開新檔。只有變更日誌資料夾時才重新開啟日誌，並沿用相同檔名；切回原資料夾時接續原檔。設定視窗取消或套用後維持空間 dropdown 關閉；從空間選單執行的管理操作仍會回到對應選單。
 
