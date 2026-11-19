@@ -47,6 +47,7 @@ export namespace lgo
             m_state.clear_state();
         }
         auto resize(size_2D size) -> void;
+        auto add_action(std::string label, std::function<void()> callback) -> void;
         auto decision() -> std::optional<bool>
         {
             return std::exchange(m_decision, std::nullopt);

@@ -1601,6 +1601,26 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {google_batch_t::gzip_available() ? "batch_gzip" : "batch_gzip（此建置無 ZLIB）",
                          settings.batch_gzip && google_batch_t::gzip_available()}});
                 persistent->m_dialog->set_checkbox_enabled(1,google_batch_t::gzip_available(),"此建置未包含 ZLIB，無法使用 batch gzip 壓縮");
+                persistent->m_dialog->add_action("刪除記錄",[persistent]
+                {
+                    try
+                    {
+                        const auto active = std::filesystem::absolute(lgo::get_logfile_path()).lexically_normal();
+                        std::uint64_t removed{};
+                        for (const auto& entry : std::filesystem::directory_iterator{active.parent_path()})
+                        {
+                            // A session keeps its filename when changing log directories.
+                            // Keep that name and aliases of the open file; never traverse
+                            // subdirectories or follow links outside the log directory.
+                            if (entry.path().filename()==active.filename() || entry.is_symlink() || !entry.is_regular_file()) continue;
+                            if (entry.path().extension()!=".txt") continue;
+                            if (std::filesystem::equivalent(entry.path(),active)) continue;
+                            if (std::filesystem::remove(entry.path())) ++removed;
+                        }
+                        persistent->m_dialog->error("已刪除 "+std::to_string(removed)+" 份記錄");
+                    }
+                    catch (const std::exception& error) {persistent->m_dialog->error(error.what());}
+                });
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)

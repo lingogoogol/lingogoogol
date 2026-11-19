@@ -86,6 +86,13 @@ namespace lgo
                 m_decision=true;
         });
     }
+    auto modal_dialog_t::add_action(std::string label, std::function<void()> callback) -> void
+    {
+        auto button = m_state.add_object_shared<button_classic_std_t>(
+            depth_range_t{.02f,.03f}, pos_2D{}, std::move(callback), std::move(label));
+        m_children.emplace_back(button,pos_2D{24,m_height-48});
+        resize(m_state.get_engine()->get_window_size());
+    }
     auto modal_dialog_t::resize(size_2D size) -> void
     {
         m_backdrop->set_size(size);

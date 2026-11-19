@@ -167,6 +167,8 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 
 `batch_gzip` 是布林欄位，預設 `true`（新設定及缺少此欄位的舊設定皆啟用；既有明確的 `false` 仍保留）；建置時 CMake 以 `find_package(ZLIB)` 偵測，找到後才啟用壓縮能力。沒有 ZLIB 時仍可建置，checkbox 會停用，手動設定 `true` 也不壓縮，日誌會說明原因。啟用後只壓縮送往 Drive batch endpoint 的 POST multipart body（含背景補充 batch），使用 gzip level 1；Content-Type／boundary 保留，Content-Encoding 為 `gzip`，長度依壓縮後位元組數計算。逐筆模式與其他 endpoint 不壓縮。切換只影響新派送，既有請求及其重試保持原編碼；部分成功重試會重新壓縮尚未完成的子請求。`http_log_codes` 仍記錄未壓縮的 multipart／子請求內容，外層標頭含 `Content-Encoding: gzip`，內層日誌標頭也註記 `gzip`；快取鍵使用未壓縮內容，切換不影響成功回應重播。
 
+設定內另有「刪除記錄」按鈕，立即刪除目前已套用日誌資料夾內的舊 `.txt` 日誌，保留目前 session 的檔名及開啟檔案；不套用表單內尚未確認的路徑，也不處理子目錄或符號連結。
+
 格式更新會將舊的 content 重新分塊並以目前格式壓縮，完整寫入替代索引後才切換檔案主索引，再刪除舊分頁、chunk 與 content；檔案主 ID 不變。中斷後可沿用任務檢查點恢復，不會將尚未完成的資料標成最新版本。
 
 同一次程式執行使用啟動時決定的日誌檔名；套用設定、登入／登出或變更空間帳戶關聯不會另開新檔。只有變更日誌資料夾時才重新開啟日誌，並沿用相同檔名；切回原資料夾時接續原檔。設定視窗取消或套用後維持空間 dropdown 關閉；從空間選單執行的管理操作仍會回到對應選單。

@@ -285,7 +285,18 @@ try:
         assert not snapshot()['menu'],'Closing settings opened the space dropdown'
     emit('session-log-before-settings')
     initial_files=set(original_log.parent.glob('*.txt'))
-    s=open_settings();finish_settings(s,False)
+    s=open_settings()
+    (original_log.parent/'old-session.txt').write_text('old session')
+    (original_log.parent/'keep.bin').write_bytes(b'not a log')
+    (original_log.parent/'nested').mkdir()
+    (original_log.parent/'nested/keep.txt').write_text('not a direct session log')
+    before_delete=original_log.read_text()
+    height=152+28+68*8+36*2
+    click({'x':(s['window_w']-720)//2+70,'y':max(0,(s['window_h']-height)//2)+height-40})
+    wait(lambda:not (original_log.parent/'old-session.txt').exists(),'Delete logs button did not delete old session')
+    assert original_log.exists() and original_log.read_text().startswith(before_delete),'Active session log was removed or truncated'
+    assert (original_log.parent/'keep.bin').exists() and (original_log.parent/'nested/keep.txt').exists()
+    finish_settings(s,False)
     assert not Path('settings.json').exists(),'Cancel unexpectedly saved settings'
     time.sleep(1.1) # Cross a filename timestamp boundary to detect log rotation.
     s=open_settings();settings_field(s,5,'0,200,302,700');settings_field(s,6,'17');finish_settings(s,True,17)
@@ -448,7 +459,7 @@ try:
     command('key','Escape');command('key','alt+F4');assert app.wait(timeout=15)==0
     logs=''.join(path.read_text(errors='replace') for path in Path('logfile').glob('*.txt'))
     assert 'uncaught exception:' not in logs and 'finished_all!' in logs
-    print('PASS: enabled/disabled tooltips across real space menus, one log per process across settings/space operations, directory-change continuation, closed settings dropdown, rendered space/user/project/service menus, named provisioning, managed-key filtering, linking, login/logout/restart, typed removals, retained cloud identities and clear warning.')
+    print('PASS: enabled/disabled tooltips across real space menus, delete old logs while preserving the current session, one log per process across settings/space operations, directory-change continuation, closed settings dropdown, rendered space/user/project/service menus, named provisioning, managed-key filtering, linking, login/logout/restart, typed removals, retained cloud identities and clear warning.')
 finally:
     if app.poll() is None: app.kill();app.wait()
     if window_manager.poll() is None: window_manager.terminate();window_manager.wait(timeout=5)
