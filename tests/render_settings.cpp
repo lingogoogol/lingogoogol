@@ -19,8 +19,8 @@ int main(int argc,char** argv)
     {
         lgo::init_logfile("logfile/render-settings.txt");
         const auto defaults=storage_settings_t::load();
-        check(defaults.frame_rate_limit==60,"Incorrect defaults.");
-        for(const auto field:{"frame_rate_limit"})
+        check(defaults.frame_rate_limit==60 && defaults.reserve_in_flight_limit==64,"Incorrect defaults.");
+        for(const auto field:{"frame_rate_limit","reserve_in_flight_limit"})
         {
             for(const auto& invalid:std::vector<json>{0,-1,1.5,"64",nullptr,true})
             {
@@ -109,6 +109,7 @@ int main(int argc,char** argv)
             {
                 settings.save();loads.m_settings=settings;
                 engine.frame_rate_limit_set(settings.frame_rate_limit);
+                runtime.reserve_in_flight_limit_set(settings.reserve_in_flight_limit);
             };
             auto snapshot_at=std::chrono::steady_clock::now();
             const auto deadline=snapshot_at+90s;
@@ -123,12 +124,13 @@ int main(int argc,char** argv)
                 snapshot_at=std::chrono::steady_clock::now()+50ms;
                 storage_atomic_write("ui.json",json{{"dialog",bool(persistent.m_dialog)},
                     {"values",persistent.m_dialog ? persistent.m_dialog->values():std::vector<std::string>{}},
-                    {"fps",loads.m_settings.frame_rate_limit},
+                    {"fps",loads.m_settings.frame_rate_limit},{"reserve",loads.m_settings.reserve_in_flight_limit},
                     {"width",engine.get_window_size().x},{"height",engine.get_window_size().y}}.dump());
             }
             multi.stop();
             const auto saved=storage_settings_t::load();
-            check(saved.frame_rate_limit==loads.m_settings.frame_rate_limit,
+            check(saved.frame_rate_limit==loads.m_settings.frame_rate_limit &&
+                  saved.reserve_in_flight_limit==loads.m_settings.reserve_in_flight_limit,
                   "Persisted limits did not reload through the production parser.");
             std::println("PASS: settings GUI");
         }

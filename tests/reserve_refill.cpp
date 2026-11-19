@@ -56,6 +56,8 @@ int main(int argc,char** argv)
         }
         auto budget=std::make_shared<blob_reserve_budget_t>();
         if(mode=="shared-budget")budget->per_queue=16;
+        if(mode=="dynamic-budget") { budget->limit=12;budget->per_queue=3; }
+        if(mode=="large-budget") { budget->limit=80;budget->per_queue=20; }
         auto queue=std::make_shared<blob_queue_t>("test-queue",account.get(),&close,budget);
         auto wait=[&](auto done)
         {
@@ -73,16 +75,30 @@ int main(int argc,char** argv)
             easy.path_set(path); easy.method_get(); easy.run();
             return json::parse(easy.payload());
         };
-        if(mode=="shared-budget")
+        if(mode=="shared-budget" || mode=="dynamic-budget" || mode=="large-budget")
         {
+            const auto initial=budget->limit.load();
             std::vector<std::shared_ptr<blob_queue_t>> others;
             for(int i=0;i<3;++i)
                 others.push_back(std::make_shared<blob_queue_t>("shared-queue-"+std::to_string(i),account.get(),&close,budget));
-            wait([&]{return request("/fixture/status").at("active")==64;});
+            wait([&]{return request("/fixture/status").at("active")==initial;});
             std::this_thread::sleep_for(300ms);
-            check(budget->active==64,"Queues exceeded the shared reserve budget.");
-            check(queue->planned_creations()==1600,"One queue monopolized the budget.");
-            for(const auto& other:others)check(other->planned_creations()==1600,"Shared queue did not receive its fair budget.");
+            check(budget->active==initial,"Queues exceeded the shared reserve budget.");
+            check(queue->planned_creations()==initial/4*100,"One queue monopolized the budget.");
+            for(const auto& other:others)check(other->planned_creations()==initial/4*100,"Shared queue did not receive its fair budget.");
+            if(mode=="dynamic-budget")
+            {
+                budget->limit=28;budget->per_queue=7;
+                wait([&]{return request("/fixture/status").at("active")==28;});
+                budget->limit=4;budget->per_queue=1;
+                std::this_thread::sleep_for(400ms);
+                check(request("/fixture/status").at("active")==28,"Reducing the limit cancelled in-flight requests.");
+                check(request("/fixture/status").at("attempts")==28,"Reducing the limit dispatched extra work.");
+                request("/fixture/release?count=28");
+                wait([&]{return request("/fixture/status").at("attempts")==32;});
+                std::this_thread::sleep_for(400ms);
+                check(request("/fixture/status").at("active")==4,"Reduced shared budget was not enforced.");
+            }
             close=true;queue->stop();for(auto& other:others)other->stop();
             check(budget->active==0,"Shutdown leaked shared reserve slots.");
         }

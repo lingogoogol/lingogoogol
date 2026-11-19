@@ -106,7 +106,7 @@ auto storage_runtime_t::open_space(const storage_settings_t& settings, const sto
         std::lock_guard lock{m_mutex};
         auto total=m_queues.size();
         for(const auto& address:interleaved)total+=!m_queues.contains(address);
-        m_reserve_budget->per_queue=std::max<std::size_t>(1,blob_reserve_budget_t::limit/std::max<std::size_t>(1,total));
+        m_reserve_budget->per_queue=std::max<std::size_t>(1,m_reserve_budget->limit.load()/std::max<std::size_t>(1,total));
     }
     for(const auto& address:interleaved)
     {
@@ -295,7 +295,15 @@ auto storage_runtime_t::sign_out(const std::string& storage_id) -> void
         return true;
     });
     m_reserve_budget->per_queue=std::max<std::size_t>(1,
-        blob_reserve_budget_t::limit/std::max<std::size_t>(1,m_queues.size()));
+        m_reserve_budget->limit.load()/std::max<std::size_t>(1,m_queues.size()));
+}
+
+auto storage_runtime_t::reserve_in_flight_limit_set(std::size_t limit) -> void
+{
+    if (!limit) throw std::runtime_error{"預備補充共用在途上限必須大於零"};
+    std::lock_guard lock{m_mutex};
+    m_reserve_budget->limit=limit;
+    m_reserve_budget->per_queue=std::max<std::size_t>(1,limit/std::max<std::size_t>(1,m_queues.size()));
 }
 
 auto storage_runtime_t::retry_accounts() -> void

@@ -11,11 +11,11 @@ export {
     {
         std::atomic_size_t active{};
         std::atomic_size_t per_queue{64};
-        static constexpr std::size_t limit{64};
+        std::atomic_size_t limit{64};
         auto acquire() -> bool
         {
             auto count=active.load();
-            while(count<limit)
+            while(count<limit.load())
                 if(active.compare_exchange_weak(count,count+1))return true;
             return false;
         }

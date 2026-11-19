@@ -76,6 +76,7 @@ auto app() -> void
     storage_runtime_t runtime{&close_app};
     runtime.batch_request = settings.batch_request;
     runtime.batch_size = settings.batch_size;
+    runtime.reserve_in_flight_limit_set(settings.reserve_in_flight_limit);
     auto startup_control = std::make_shared<request_control_t>();
     std::shared_ptr<storage_session_t> session;
     std::string startup_error;
@@ -971,6 +972,7 @@ auto app() -> void
                 }
                 runtime.batch_request = settings.batch_request;
                 runtime.batch_size = settings.batch_size;
+                runtime.reserve_in_flight_limit_set(settings.reserve_in_flight_limit);
                 engine.frame_rate_limit_set(settings.frame_rate_limit);
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);

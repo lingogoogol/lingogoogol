@@ -269,12 +269,12 @@ try:
         Path('open-settings').touch()
         return wait(lambda:snapshot() if snapshot()['dialog'] else None,'Settings did not open')
     def settings_field(s,index,value):
-        # Match modal_dialog_t: one description, nine fields, two checkboxes.
-        height=152+28+68*9+36*2
+        # Match modal_dialog_t: one description, ten fields, two checkboxes.
+        height=152+28+68*10+36*2
         left=(s['window_w']-720)//2;top=max(0,(s['window_h']-height)//2)
         click({'x':left+200,'y':top+124+68*index});paste(value)
     def finish_settings(s,accepted,workers=None):
-        height=152+28+68*9+36*2
+        height=152+28+68*10+36*2
         left=(s['window_w']-720)//2;top=max(0,(s['window_h']-height)//2)
         click({'x':left+(640 if accepted else 520),'y':top+height-40})
         wait(lambda:not snapshot()['dialog'] and not snapshot()['switching'] and
@@ -289,7 +289,7 @@ try:
     (original_log.parent/'nested').mkdir()
     (original_log.parent/'nested/keep.txt').write_text('not a direct session log')
     before_delete=original_log.read_text()
-    height=152+28+68*9+36*2
+    height=152+28+68*10+36*2
     click({'x':(s['window_w']-720)//2+70,'y':max(0,(s['window_h']-height)//2)+height-40})
     wait(lambda:not (original_log.parent/'old-session.txt').exists(),'Delete logs button did not delete old session')
     assert original_log.exists() and original_log.read_text().startswith(before_delete),'Active session log was removed or truncated'

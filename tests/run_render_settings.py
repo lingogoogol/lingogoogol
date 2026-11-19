@@ -40,7 +40,7 @@ def wait(fn, message):
 window = wait(lambda: command('search', '--name', 'Render settings regression').splitlines()[0], 'No GUI')
 command('windowfocus', '--sync', window)
 def click(s, x, y):
-    command('mousemove', '--window', window, (s['width']-720)//2+x, max(0,(s['height']-864)//2)+y, 'click', '1')
+    command('mousemove', '--window', window, (s['width']-720)//2+x, max(0,(s['height']-932)//2)+y, 'click', '1')
     time.sleep(.1)
 def open_settings():
     Path('open-settings').touch()
@@ -49,26 +49,26 @@ def field(s, index, value):
     click(s, 150, 124+68*index)
     command('key', 'ctrl+a')
     command('key', 'BackSpace') if not value else command('type', '--clearmodifiers', '--', value)
-def accept(s, ok=True): click(s, 640 if ok else 520, 832)
+def accept(s, ok=True): click(s, 640 if ok else 520, 900)
 try:
     s = open_settings()
-    assert s['values'][8:9] == ['60']
-    field(s,8,'17');accept(s,False)
+    assert s['values'][8:10] == ['60','64']
+    field(s,8,'17');field(s,9,'12');accept(s,False)
     wait(lambda: not state()['dialog'], 'Cancel did not close')
-    assert state()['fps']==60 and not Path('settings.json').exists()
-    for index in (8,):
+    assert state()['fps']==60 and state()['reserve']==64 and not Path('settings.json').exists()
+    for index in (8,9):
         s=open_settings()
-        assert s['values'][8:9]==['60'], 'Cancelled edit was retained'
+        assert s['values'][8:10]==['60','64'], 'Cancelled edit was retained'
         for invalid in ('0','-1','1.5','abc','18446744073709551616',''):
             field(s,index,invalid);accept(s)
             assert state()['dialog'] and not Path('settings.json').exists(), ('Invalid limit accepted',index,invalid)
         accept(s,False);wait(lambda: not state()['dialog'], 'Cancel did not close')
-    s=open_settings();field(s,8,'17');accept(s)
-    wait(lambda: not state()['dialog'] and state()['fps']==17, 'New limits not applied')
+    s=open_settings();field(s,8,'17');field(s,9,'12');accept(s)
+    wait(lambda: not state()['dialog'] and state()['fps']==17 and state()['reserve']==12, 'New limits not applied')
     saved=json.loads(Path('settings.json').read_text())
-    assert saved['frame_rate_limit']==17
+    assert saved['frame_rate_limit']==17 and saved['reserve_in_flight_limit']==12
     assert saved['worker_count']==64 and saved['batch_size']==100 and saved['batch_request'] is True
-    s=open_settings();assert s['values'][8:9]==['17'];accept(s,False)
+    s=open_settings();assert s['values'][8:10]==['17','12'];accept(s,False)
     wait(lambda: not state()['dialog'], 'Final cancel did not close')
     Path('close-test').touch();assert p.wait(timeout=15)==0
     print(Path('ui-output').read_text(),end='')

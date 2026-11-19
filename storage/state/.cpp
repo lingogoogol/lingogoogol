@@ -223,6 +223,15 @@ auto storage_settings_t::parse_frame_rate_limit(std::string_view text) -> std::s
     return count;
 }
 
+auto storage_settings_t::parse_reserve_in_flight_limit(std::string_view text) -> std::size_t
+{
+    std::size_t count{};
+    const auto [end,error] = std::from_chars(text.data(),text.data()+text.size(),count);
+    if (error!=std::errc{} || end!=text.data()+text.size() || !count)
+        throw std::runtime_error{"預備補充共用在途上限必須是有效的正整數"};
+    return count;
+}
+
 auto storage_settings_t::load() -> storage_settings_t
 {
     storage_settings_t result;
@@ -246,6 +255,7 @@ auto storage_settings_t::load() -> storage_settings_t
     result.worker_count = parse_worker_count(data.value("worker_count",nlohmann::json(64)).dump());
     result.batch_size = parse_batch_size(data.value("batch_size",nlohmann::json(100)).dump());
     result.frame_rate_limit = parse_frame_rate_limit(data.value("frame_rate_limit",nlohmann::json(result.frame_rate_limit)).dump());
+    result.reserve_in_flight_limit = parse_reserve_in_flight_limit(data.value("reserve_in_flight_limit",nlohmann::json(result.reserve_in_flight_limit)).dump());
     result.network_retries = data.value("network_retries", -1);
     if (result.network_retries < -1)
         throw std::runtime_error{"Network retries must be nonnegative or -1 (unlimited)."};
@@ -256,6 +266,7 @@ auto storage_settings_t::save() const -> void
     parse_http_log_codes(http_log_codes);
     if (!worker_count) throw std::runtime_error{"worker 數量必須大於零"};
     if (!frame_rate_limit) throw std::runtime_error{"幀率限制必須大於零"};
+    if (!reserve_in_flight_limit) throw std::runtime_error{"預備補充共用在途上限必須大於零"};
     if (batch_size<1 || batch_size>100) throw std::runtime_error{"batch_size 必須是 1 到 100 的整數"};
     auto data = nlohmann::json{{"logfile_path", logfile_path},
                                                          {"http_log_codes", http_log_codes},
@@ -268,6 +279,7 @@ auto storage_settings_t::save() const -> void
                                                          {"batch_size", batch_size},
                                                          {"worker_count", worker_count}};
     data["frame_rate_limit"] = frame_rate_limit;
+    data["reserve_in_flight_limit"] = reserve_in_flight_limit;
     data["spaces"] = nlohmann::json::array();
     for (const auto& space : spaces)
         data["spaces"].push_back({{"id",space.id},{"name",space.name},

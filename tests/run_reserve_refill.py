@@ -89,7 +89,8 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
         shutil.copy2(dll, test/dll.name)
     for mode, initial, batches in [('full', 20000, 0), ('near-full', 19999, 1),
                                    ('partial-gap', 13450, 66), ('empty-retry', 0, 201),
-                                   ('shared-budget',0,64),('root-first',0,None)]:
+                                   ('shared-budget',0,64),('dynamic-budget',0,32),
+                                   ('large-budget',0,80),('root-first',0,None)]:
         server = Server(('127.0.0.1', 0), Handler)
         server.lock = threading.Lock()
         server.release = threading.Semaphore(0)
@@ -101,6 +102,8 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
         # Each scenario replaces the complete queue, including its tail edit.
         (test/'test-queue.tail').unlink(missing_ok=True)
         (test/'test-queue').write_text(json.dumps(['reserved']*initial))
+        for path in test.glob('shared-queue-*'):
+            path.unlink()
         (test/'refill.log').unlink(missing_ok=True)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
@@ -109,13 +112,13 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
                 capture_output=True, text=True, timeout=30)
             assert run.returncode == 0, (run.stdout, run.stderr, server.errors)
             assert not server.errors, server.errors
-            assert server.maximum <= 64, (mode, server.maximum)
+            assert server.maximum <= (80 if mode == 'large-budget' else 64), (mode, server.maximum)
             if batches is not None: assert server.attempts == batches, (mode, server.attempts)
             if mode == 'root-first': assert server.roots==1
             if mode == 'partial-gap': assert server.maximum == 64
             if mode == 'empty-retry': assert server.part_counts == {100: 200, 1: 1}, server.part_counts
             print(run.stdout, end='', flush=True)
         finally:
-            server.release.release(64)
+            server.release.release(256)
             server.shutdown(); server.server_close()
-    print('PASS: <=64 in-flight batches, rounded gaps including pending IDs, 20,000-create refill, background project/account balancing and retry counted once.')
+    print('PASS: configurable shared refill budgets (12/28/4/64/80), rounded gaps including pending IDs, 20,000-create refill, background project/account balancing and retry counted once.')

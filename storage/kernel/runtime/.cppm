@@ -28,6 +28,7 @@ export {
         std::atomic_bool batch_request{true};
         std::atomic_size_t batch_size{100};
         explicit storage_runtime_t(std::atomic_bool* close);
+        auto reserve_in_flight_limit_set(std::size_t limit) -> void;
         ~storage_runtime_t()
         {
             stop();
