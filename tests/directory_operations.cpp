@@ -426,7 +426,7 @@ int main(int argc, char** argv)
                         object.visit_children(inspect);
                     };
                     inspect(row);
-                    check(name && size && actions.size()==4,"Entry does not have a name, size and four actions.");
+                    check(name && size && actions.size()==5,"Entry does not have a name, size and five actions.");
                     check(name->get_pos().x==name_header->get_pos().x &&
                           name->get_size().x==name_header->get_size().x &&
                           size->get_pos().x==size_header->get_pos().x &&
@@ -434,7 +434,7 @@ int main(int argc, char** argv)
                           actions.front()->get_pos().x==actions_header->get_pos().x,
                           "Header and entry columns are misaligned after resizing.");
                     for (std::size_t i{}; i<actions.size(); ++i)
-                        check(actions[i]->get_text()==std::array{"下載","剪下","複製","刪除"}[i] &&
+                        check(actions[i]->get_text()==std::array{"下載","剪下","複製","改名","刪除"}[i] &&
                               actions[i]->get_size().x==32 && actions[i]->get_pos().y==name->get_pos().y &&
                               actions[i]->get_pos().x>=viewer->get_pos().x &&
                               actions[i]->get_pos().x+32<=viewer->get_pos().x+viewer->view_size().x,

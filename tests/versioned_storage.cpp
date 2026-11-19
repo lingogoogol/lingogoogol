@@ -129,6 +129,37 @@ int main()
         check(clicked==1,"Enabled button did not invoke exactly once");
         fixture->hide();wait([&]{return !tips->snapshot();});
         fixture.reset();
+        const auto rename_before=name("old-file");
+        const auto tasks_before=loads.m_task_list.size();
+        click(*row_button("old","改名"));
+        wait([&]{return bool(persistent.m_dialog);});
+        input(json::array({json::array({"move",persistent.m_paste_button->get_pos().x+20,persistent.m_paste_button->get_pos().y+10})}));
+        for(int i=0;i<5;++i)pump();
+        check(!tips->snapshot(),"Background tooltip leaked through modal overlay");
+        // Cancel must not schedule any writes.
+        const auto dialog_top=(engine.get_window_size().y-220)/2;
+        input(json::array({json::array({"move",(engine.get_window_size().x-720)/2+520,dialog_top+180})}));
+        wait([&]{auto hint=tips->snapshot();return hint && hint->text.contains("取消本次操作");});
+        input(json::array({json::array({"click",(engine.get_window_size().x-720)/2+520,dialog_top+180})}));
+        wait([&]{return !persistent.m_dialog;});
+        check(loads.m_task_list.size()==tasks_before,"Cancelled rename started a task");
+        click(*row_button("old","改名"));wait([&]{return bool(persistent.m_dialog);});
+        const auto left=(engine.get_window_size().x-720)/2;
+        input(json::array({json::array({"click",left+180,dialog_top+90}),json::array({"key","ctrl+a"}),
+            json::array({"type","/"}),json::array({"key","Return"})}));
+        check(bool(persistent.m_dialog) && loads.m_task_list.size()==tasks_before,"Invalid rename was accepted");
+        input(json::array({json::array({"key","ctrl+a"}),json::array({"type","renamed"}),json::array({"key","Return"})}));
+        wait([&]{return !persistent.m_dialog && loads.m_task_list.size()>tasks_before;});
+        finish(loads.m_task_list.back());idle();
+        check(find("root","renamed").at("id")=="old" && name("old").at("name")=="renamed", "Folder rename lost ID or index name");
+        check(name("old-file")==rename_before,"Folder rename changed child metadata");
+        pos="old";persistent.m_refresh();idle();
+        // File rename also updates both the directory entry and blob metadata.
+        operation("directory-rename","old",find("old","old.bin"),{},"renamed.bin");idle();
+        check(name("old-file").at("name")=="renamed.bin","File rename missed metadata");
+        operation("directory-rename","old",find("old","renamed.bin"),{},"old.bin");idle();
+        operation("directory-rename","root",find("root","renamed"),{},"old");idle();
+        pos="root";persistent.m_refresh();idle();
         begin_task(&loads,session,"upload-folder","input","root");finish(loads.m_task_list.back());
         auto uploaded=find("root","input");const auto uploaded_id=uploaded.at("id").get<std::string>();
         auto metadata=name(uploaded_id);

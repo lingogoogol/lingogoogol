@@ -322,6 +322,35 @@ auto directory_execute(directory_task_t& task) -> void
     const auto id{task.m_entity.at("id").get<std::string>()};
     if (id == task.m_session->root)
         throw std::runtime_error{"不可操作根目錄"};
+    if (task.m_kind == "directory-rename")
+    {
+        directory_validate_name(task.m_name);
+        verify_entry(easy,task.m_source,task.m_entity);
+        auto entity_pages = pages(easy,id);
+        auto parent_pages = pages(easy,task.m_source);
+        // Validate every replacement before writing anything. The parent index
+        // can be near the Drive description limit even for a valid UTF-8 name.
+        for (auto& page : parent_pages)
+        {
+            for (auto& entry : page.content)
+                if (entry.at("id")==id) entry["name"]=task.m_name;
+            if (page.content.dump().size()>content_size_max) throw std::runtime_error{"項目名稱過長"};
+        }
+        task.m_total = entity_pages.size()+parent_pages.size();
+        for (auto& page : entity_pages)
+        {
+            if (page.name.at("parent")!=task.m_source) throw std::runtime_error{"項目已移動，請重新整理"};
+            page.name["name"] = task.m_name;
+            easy.update_name(page.id,page.name.dump());
+            ++task.m_completed;
+        }
+        for (const auto& page : parent_pages)
+        {
+            easy.update_content(page.id,page.content.dump());
+            ++task.m_completed;
+        }
+        return;
+    }
     if (task.m_kind == "directory-move")
     {
         task.m_total = 3;

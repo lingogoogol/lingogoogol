@@ -175,7 +175,7 @@ namespace
             if (!m_name) return;
             constexpr std::int64_t name_min{120}, size_width{100}, time_width{190};
             const auto gap{2 * lgo::std_margin.x + lgo::std_line_size.x};
-            const auto actions_width{4 * 32 + 3 * lgo::std_line_size.x + 6 * lgo::std_margin.x};
+            const auto actions_width{5 * 32 + 4 * lgo::std_line_size.x + 8 * lgo::std_margin.x};
             const auto width{get_size().x}, height{get_size().y};
             const bool show_size{width >= name_min + size_width + actions_width + 2 * gap};
             const bool show_time{width >= name_min + size_width + time_width + actions_width + 3 * gap};
@@ -678,7 +678,8 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     task->m_kind = kind; task->m_name = name; task->m_source = source;
     task->m_destination = destination; task->m_entity = std::move(entity);
     task_row(state, task, (kind == "directory-create" ? "新增資料夾：" :
-        kind == "directory-move" ? "剪下貼上：" : kind == "directory-copy" ? "複製：" : "刪除：") + name);
+        kind == "directory-move" ? "剪下貼上：" : kind == "directory-copy" ? "複製：" :
+        kind == "directory-rename" ? "改名：" : "刪除：") + name);
     task->m_pause_button->hide();
     // Share the publication chain: every read/modify/write of a directory is
     // ordered with existing uploads. A worker never reads GUI-owned containers.
@@ -939,6 +940,34 @@ namespace
         });
     }
 
+    auto rename_dialog(lgo::engine_t* engine, GUI_persistent_t* persistent, load_state_t* state,
+                       std::shared_ptr<storage_session_t> session, std::string source,
+                       nlohmann::json entry) -> void
+    {
+        persistent->m_dialog_queue.push_back([=]
+        {
+            if (state->m_session != session || session->clearing) return;
+            persistent->m_dialog = std::make_unique<lgo::modal_dialog_t>(
+                engine, state->m_progress_column->get_depth_tracker(), "改名",
+                std::vector<std::string>{},
+                std::vector<std::pair<std::string,std::string>>{{"名稱",entry.at("name")}}, "改名");
+            persistent->m_dialog_done = [=](bool accepted,const std::vector<std::string>& values)
+            {
+                if (!accepted) return true;
+                try
+                {
+                    if (state->m_session!=session || session->clearing)
+                        throw std::runtime_error{"空間已變更，請取消並重新操作"};
+                    directory_validate_name(values.front());
+                    begin_directory_task(state,session,"directory-rename",source,entry,{},values.front());
+                    return true;
+                }
+                catch (const std::exception& error)
+                {persistent->m_dialog->error(error.what());return false;}
+            };
+        });
+    }
+
     auto delete_dialog(lgo::engine_t* engine, GUI_persistent_t* persistent, load_state_t* state,
                        std::shared_ptr<storage_session_t> session, std::string source,
                        nlohmann::json entry) -> void
@@ -1130,6 +1159,10 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, true}; },
                 "複製", lgo::std_blue_light, lgo::size_1D{32});
+            separator();
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                { rename_dialog(engine,persistent,load_state,session,source,entry); },
+                "改名", lgo::std_blue_light, lgo::size_1D{32});
             separator();
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { delete_dialog(engine, persistent, load_state, session, source, entry); },
@@ -1394,7 +1427,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                 }
             }
         }
-        if (reset_view || *pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
+        if (task.m_kind=="directory-rename" && persistent->m_clipboard &&
+            persistent->m_clipboard->session==task.m_session && persistent->m_clipboard->entity.at("id")==task.m_entity.at("id"))
+            persistent->m_clipboard->entity["name"] = task.m_name;
+        if (reset_view || task.m_kind=="directory-rename" ||
+            *pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
     };
     load_state->m_on_upload_linked = [engine, persistent, multi, load_state, blob_queue, pos,
                                       viewer = std::weak_ptr{viewer_div}](const std::string& uploaded_pos)
