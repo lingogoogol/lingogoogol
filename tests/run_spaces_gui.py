@@ -254,10 +254,8 @@ try:
     pending=next(item for item in snapshot()['footer'] if item['text']=='繼續配置')
     assert not pending['enabled']
     assert '不可用' in hover(pending,'沒有尚未完成的配置')['text']
-    expand=next(item for item in snapshot()['footer'] if item['text']=='擴充並行')
-    assert not expand['enabled']
-    hover(expand,'請先登入空間')
-    click(expand)
+    assert all(item['text']!='擴充並行' for item in snapshot()['footer']),'Space list still contains parallel expansion'
+    click(pending)
     assert snapshot()['menu'] and not snapshot()['switching'] and not snapshot()['dialog'],'Disabled menu action ran'
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu did not close')
     wait(lambda:not snapshot()['tooltip'],'Tooltip outlived its menu')
@@ -316,9 +314,8 @@ try:
     assert set(changed_log.parent.glob('*.txt'))=={changed_log}
     menu=open_menu();assert not menu['rows']
     assert [(a['text'],a['enabled']) for a in menu['footer']]==[
-        ('繼續配置',False),('擴充並行',False),('新增空間',True)]
+        ('繼續配置',False),('新增空間',True)]
     footer('繼續配置');assert snapshot()['menu'] and not snapshot()['switching']
-    footer('擴充並行');assert snapshot()['menu'] and not snapshot()['dialog']
     footer('新增空間');dialog('',key='Return');assert snapshot()['dialog'],'Enter bypassed empty-name validation'
     dialog('My Space',key='KP_Enter');closed();ready(0)
     settings=json.loads(Path('settings.json').read_text());space=settings['spaces'][0]
@@ -351,6 +348,8 @@ try:
     saved=checkpoint.read_bytes()
     command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu did not close before pending-state tooltip')
     open_menu()
+    assert all(item['text']!='擴充並行' for item in snapshot()['footer']),'Pending setup restored expansion to the space list'
+    action('編輯');ready(1)
     expand=next(item for item in snapshot()['footer'] if item['text']=='擴充並行')
     assert not expand['enabled']
     hover(expand,'已有尚未完成的配置')

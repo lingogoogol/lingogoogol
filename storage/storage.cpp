@@ -593,9 +593,6 @@ auto app() -> void
             const bool pending=std::filesystem::exists(parallel_checkpoint);
             actions.emplace_back("繼續配置",std::function<void()>{});
             if(pending)actions.back().second=[&] { resume_parallel(); };
-            actions.emplace_back("擴充並行",std::function<void()>{});
-            if(!pending && load_state.m_session)
-                actions.back().second=[&,id=load_state.m_session->storage_id] { start_parallel(id); };
             actions.emplace_back("新增空間",[&]
             {
                 name_dialog("新增空間","空間名稱",[&](std::string name)
