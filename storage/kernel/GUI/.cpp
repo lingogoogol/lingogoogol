@@ -175,7 +175,7 @@ namespace
             if (!m_name) return;
             constexpr std::int64_t name_min{120}, size_width{100}, time_width{190};
             const auto gap{2 * lgo::std_margin.x + lgo::std_line_size.x};
-            const auto actions_width{5 * 32 + 4 * lgo::std_line_size.x + 8 * lgo::std_margin.x};
+            const auto actions_width{6 * 32 + 5 * lgo::std_line_size.x + 10 * lgo::std_margin.x};
             const auto width{get_size().x}, height{get_size().y};
             const bool show_size{width >= name_min + size_width + actions_width + 2 * gap};
             const bool show_time{width >= name_min + size_width + time_width + actions_width + 3 * gap};
@@ -679,7 +679,7 @@ auto begin_directory_task(load_state_t* state, std::shared_ptr<storage_session_t
     task->m_destination = destination; task->m_entity = std::move(entity);
     task_row(state, task, (kind == "directory-create" ? "新增資料夾：" :
         kind == "directory-move" ? "剪下貼上：" : kind == "directory-copy" ? "複製：" :
-        kind == "directory-rename" ? "改名：" : "刪除：") + name);
+        kind == "directory-rename" ? "改名：" : kind == "directory-upgrade" ? "更新：" : "刪除：") + name);
     task->m_pause_button->hide();
     // Share the publication chain: every read/modify/write of a directory is
     // ordered with existing uploads. A worker never reads GUI-owned containers.
@@ -1141,16 +1141,24 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                 lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_margin,
                 lgo::size_1D{0},
                 lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
-            actions->add_object<progress_button_t>(storage_content_depth, [=]
-                {
-                    if (folder) folder_download_callback(load_state, name, id);
-                    else file_download_callback(load_state, name, id);
-                }, "下載", lgo::std_blue_light, lgo::size_1D{32});
             auto separator = [&]
             {
                 actions->add_object<lgo::std_liney_t>(storage_content_depth,
                     lgo::size_1D{lgo::font_preference_t::default_get()[0]->leading_get()}, lgo::std_blue_light);
             };
+            auto update_button = actions->add_object_shared<progress_button_t>(storage_content_depth,[=]
+                {begin_directory_task(load_state,session,"directory-upgrade",source,entry,{},name);},
+                "更新",lgo::std_blue_light,lgo::size_1D{32});
+            update_button->set_enabled(entry.at("version_min")!=storage_format::current_version,
+                std::string{folder ? "此資料夾及其子內容已是最新格式" : "此檔案已是最新格式"}+
+                    "（版本 "+std::to_string(storage_format::current_version)+"）");
+            update_button->set_tooltip("將此項目的 blob 格式更新到最新版本："+name);
+            separator();
+            actions->add_object<progress_button_t>(storage_content_depth, [=]
+                {
+                    if (folder) folder_download_callback(load_state, name, id);
+                    else file_download_callback(load_state, name, id);
+                }, "下載", lgo::std_blue_light, lgo::size_1D{32});
             separator();
             actions->add_object<progress_button_t>(storage_content_depth, [=]
                 { persistent->m_clipboard = GUI_persistent_t::clipboard_t{session, source, entry, false}; },
@@ -1430,7 +1438,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         if (task.m_kind=="directory-rename" && persistent->m_clipboard &&
             persistent->m_clipboard->session==task.m_session && persistent->m_clipboard->entity.at("id")==task.m_entity.at("id"))
             persistent->m_clipboard->entity["name"] = task.m_name;
-        if (reset_view || task.m_kind=="directory-rename" ||
+        if (reset_view || task.m_kind=="directory-upgrade" || task.m_kind=="directory-rename" ||
             *pos == task.m_source || *pos == task.m_destination) persistent->m_refresh();
     };
     load_state->m_on_upload_linked = [engine, persistent, multi, load_state, blob_queue, pos,

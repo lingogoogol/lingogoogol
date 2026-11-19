@@ -10,7 +10,7 @@ import storage.google;
 import storage.kernel;
 using json=nlohmann::json;
 using namespace std::chrono_literals;
-int main()
+int main(int argc,char** argv)
 {
     try
     {
@@ -92,6 +92,25 @@ int main()
             throw std::runtime_error{"Missing row action: "+text+" / "+action};
         };
         auto idle=[&]{wait([&]{return persistent.m_listings.empty();});};
+        if (argc>1 && std::string_view{argv[1]}=="resume-upgrade")
+        {
+            restore_tasks(&loads,[&](const json&){return session;});
+            wait([&]{return !loads.m_task_list.empty();});
+            finish(loads.m_task_list.back());idle();
+            check(name("root").at("version_min")==2,"Restored upgrade did not finish root metadata");
+            begin_task(&loads,session,"download-file","large-after-replay.bin","large-file");finish(loads.m_task_list.back());
+            check(storage_read("large-after-replay.bin")==storage_read("expected-large.bin"),"Crash replay changed legacy bytes");
+            lgo::log_file("finished_all!\n");
+            std::cout<<"PASS: interrupted upgrade restored after main publication and partial cleanup.\n";
+            return 0;
+        }
+        if (argc>1 && std::string_view{argv[1]}=="interrupt-upgrade")
+        {
+            begin_directory_task(&loads,session,"directory-upgrade","root",json{{"id","root"},{"type","folder"},{"name","fixture"}},{},"fixture");
+            wait([&]{return false;});
+        }
+        operation("directory-create","root",json::object(),{},"layout-current");idle();
+        input(json::array({json::array({"move",100,400}),json::array({"capture","layout-after",0,0,1536,1024})}));
         auto tips=lgo::button_tooltip_t::shared(&engine);
         auto hover=[&](const lgo::GUI_object_t& object,std::string_view expected)
         {
@@ -103,13 +122,20 @@ int main()
             check(hint.pos.x>=0 && hint.pos.x+hint.size.x<=engine.get_window_size().x,"Tooltip exceeds horizontal viewport");
             return hint;
         };
+        const auto row_tasks=loads.m_task_list.size();
+        hover(*row_button("layout-current","更新"),"此資料夾及其子內容已是最新格式");
+        click(*row_button("layout-current","更新"));
+        check(loads.m_task_list.size()==row_tasks,"Disabled folder update started a task");
         const auto paste_hint=hover(*persistent.m_paste_button,"請先剪下或複製");
         check(paste_hint.text.contains("不可用") && paste_hint.pos.y>persistent.m_paste_button->get_pos().y,"Disabled tooltip missing reason or below placement");
         input(json::array({json::array({"capture","disabled",paste_hint.pos.x,paste_hint.pos.y,paste_hint.size.x,paste_hint.size.y})}));
         click(*persistent.m_paste_button);
         check(!persistent.m_dialog && !persistent.m_clipboard,"Disabled tooltip made paste clickable");
-        for (const auto action : {"下載","剪下","複製","刪除"})
-            hover(*row_button("old",action),row_button("old",action)->tooltip_text());
+        for (const auto action : {"更新","下載","剪下","複製","改名","刪除"})
+        {
+            const auto* button = row_button("old",action);
+            hover(*button,button->tooltip_text());
+        }
         loads.m_session.reset();persistent.m_refresh();for(int i=0;i<3;++i)pump();
         hover(*persistent.m_account_buttons.front(),"請先登入空間");
         loads.m_session=session;persistent.m_refresh();idle();
@@ -165,15 +191,15 @@ int main()
         auto metadata=name(uploaded_id);
         check(metadata.at("version")==2 && metadata.at("version_min")==2 && metadata.at("size")==1900000 && metadata.at("time").get<std::int64_t>()>0,"Uploaded folder metadata incorrect");
         const auto upload_time=metadata.at("time");
-        check(name("root").at("size")==1900003 && name("root").at("version_min")==0 && name("root").contains("time"),"Root aggregate or upgrade time incorrect");
+        check(name("root").at("size")==3793753 && name("root").at("version_min")==0 && name("root").contains("time"),"Root aggregate or upgrade time incorrect");
         operation("directory-create","root",json::object(),{},"created");
         const auto created=find("root","created").at("id").get<std::string>();
         auto old=find("old","old.bin");
         operation("directory-copy","old",old,created,"old.bin");
         auto copied=find(created,"old.bin");
-        check(name(created).at("version_min")==0 && name(created).at("size")==3 && name("root").at("size")==1900006,"Paste did not update ancestors");
+        check(name(created).at("version_min")==1 && name(created).at("size")==3 && name("root").at("size")==3793756,"Paste did not update ancestors");
         operation("directory-move","root",uploaded,"dest","input");
-        check(name("dest").at("size")==1900000 && name(uploaded_id).at("time")==upload_time && name("root").at("size")==1900006,"Move changed time or totals");
+        check(name("dest").at("size")==1900000 && name(uploaded_id).at("time")==upload_time && name("root").at("size")==3793756,"Move changed time or totals");
         // Follow real uploaded indices; decode version 2 through the production downloader.
         auto nested=find(uploaded_id,"nested").at("id").get<std::string>();
         auto payload=find(nested,"payload.bin");
@@ -181,6 +207,29 @@ int main()
         check(storage_read("download.bin")==storage_read("input/nested/payload.bin"),"Version 2 downloaded bytes differ");
         begin_task(&loads,session,"download-file","legacy.bin",copied.at("id"));finish(loads.m_task_list.back());
         check(storage_read("legacy.bin")=="old","Legacy copied download differs");
+        // Row update must convert the selected file and refresh ancestor minima.
+        pos=created;persistent.m_refresh();idle();
+        click(*row_button("old.bin","更新"));
+        wait([&]{return loads.m_task_list.back()->m_label.starts_with("更新：");});
+        finish(loads.m_task_list.back());idle();
+        check(name(copied.at("id")).at("version_min")==2,"Row update did not convert the file");
+        hover(*row_button("old.bin","更新"),"此檔案已是最新格式");
+        const auto file_tasks=loads.m_task_list.size();
+        click(*row_button("old.bin","更新"));
+        check(loads.m_task_list.size()==file_tasks,"Disabled file update started a task");
+        begin_task(&loads,session,"download-file","upgraded.bin",copied.at("id"));finish(loads.m_task_list.back());
+        check(storage_read("upgraded.bin")=="old","Updated file bytes changed");
+        // Recursive updates cover versions 0/1, empty files,
+        // continuation pages and incompressible legacy 18,750-byte slices.
+        pos="root";persistent.m_refresh();idle();
+        begin_directory_task(&loads,session,"directory-upgrade","root",json{{"id","root"},{"type","folder"},{"name","fixture"}},{},"fixture");
+        wait([&]{return loads.m_task_list.back()->m_label.starts_with("更新：") && loads.m_task_list.back()->m_result==task_result_t::active;});
+        finish(loads.m_task_list.back());idle();
+        check(name("root").at("version_min")==2,"Root upgrade or button availability failed");
+        begin_task(&loads,session,"download-file","large-upgraded.bin","large-file");finish(loads.m_task_list.back());
+        check(storage_read("large-upgraded.bin")==storage_read("expected-large.bin"),"Repartitioned legacy bytes changed");
+        check(name("large-file").at("time")==123 && name("large-file").at("name")=="large.bin","Upgrade changed existing time or name");
+        operation("directory-delete","root",find("root","large"),{},"large");
         operation("directory-delete","root",find("root","old"),{},"old");
         operation("directory-delete",created,copied,{},"old.bin");
         check(name("root").at("size")==1900000 && name("root").at("version_min")==2 && name(created).at("size")==0,"Deletion did not update all ancestors");
@@ -202,7 +251,7 @@ int main()
         check(heading && size_label && timestamp,"Missing time column, folder size or timestamp text");
         glfwSetWindowSize(engine.window_get(),1000,800);for(int i=0;i<5;++i)pump();
         engine.flush();
-        std::cout<<"PASS: native button tooltip regression, version 2 folder upload/download, legacy copy/download, create/move/delete, ancestor size/version_min, upgrade and preserved timestamps, listing and resize.\n";
+        std::cout<<"PASS: versions 0/1/2, resumable recursive format updates, legacy slice repartitioning, fixed update controls, disabled tooltips, rename and byte comparisons.\n";
         lgo::log_file("finished_all!\n");
         return 0;
     }

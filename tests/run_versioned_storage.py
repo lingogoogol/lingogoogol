@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Run versioned metadata and transfer integration against an isolated local Drive."""
 import json
+import base64
+import ctypes
+import copy
+import time
 import os
 import random
 from pathlib import Path
@@ -36,7 +40,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.server.failed_once=True
                     return 503, {'error':'lost-response fixture after applying metadata'}
                 return 200,{'id':id}
-            if method=='DELETE':return (204,{}) if self.server.blobs.pop(id,None) is not None else (404,{})
+            if method=='DELETE':
+                if getattr(self.server,'interrupt_cleanup',False) and id.startswith('large-'):
+                    self.server.delete_attempts+=1
+                    if self.server.delete_attempts>=5:
+                        self.server.interrupted.set()
+                        return 503, {'error':'interrupt during obsolete graph cleanup'}
+                return (204,{}) if self.server.blobs.pop(id,None) is not None else (404,{})
         raise AssertionError(method)
     def respond(self,status,body):
         body=body if isinstance(body,bytes) else json.dumps(body).encode()
@@ -63,15 +73,19 @@ class Handler(BaseHTTPRequestHandler):
             status,value=self.resource(method,path,payload)
             result=json.dumps(value).encode() if status!=204 else b''
             responses.append(b'--reply\r\nContent-Type: application/http\r\nContent-ID: response-'+content_id.strip(b'<>')+b'\r\n\r\nHTTP/1.1 '+str(status).encode()+b' OK\r\nContent-Type: application/json\r\n\r\n'+result+b'\r\n')
-        result=b''.join(responses)+b'--reply--\r\n'
+        result=b''.join(reversed(responses))+b'--reply--\r\n'
         self.send_response(200);self.send_header('Content-Type','multipart/mixed; boundary=reply');self.send_header('Content-Length',str(len(result)));self.end_headers();self.wfile.write(result)
 
 with tempfile.TemporaryDirectory(prefix='storage-versioned-') as directory:
     test=Path(directory)
+    dialog=(source/'storage/dialog/.cpp').read_text()
+    start=dialog.index('dialog_t::dialog_t(bool folder)')
+    end=dialog.index('auto dialog_t::ok()',start)
+    (test/'dialog.cpp').write_text(dialog[:start]+'dialog_t::dialog_t(bool) { m_result.push_back("output"); m_ok=true; }\n'+dialog[end:])
     commands=json.loads((build/'compile_commands.json').read_text())
-    for original,replacement,output in [('storage/storage.cpp','versioned_storage.cpp','test.obj'),('storage/google/easy/.cpp','mock_google_easy.cpp','mock.obj')]:
+    for original,replacement,output in [('storage/storage.cpp','versioned_storage.cpp','test.obj'),('storage/google/easy/.cpp','mock_google_easy.cpp','mock.obj'),('storage/dialog/.cpp',str(test/'dialog.cpp'),'dialog.obj')]:
         command=shlex.split(next(e['command'] for e in commands if Path(e['file'])==source/original))
-        command[command.index('-o')+1]=str(test/output);command[command.index('-c')+1]=str(source/'tests'/replacement)
+        command[command.index('-o')+1]=str(test/output);command[command.index('-c')+1]=str(source/'tests'/replacement) if not Path(replacement).is_absolute() else replacement
         subprocess.run(command,cwd=build,check=True)
     link_command=subprocess.check_output(['ninja','-t','commands','storage.exe'],cwd=build,text=True).splitlines()[-1]
     command=[x for x in shlex.split(link_command.split(' && ')[1]) if x not in ('-mwindows','-municode') and not x.startswith('-Wl,--out-implib')]
@@ -79,6 +93,8 @@ with tempfile.TemporaryDirectory(prefix='storage-versioned-') as directory:
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')]=str(test/'test.obj')
     command[command.index('storage/google/easy/libstorage.google.easy.a')]=str(test/'mock.obj')
     command.append('storage/google/easy/CMakeFiles/storage.google.easy.dir/.cppm.obj')
+    command[command.index('storage/dialog/libstorage.dialog.a')]=str(test/'dialog.obj')
+    command.append('storage/dialog/CMakeFiles/storage.dialog.dir/.cppm.obj')
     subprocess.run(command,cwd=build,check=True)
     for p in (runtime/'bin').glob('*.dll'):shutil.copy2(p,test/p.name)
     for name in ['font','shader']:shutil.copytree(runtime/name,test/name)
@@ -88,10 +104,34 @@ with tempfile.TemporaryDirectory(prefix='storage-versioned-') as directory:
     (test/'input/empty.bin').write_bytes(b'')
     (test/'queue').write_text(json.dumps([f'reserve-{i}' for i in range(20000)]))
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);server.daemon_threads=True;server.lock=threading.Lock();server.failed_once=False
-    server.blobs={'root':folder('root','null',[link('old','folder','old'),link('dest','folder','dest')]),'dest':folder('dest','root',[]),'old':folder('old','root',[link('old-file','file','old.bin')]),
+    server.blobs={'root':folder('root','null',[link('old','folder','old'),link('dest','folder','dest'),link('large','folder','large')]),'dest':folder('dest','root',[]),'old':folder('old','root',[link('old-file','file','old.bin')]),
         'old-file':blob({'name':'old.bin','size':3,'parent':'old','parent_account':'fixture','next':'null','next_account':'null','account':'fixture'},['old-chunk']),
         'old-chunk':blob({'parent':'old-file','parent_account':'fixture','account':'fixture'},['old-data']),
         'old-data':{'name':json.dumps({'parent':'old-chunk','parent_account':'fixture'}),'description':'b2xk'}}
+    zstd=ctypes.CDLL('libzstd.so.1')
+    zstd.ZSTD_compress.restype=ctypes.c_size_t
+    compressed=ctypes.create_string_buffer(64)
+    length=zstd.ZSTD_compress(compressed,64,b'old',3,3)
+    server.blobs['old-data']['description']=base64.urlsafe_b64encode(compressed.raw[:length]).decode()
+    for id in ('old-file','old-chunk','old-data'):
+        metadata=json.loads(server.blobs[id]['name']);metadata['version']=1
+        if id=='old-file':metadata['version_min']=1
+        server.blobs[id]['name']=json.dumps(metadata)
+    payload=random.Random(2026).randbytes(101*18750)
+    (test/'expected-large.bin').write_bytes(payload)
+    server.blobs['large']=folder('large','root',[link('large-file','file','large.bin'),link('empty-file','file','empty.bin')])
+    server.blobs['large-file']=blob({'name':'large.bin','size':len(payload),'parent':'large','parent_account':'fixture',
+        'next':'large-file2','next_account':'fixture','account':'fixture','time':123},['large-chunk'])
+    server.blobs['large-file2']=blob({'name':'large.bin','size':len(payload),'parent':'large','parent_account':'fixture',
+        'next':'null','next_account':'null','account':'fixture','time':123},['large-chunk2'])
+    server.blobs['empty-file']=blob({'name':'empty.bin','size':0,'parent':'large','parent_account':'fixture',
+        'next':'null','next_account':'null','account':'null'},[])
+    server.blobs['large-chunk']=blob({'parent':'large-file','parent_account':'fixture','account':'fixture'},[f'large-data-{i}' for i in range(100)])
+    server.blobs['large-chunk2']=blob({'parent':'large-file','parent_account':'fixture','account':'fixture'},['large-data-100'])
+    for i in range(101):
+        server.blobs[f'large-data-{i}']={'name':json.dumps({'parent':'large-chunk' if i<100 else 'large-chunk2','parent_account':'fixture'}),
+            'description':base64.urlsafe_b64encode(payload[i*18750:(i+1)*18750]).decode()}
+    original_blobs=copy.deepcopy(server.blobs)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         result=subprocess.run(['xvfb-run','-a','-s','-screen 0 1600x1200x24','python3',str(source/'tests/versioned_storage_gui_driver.py'),str(test/'test.exe')],cwd=test,env={**os.environ,'WINEDEBUG':'-all','STORAGE_GPU_TEST_PORT':str(server.server_port)},capture_output=True,text=True,timeout=120)
@@ -99,6 +139,34 @@ with tempfile.TemporaryDirectory(prefix='storage-versioned-') as directory:
         if result.returncode:
             shutil.copytree(test,'/tmp/storage-versioned-failed',dirs_exist_ok=True)
             raise RuntimeError(f'exit {result.returncode}: {result.stderr}')
+        replay=test/'replay';replay.mkdir()
+        for path in test.glob('*.dll'):shutil.copy2(path,replay/path.name)
+        shutil.copy2(test/'test.exe',replay/'test.exe')
+        for name in ('font','shader'):shutil.copytree(test/name,replay/name)
+        (replay/'root').mkdir()
+        (replay/'queue').write_text(json.dumps([f'replay-reserve-{i}' for i in range(20000)]))
+        shutil.copy2(test/'expected-large.bin',replay/'expected-large.bin')
+        with server.lock:
+            server.blobs=copy.deepcopy(original_blobs)
+            server.interrupt_cleanup=True;server.delete_attempts=0;server.interrupted=threading.Event()
+        def interrupt():
+            if server.interrupted.wait(60):(replay/'crash-now').touch()
+        threading.Thread(target=interrupt,daemon=True).start()
+        command=['xvfb-run','-a','-s','-screen 0 1600x1200x24','python3',str(source/'tests/versioned_storage_gui_driver.py'),str(replay/'test.exe')]
+        env={**os.environ,'WINEDEBUG':'-all','STORAGE_GPU_TEST_PORT':str(server.server_port)}
+        interrupted=subprocess.run([*command,'interrupt-upgrade'],cwd=replay,env=env,capture_output=True,text=True,timeout=90)
+        assert interrupted.returncode==0 and server.interrupted.is_set(),interrupted.stdout+interrupted.stderr
+        assert json.loads(server.blobs['large-file']['name'])['version_min']==2
+        assert any(f'large-data-{i}' not in server.blobs for i in range(101)) and any(f'large-data-{i}' in server.blobs for i in range(101))
+        server.interrupt_cleanup=False
+        for name in ('ui-step.json','ui-ack','crash-now'):(replay/name).unlink(missing_ok=True)
+        resumed=subprocess.run([*command,'resume-upgrade'],cwd=replay,env=env,capture_output=True,text=True,timeout=90)
+        print(resumed.stdout,end='')
+        if resumed.returncode:
+            shutil.copytree(replay,'/tmp/storage-upgrade-replay-failed',dirs_exist_ok=True)
+            raise RuntimeError(resumed.stdout+resumed.stderr)
+        assert all(json.loads(blob['name']).get('version')==2 for blob in server.blobs.values())
+        assert not any(id.startswith('large-data-') for id in server.blobs)
         assert server.failed_once, 'Lost-response retry was not exercised'
         assert not any('uncaught exception:' in p.read_text(errors='replace') for p in (test/'logfile').glob('*'))
         assert any('finished_all!' in p.read_text(errors='replace') for p in (test/'logfile').glob('*'))

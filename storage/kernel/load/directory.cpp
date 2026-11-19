@@ -5,6 +5,7 @@ module storage.kernel.load;
 import std;
 import storage.google;
 import storage.http;
+import storage.encode;
 
 namespace
 {
@@ -272,6 +273,132 @@ namespace
             });
     }
 
+    // Build replacement file indices off to the side. Legacy slices can hold
+    // 18,750 raw bytes, but zstd's worst-case bound only fits 18,600 bytes in
+    // the current wire limit. Merely changing version tags would corrupt data
+    // or exceed Drive's description limit; stream and repartition the bytes.
+    using node_index_t = std::map<std::string,const nlohmann::json*>;
+
+    auto upgrade_file(directory_task_t& task, directory_io_t& easy,
+                      const std::string& id, const node_index_t& by_id) -> void
+    {
+        const auto key = "upgrade-file:" + id;
+        std::vector<const nlohmann::json*> old_pages;
+        auto page = id;
+        while (page != "null")
+        {
+            const auto* node = by_id.at(page);
+            old_pages.push_back(node);
+            page = node->at("name").at("next");
+        }
+        const auto& original = old_pages.front()->at("name");
+        if (storage_format::minimum(original) == storage_format::current_version) return;
+        auto publication = task.m_journal->response(key);
+        if (!publication)
+        {
+            const auto size = original.at("size").get<std::uint64_t>();
+            const auto count = size / storage_format::content_capacity + (size % storage_format::content_capacity != 0);
+            const auto chunk_count = count / 100 + (count % 100 != 0);
+            const auto page_count = std::max<std::uint64_t>(1,chunk_count / 100 + (chunk_count % 100 != 0));
+            std::vector<std::string> new_pages{id}, chunks;
+            for (std::uint64_t i=1;i<page_count;++i)
+                new_pages.push_back(task_reserve(task,key+":page:"+std::to_string(i),1,{},"file").front());
+            for (std::uint64_t i=0;i<chunk_count;i+=100)
+            {
+                const auto batch = std::min<std::uint64_t>(100,chunk_count-i);
+                const auto group = key+":chunks:"+std::to_string(i/100);
+                const auto address = task_owner(task,group,batch);
+                auto ids = task_reserve(task,group,batch,address,"chunk");
+                chunks.insert(chunks.end(),ids.begin(),ids.end());
+            }
+            std::string pending;
+            std::vector<std::string> slices;
+            std::size_t chunk_index{};
+            std::uint64_t decoded{};
+            auto flush = [&]
+            {
+                if (slices.empty()) return;
+                const auto chunk = chunks.at(chunk_index++);
+                const auto ids = task_reserve(task,key+":contents:"+chunk,slices.size(),{},"data");
+                parallel(task,0,[&]{return slices.size();},[&](std::size_t i)
+                {
+                    auto name = nlohmann::json{{"parent",chunk},{"parent_account",task.m_session->owner(chunk)}};
+                    auto content = content_blob_encode(std::move(slices[i]),name);
+                    return easy.update_async({ids[i],name.dump(),std::move(content)});
+                },[](std::size_t,std::string)->response_t{return {};});
+                const auto name = nlohmann::json{{"version",storage_format::current_version},
+                    {"parent",id},{"parent_account",task.m_session->owner(id)},
+                    {"account",task.m_session->owner(ids.front())}};
+                easy.update({chunk,name.dump(),nlohmann::json(ids).dump()});
+                slices.clear();
+            };
+            for (const auto* old_page : old_pages)
+                for (const auto& old_chunk_id : old_page->at("content"))
+                {
+                    const auto& contents = by_id.at(old_chunk_id.get<std::string>())->at("content");
+                    std::vector<std::string> bytes(contents.size());
+                    parallel(task,0,[&]{return contents.size();},[&](std::size_t i)
+                        {return easy.get_async(contents[i],"name,description");},
+                        [&](std::size_t i,std::string response)->response_t
+                        {bytes[i]=content_blob_decode(nlohmann::json::parse(response));return {};});
+                    for (auto& raw : bytes)
+                    {
+                        storage_format::checked_add(decoded,raw.size());
+                        if (decoded>size) throw std::runtime_error{"更新內容超出檔案大小"};
+                        pending += raw;
+                        while (pending.size()>=storage_format::content_capacity)
+                        {
+                            slices.push_back(pending.substr(0,storage_format::content_capacity));
+                            pending.erase(0,storage_format::content_capacity);
+                            if (slices.size()==100) flush();
+                        }
+                    }
+                }
+            if (decoded!=size) throw std::runtime_error{"更新內容與檔案大小不一致"};
+            if (!pending.empty()) slices.push_back(std::move(pending));
+            flush();
+            nlohmann::json main;
+            // Publish the main page last. Until then the original graph remains
+            // readable; the durable main-page PATCH can replay after a crash.
+            for (std::size_t i=new_pages.size();i-- > 0;)
+            {
+                auto name = original;
+                name["version"] = storage_format::current_version;
+                name["version_min"] = storage_format::current_version;
+                if (!name.contains("time")) name["time"] = task.m_journal->field("time").value();
+                name["next"] = i+1<new_pages.size() ? new_pages[i+1] : "null";
+                name["next_account"] = task.m_session->owner(name.at("next"));
+                name["account"] = chunks.empty() ? "null" : task.m_session->owner(chunks.at(i*100));
+                const auto first = std::min(i*100,chunks.size()), last = std::min(first+100,chunks.size());
+                auto content = nlohmann::json(std::vector<std::string>{chunks.begin()+first,chunks.begin()+last});
+                if (i) easy.update({new_pages[i],name.dump(),content.dump()});
+                else main = {{"name",name},{"content",content}};
+            }
+            task.m_journal->response(key,main.dump());
+            task.m_journal->wait();
+            publication = main.dump();
+        }
+        const auto main = nlohmann::json::parse(*publication);
+        easy.update({id,main.at("name").dump(),main.at("content").dump()});
+        // Old immutable content is no longer referenced. Repeating DELETE is
+        // safe, including a lost response or a crash halfway through cleanup.
+        std::vector<std::string> obsolete;
+        std::function<void(const std::string&)> retire = [&](const std::string& old)
+        {
+            const auto& node = *by_id.at(old);
+            obsolete.push_back(old);
+            if (node.at("kind")!="data")
+                for (const auto& child : node.at("content")) retire(child.get<std::string>());
+        };
+        for (const auto* old_page : old_pages)
+        {
+            if (old_page->at("id")!=id) obsolete.push_back(old_page->at("id"));
+            for (const auto& chunk : old_page->at("content")) retire(chunk.get<std::string>());
+        }
+        parallel(task,0,[&]{return obsolete.size();},[&](std::size_t i){return easy.remove(obsolete[i]);},
+            [](std::size_t,std::string)->response_t{return {};});
+    }
+
 } // namespace
 
 auto directory_validate_name(std::string_view name) -> void
@@ -320,6 +447,50 @@ auto directory_execute(directory_task_t& task) -> void
         return;
     }
     const auto id{task.m_entity.at("id").get<std::string>()};
+    if (task.m_kind == "directory-upgrade")
+    {
+        nlohmann::json nodes;
+        if (const auto stored = task.m_journal->response("upgrade-manifest"))
+            nodes = nlohmann::json::parse(*stored);
+        else
+        {
+            if (id!=task.m_session->root) verify_entry(easy,task.m_source,task.m_entity);
+            nodes = nlohmann::json::array();
+            std::set<std::string> seen;
+            std::vector<std::string> ids;
+            collect(task,easy,task.m_entity,id==task.m_session->root ? "null" : task.m_source,seen,ids,&nodes);
+            task.m_journal->set("routing",task.m_session->routing());
+            task.m_journal->response("upgrade-manifest",nodes.dump());
+            task.m_journal->wait();
+        }
+        node_index_t index;
+        std::set<std::string> files, folders;
+        if (task.m_entity.at("type")=="file") files.insert(id);
+        else folders.insert(id);
+        for (const auto& node : nodes)
+        {
+            index.emplace(node.at("id"),&node);
+            if (node.at("kind")=="folder")
+                for (const auto& entry : node.at("content"))
+                    (entry.at("type")=="file" ? files : folders).insert(entry.at("id"));
+        }
+        task.m_total = files.size()+folders.size();
+        for (const auto& file : files)
+        {
+            upgrade_file(task,easy,file,index);
+            ++task.m_completed;
+        }
+        // Descendants first so version_min never claims current data before
+        // every referenced file has been converted successfully.
+        for (auto node=nodes.rbegin();node!=nodes.rend();++node)
+            if (folders.contains(node->at("id").get<std::string>()))
+            {
+                refresh(node->at("id"));
+                ++task.m_completed;
+            }
+        if (task.m_entity.at("type")=="file") refresh(task.m_source);
+        return;
+    }
     if (id == task.m_session->root)
         throw std::runtime_error{"不可操作根目錄"};
     if (task.m_kind == "directory-rename")
