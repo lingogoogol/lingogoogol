@@ -65,6 +65,70 @@ int main()
         auto find=[&](std::string parent,std::string text){for(auto& e:entries(parent))if(e.at("name")==text)return e;throw std::runtime_error{"Missing entry: "+text};};
         auto finish=[&](const std::shared_ptr<load_task_t>& task){unsigned retries=0;wait([&]{if(task->m_control->paused){if(++retries>3)throw std::runtime_error{task->m_control->reason()};task->m_control->retry();}return task->m_result!=task_result_t::active;});check(task->m_result==task_result_t::completed,"Task failed");};
         auto operation=[&](std::string kind,std::string source,json entry,std::string destination,std::string text){begin_directory_task(&loads,session,kind,source,entry,destination,text);finish(loads.m_task_list.back());};
+        unsigned step{};
+        auto input=[&](json commands)
+        {
+            storage_atomic_write("ui-step.json",json{{"step",++step},{"commands",commands}}.dump());
+            wait([&]{return std::filesystem::exists("ui-ack") && storage_read("ui-ack")==std::to_string(step);});
+        };
+        auto click=[&](const lgo::GUI_object_t& object)
+        {
+            const auto p=object.get_pos();const auto n=object.get_size();
+            input(json::array({json::array({"click",p.x+n.x/2,p.y+n.y/2})}));
+        };
+        auto row_button=[&](std::string text,std::string action)->progress_button_t*
+        {
+            std::optional<std::int64_t> y;
+            std::vector<progress_button_t*> buttons;
+            std::function<void(lgo::GUI_object_t&)> scan=[&](auto& object)
+            {
+                if (auto label=dynamic_cast<lgo::button_text_t<lgo::text_line_scroll_std_t>*>(&object);
+                    label && label->get_text()==text) y=label->get_pos().y;
+                if (auto button=dynamic_cast<progress_button_t*>(&object);button && button->get_text()==action) buttons.push_back(button);
+                object.visit_children(scan);
+            };
+            scan(*gui.get_object_shared<lgo::divy_hard_t>(0));
+            for (auto* button:buttons) if (y && button->get_pos().y==*y) return button;
+            throw std::runtime_error{"Missing row action: "+text+" / "+action};
+        };
+        auto idle=[&]{wait([&]{return persistent.m_listings.empty();});};
+        auto tips=lgo::button_tooltip_t::shared(&engine);
+        auto hover=[&](const lgo::GUI_object_t& object,std::string_view expected)
+        {
+            const auto at=object.get_pos();const auto size=object.get_size();
+            input(json::array({json::array({"move",at.x+size.x/2,at.y+size.y/2})}));
+            wait([&]{auto hint=tips->snapshot();return hint && hint->text.contains(expected);});
+            const auto hint=tips->snapshot().value();
+            check(hint.pos.y>=at.y+size.y || hint.pos.y+hint.size.y<=at.y,"Tooltip overlaps its button");
+            check(hint.pos.x>=0 && hint.pos.x+hint.size.x<=engine.get_window_size().x,"Tooltip exceeds horizontal viewport");
+            return hint;
+        };
+        const auto paste_hint=hover(*persistent.m_paste_button,"請先剪下或複製");
+        check(paste_hint.text.contains("不可用") && paste_hint.pos.y>persistent.m_paste_button->get_pos().y,"Disabled tooltip missing reason or below placement");
+        input(json::array({json::array({"capture","disabled",paste_hint.pos.x,paste_hint.pos.y,paste_hint.size.x,paste_hint.size.y})}));
+        click(*persistent.m_paste_button);
+        check(!persistent.m_dialog && !persistent.m_clipboard,"Disabled tooltip made paste clickable");
+        for (const auto action : {"下載","剪下","複製","刪除"})
+            hover(*row_button("old",action),row_button("old",action)->tooltip_text());
+        loads.m_session.reset();persistent.m_refresh();for(int i=0;i<3;++i)pump();
+        hover(*persistent.m_account_buttons.front(),"請先登入空間");
+        loads.m_session=session;persistent.m_refresh();idle();
+        // A long tooltip wraps by code point and can update while the cursor
+        // remains stationary. Disabling under hover must suppress the action.
+        unsigned clicked{};
+        auto fixture=gui.add_object_shared<progress_button_t>(lgo::depth_range_t{.008f,.009f},
+            lgo::pos_2D{1400,960},[&]{++clicked;},"tooltip fixture",lgo::std_white,lgo::size_1D{100});
+        const std::string long_hint="長文字換行測試："+std::string(180,'W');
+        fixture->set_tooltip(long_hint);
+        const auto wrapped=hover(*fixture,long_hint);
+        check(wrapped.size.y>40 && wrapped.pos.y+wrapped.size.y<fixture->get_pos().y,"Long tooltip did not wrap or fall back above");
+        fixture->set_enabled(false,"測試中，暫時無法操作");
+        wait([&]{auto hint=tips->snapshot();return hint && hint->text.contains("測試中，暫時無法操作");});
+        click(*fixture);check(clicked==0,"Disabled button invoked its action");
+        fixture->set_enabled(true);hover(*fixture,long_hint);click(*fixture);
+        check(clicked==1,"Enabled button did not invoke exactly once");
+        fixture->hide();wait([&]{return !tips->snapshot();});
+        fixture.reset();
         begin_task(&loads,session,"upload-folder","input","root");finish(loads.m_task_list.back());
         auto uploaded=find("root","input");const auto uploaded_id=uploaded.at("id").get<std::string>();
         auto metadata=name(uploaded_id);
@@ -107,7 +171,7 @@ int main()
         check(heading && size_label && timestamp,"Missing time column, folder size or timestamp text");
         glfwSetWindowSize(engine.window_get(),1000,800);for(int i=0;i<5;++i)pump();
         engine.flush();
-        std::cout<<"PASS: production version 2 folder upload/download, legacy copy/download, create/move/delete, ancestor size/version_min, upgrade and preserved timestamps, listing and resize.\n";
+        std::cout<<"PASS: native button tooltip regression, version 2 folder upload/download, legacy copy/download, create/move/delete, ancestor size/version_min, upgrade and preserved timestamps, listing and resize.\n";
         lgo::log_file("finished_all!\n");
         return 0;
     }

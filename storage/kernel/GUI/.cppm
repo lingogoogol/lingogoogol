@@ -32,6 +32,7 @@ export {
             std::vector<std::pair<std::string,std::function<void()>>> actions;
         };
         std::function<std::vector<menu_row_t>()> m_space_menu_rows;
+        std::function<std::string(std::string_view)> m_space_menu_disabled_reason;
         std::function<std::vector<std::pair<std::string,std::function<void()>>>()> m_space_menu_actions;
         std::shared_ptr<lgo::text_line_scroll_t> m_directory_status;
         std::shared_ptr<lgo::text_line_scroll_std_t> m_reserve_wait_text;

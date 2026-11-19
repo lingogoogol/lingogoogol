@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='storage-versioned-') as directory:
         'old-data':{'name':json.dumps({'parent':'old-chunk','parent_account':'fixture'}),'description':'b2xk'}}
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
-        result=subprocess.run(['xvfb-run','-a','-s','-screen 0 1600x1200x24','wine64',str(test/'test.exe')],cwd=test,env={**os.environ,'WINEDEBUG':'-all','STORAGE_GPU_TEST_PORT':str(server.server_port)},capture_output=True,text=True,timeout=120)
+        result=subprocess.run(['xvfb-run','-a','-s','-screen 0 1600x1200x24','python3',str(source/'tests/versioned_storage_gui_driver.py'),str(test/'test.exe')],cwd=test,env={**os.environ,'WINEDEBUG':'-all','STORAGE_GPU_TEST_PORT':str(server.server_port)},capture_output=True,text=True,timeout=120)
         print(result.stdout,end='')
         if result.returncode:
             shutil.copytree(test,'/tmp/storage-versioned-failed',dirs_exist_ok=True)

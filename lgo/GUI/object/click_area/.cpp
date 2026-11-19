@@ -29,7 +29,7 @@ namespace lgo
             in.m_callback_mouse_left_release,
             in.m_callback
         }
-    {}
+    { m_enabled = in.m_enabled; }
 
     click_area_t::click_area_t
     (
@@ -69,6 +69,7 @@ namespace lgo
         m_callback_mouse_left_click = in.m_callback_mouse_left_click;
         m_callback_mouse_left_release = in.m_callback_mouse_left_release;
         m_callback = in.m_callback;
+        m_enabled = in.m_enabled;
         return *this;
     }
 
@@ -112,7 +113,7 @@ namespace lgo
 
     auto click_area_t::click_area_callback_mouse_button(int button, int action, int mods) -> void
     {
-        if (button != GLFW_MOUSE_BUTTON_LEFT || !m_inside)
+        if (!m_enabled || button != GLFW_MOUSE_BUTTON_LEFT || !m_inside)
         {
             return;
         }
@@ -143,6 +144,19 @@ namespace lgo
         const auto bounds{clip_bounds({m_pos,m_size})};
         m_depth_tracker->update(m_depth_id, bounds.pos, bounds.size);
         click_area_callback_mouse_move(m_engine->get_cursor_pos());
+    }
+
+    auto click_area_t::set_enabled(bool enabled) -> void
+    {
+        m_enabled = enabled;
+        if (!enabled) m_clicked_inside = false;
+    }
+
+    auto click_area_t::hovered() const -> bool
+    {
+        const auto pos = m_engine->get_cursor_pos();
+        return status()==shown && m_inside && inside(m_pos,m_size,pos) && clip_contains(pos) &&
+            m_depth_tracker->top(pos,m_depth_id);
     }
 
     auto click_area_t::get_pos() const -> pos_2D

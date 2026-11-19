@@ -305,12 +305,16 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
         entry = persistent->m_listings.erase(entry);
     }
     for (const auto& button : persistent->m_account_buttons)
-        button->set_enabled(load_state->m_session && !persistent->m_switching);
-    if (persistent->m_login_button) persistent->m_login_button->set_enabled(!persistent->m_switching);
+        button->set_enabled(load_state->m_session && !persistent->m_switching,
+            persistent->m_switching ? "設定套用中，請稍候" : "請先登入空間");
+    if (persistent->m_login_button) persistent->m_login_button->set_enabled(!persistent->m_switching,"設定套用中，請稍候");
     if (persistent->m_paste_button)
         persistent->m_paste_button->set_enabled(persistent->m_clipboard &&
             persistent->m_clipboard->session == load_state->m_session &&
-            load_state->m_session && !load_state->m_session->clearing && !persistent->m_switching);
+            load_state->m_session && !load_state->m_session->clearing && !persistent->m_switching,
+            persistent->m_switching ? "設定套用中，請稍候" : !load_state->m_session ? "請先登入空間" :
+            load_state->m_session->clearing ? "正在清除空間" : !persistent->m_clipboard ? "請先剪下或複製檔案或資料夾" :
+            "選取的項目屬於其他空間，請重新剪下或複製");
     if (persistent->m_account_menu)
     {
         if (persistent->m_switching || persistent->m_dialog)
@@ -635,6 +639,7 @@ namespace
                     task->m_control->cancel();
             },
             "取消", lgo::std_white, lgo::size_1D{32});
+        task->m_cancel_button->set_tooltip("取消此傳輸；已下載的部分檔案可能保留在本機。");
         task->m_cancel_button->hide();
         task->m_confirm_button = actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [weak]
@@ -643,6 +648,7 @@ namespace
                 // clicked control inside its own callback is unsafe.
                 if (auto task{weak.lock()}) task->m_dismissed = true;
             }, "確定", lgo::std_white, lgo::size_1D{32});
+        task->m_confirm_button->set_tooltip("移除此已結束工作的結果列。");
         task->m_confirm_button->hide();
         // A div applies leading margins differently to its first ghost child.
         // Anchor all primary actions explicitly to the reserved retry slot.
@@ -1062,6 +1068,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                         folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
                 }, ancestor.at("name").get<std::string>(), lgo::std_brown_light, lgo::size_1D{0})};
             button->set_size(button->get_text_size());
+            button->set_tooltip("前往資料夾："+ancestor.at("name").get<std::string>());
         }
         auto rows=std::make_shared<std::map<std::string,std::uint64_t>>();
         auto entries=std::make_shared<nlohmann::json>(std::move(result.at("entries")));
@@ -1094,6 +1101,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                         folder_button_callback(engine, persistent, multi, load_state, blob_queue, target, pos, id);
                 },
                 name, folder ? lgo::std_brown_light : lgo::std_green_light, lgo::size_1D{0})};
+            label->set_tooltip(folder ? "開啟資料夾："+name : "檔案："+name);
             auto size_label{columns->add_object_ghost_shared<lgo::text_line_std_t>(
                 storage_content_depth, file_size_text(entry.at("size").get<std::uint64_t>()),
                 lgo::std_white, lgo::size_1D{0})};
@@ -1177,6 +1185,50 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
           std::shared_ptr<lgo::divy_soft_t>* progress_column, load_state_t* load_state,
           curl_multi_worker_t* multi, blob_queue_t* blob_queue, std::string* pos) -> void
 {
+    const auto tooltips = lgo::button_tooltip_t::shared(engine);
+    tooltips->set_descriptions([](std::string_view label)
+    {
+        static const std::map<std::string_view,std::string_view> hints{
+            {"更新","將此檔案或資料夾內的 blob 格式更新到最新版本。"},
+            {"下載","選擇本機目的地資料夾，下載此項目及其子內容。"},
+            {"剪下","選取此項目；到目的資料夾按「貼上」後才會移動。"},
+            {"複製","選取此項目；到目的資料夾按「貼上」建立獨立副本。"},
+            {"改名","變更檔案或資料夾名稱，保留內容與時間。"},
+            {"刪除","確認後永久刪除此項目及全部子內容。"},
+            {"貼上","將已剪下或複製的項目貼到目前資料夾。"},
+            {"重新整理","重新載入目前資料夾，並重試預備 blob 佇列。"},
+            {"設定","開啟設定，調整路徑、網路重試與傳輸選項。"},
+            {"新增資料夾","在目前資料夾建立新的空白資料夾。"},
+            {"上傳資料夾","選取本機資料夾，遞迴上傳到目前資料夾。"},
+            {"上傳檔案","選取一個或多個本機檔案，上傳到目前資料夾。"},
+            {"清除","確認後永久刪除目前空間所有關聯服務帳戶的全部 Drive 檔案。"},
+            {"清除全部","依確認文字執行清除；共用服務帳戶的其他空間也可能受影響。"},
+            {"空間","開啟空間與帳戶選單。"},
+            {"刪除記錄","刪除目前日誌資料夾的舊記錄，保留目前 session 的日誌。"},
+            {"登入","登入此空間並瀏覽其根目錄。"},
+            {"登出","登出此空間，保存並暫停其未完成工作。"},
+            {"編輯","管理此空間關聯的服務帳戶。"},
+            {"移除","移除所選的本機設定、授權或關聯；不刪除雲端資源。"},
+            {"使用","使用所選的帳戶或資源，繼續目前操作。"},
+            {"新增空間","建立新的具名空間。"},
+            {"新增帳戶","為此空間選取或建立服務帳戶。"},
+            {"新增使用者","開啟瀏覽器，新增 Google 使用者授權。"},
+            {"新增專案","建立新的 Google Cloud 專案。"},
+            {"擴充並行","選擇 Google 使用者，建立專案與服務帳戶並關聯到空間。"},
+            {"繼續配置","使用已保存的帳戶與進度，繼續尚未完成的配置。"},
+            {"返回","返回上一層選單。"},
+            {"上一頁","顯示上一頁連線狀態。"},
+            {"下一頁","顯示下一頁連線狀態。"},
+            {"暫停","保存目前進度並暫停此傳輸。"},
+            {"繼續","從已保存的進度繼續此傳輸。"},
+            {"重試","重試目前失敗的操作。"},
+            {"取消","取消本次操作。"},
+            {"確定","確認本次操作。"},
+            {"刪除並下載","刪除已有的本機目的地，再開始下載。"}};
+        const auto found = hints.find(label);
+        return found==hints.end() ? std::string{label} : std::string{found->second};
+    });
+
     storage_gui_thread_set();
     if (persistent->m_close_accounts) persistent->m_close_accounts();
     persistent->m_account_buttons.clear();
@@ -1405,7 +1457,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         {"batch_request",settings.batch_request},
                         {google_batch_t::gzip_available() ? "batch_gzip" : "batch_gzip（此建置無 ZLIB）",
                          settings.batch_gzip && google_batch_t::gzip_available()}});
-                persistent->m_dialog->set_checkbox_enabled(1,google_batch_t::gzip_available());
+                persistent->m_dialog->set_checkbox_enabled(1,google_batch_t::gzip_available(),"此建置未包含 ZLIB，無法使用 batch gzip 壓縮");
                 persistent->m_dialog_done = [=](bool accepted, const std::vector<std::string>& values)
                 {
                     if (!accepted)
@@ -1493,7 +1545,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     };
     persistent->m_paste_button = menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth, [=] { paste_dialog(engine, persistent, load_state, *pos); }, "貼上");
-    persistent->m_paste_button->set_enabled(false);
+    persistent->m_paste_button->set_enabled(false,"請先剪下或複製檔案或資料夾");
     persistent->m_account_buttons.push_back(menu_right->add_object_shared<lgo::button_classic_std_t>(
         storage_content_depth,
         [=]
@@ -1597,8 +1649,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             for (const auto& [label,action] : account.actions)
             {
                 row->add_object<lgo::std_liney_t>(content,lgo::size_1D{32},lgo::std_dark_gray);
-                row->add_object<progress_button_t>(content,[defer,action] { defer(action); },
+                auto button = row->add_object_shared<progress_button_t>(content,[defer,action] { defer(action); },
                     label,lgo::std_blue_light,lgo::size_1D{32});
+                button->set_tooltip(lgo::button_tooltip_t::shared(engine)->describe(label)+"\n"+account.text);
             }
         }
         // Include the soft div's gaps between rows in the viewport height.
@@ -1613,7 +1666,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             for (const auto& [label,action] : persistent->m_space_menu_actions())
             {
                 auto button=footer->add_object_shared<lgo::button_classic_std_t>(content,[defer,action] { defer(action); },label);
-                button->set_enabled(bool(action));
+                button->set_enabled(bool(action),persistent->m_space_menu_disabled_reason ?
+                    persistent->m_space_menu_disabled_reason(label) : "目前沒有可用操作");
             }
         persistent->m_layout_accounts = [engine,persistent,panel,background,block,outside,viewport,list_height]
         {

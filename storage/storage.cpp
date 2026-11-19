@@ -207,6 +207,8 @@ auto app() -> void
             storage_content_depth, [&] { settings_control->cancel(); }, "取消", lgo::std_white, lgo::size_1D{32});
         settings_confirm = settings_actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [dismissed] { *dismissed = true; }, "確定", lgo::std_white, lgo::size_1D{32});
+        settings_confirm->set_tooltip("移除此已結束操作的結果列。");
+        settings_cancel->set_tooltip("取消目前的設定或 Cloud 管理操作，保留已保存的進度。");
         settings_confirm->hide();
         // Hidden children retain slots; terminal confirmation replaces retry/cancel.
         settings_cancel->set_pos(settings_retry->get_pos());
@@ -574,6 +576,14 @@ auto app() -> void
                 }}}});
         return rows;
     };
+    persistent.m_space_menu_disabled_reason = [&](std::string_view label)
+    {
+        if (label=="繼續配置") return std::string{"沒有尚未完成的配置"};
+        if (label=="擴充並行")
+            return std::string{std::filesystem::exists(parallel_checkpoint) ?
+                "已有尚未完成的配置，請先繼續配置" : "請先登入空間"};
+        return std::string{"目前沒有可用操作"};
+    };
     persistent.m_space_menu_actions = [&]
     {
         using action_t=std::pair<std::string,std::function<void()>>;
@@ -732,6 +742,8 @@ auto app() -> void
         clear_confirm = clear_actions->add_object_ghost_shared<progress_button_t>(
             storage_content_depth, [dismissed = clear_dismissed] { *dismissed = true; },
             "確定", lgo::std_white, lgo::size_1D{32});
+        clear_confirm->set_tooltip("移除此清除工作的結果列。");
+        clear_cancel->set_tooltip("停止清除；已刪除的雲端資料無法復原。");
         clear_confirm->hide();
         // Hidden ordinary children still reserve their layout slots. Running
         // cancel and terminal confirm share the first slot with retry; network

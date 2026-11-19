@@ -33,6 +33,7 @@ export namespace lgo
         engine_t::callback_mouse_enter_t* m_callback_mouse_enter_key{};
         engine_t::callback_mouse_move_t* m_callback_mouse_move_key{};
         engine_t::callback_mouse_button_t* m_callback_mouse_button_key{};
+        bool m_enabled{true};
         std::atomic_bool m_inside{ false };
         std::atomic_bool m_clicked_inside{ false };
         
@@ -58,6 +59,9 @@ export namespace lgo
         );
         auto operator=(const click_area_t& in) -> click_area_t&;
 
+        auto set_enabled(bool enabled) -> void;
+        auto enabled() const -> bool { return m_enabled; }
+        auto hovered() const -> bool;
         auto get_pos() const -> pos_2D override;
         auto set_pos(pos_2D pos) -> void override;
         auto get_size() const -> size_2D override;

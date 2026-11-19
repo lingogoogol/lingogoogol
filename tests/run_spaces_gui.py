@@ -155,7 +155,11 @@ observation = r'''
                 object.visit_children(inspect);
             };
             if (persistent.m_account_menu) inspect(*persistent.m_account_menu->get_object_shared<lgo::divy_soft_t>(1));
-            auto value=nlohmann::json{{"toolbar",point(*persistent.m_login_button)},
+            const auto hint=lgo::button_tooltip_t::shared(&engine)->snapshot();
+            auto tooltip=nlohmann::json{};
+            if(hint) tooltip={{"text",hint->text},{"x",hint->pos.x},{"y",hint->pos.y},
+                {"width",hint->size.x},{"height",hint->size.y}};
+            auto value=nlohmann::json{{"tooltip",tooltip},{"toolbar",point(*persistent.m_login_button)},
                 {"label",persistent.m_login_button->get_text()},{"menu",bool(persistent.m_account_menu)},
                 {"dialog",bool(persistent.m_dialog)},{"switching",persistent.m_switching},
                 {"maximized",bool(glfwGetWindowAttrib(engine.window_get(),GLFW_MAXIMIZED))},
@@ -197,6 +201,14 @@ def wait(predicate, message, timeout=30):
 def click(at):
     s=snapshot()
     command('mousemove',s['window_x']+at['x'],s['window_y']+at['y'],'click','1');time.sleep(.12)
+def hover(at, expected):
+    s=snapshot()
+    command('mousemove',s['window_x']+at['x'],s['window_y']+at['y'])
+    hint=wait(lambda:snapshot()['tooltip'] if snapshot()['tooltip'] and expected in snapshot()['tooltip']['text'] else None,'Missing tooltip: '+expected)
+    assert hint['x']>=0 and hint['x']+hint['width']<=s['window_w']
+    assert hint['y']>=at['y'] or hint['y']+hint['height']<=at['y']
+    return hint
+
 def ready(page):
     value=wait(lambda: snapshot() if snapshot()['menu'] and snapshot()['page']==page and not snapshot()['switching'] else None,'Missing menu '+str(page))
     assert value['log_path']==session_log,'Space operation split the session log'
@@ -237,6 +249,18 @@ try:
     assert snapshot()['label']=='空間' and not snapshot()['session']
     assert snapshot()['maximized'],'Application did not start maximized'
     session_log=snapshot()['log_path']
+    hover(snapshot()['toolbar'],'開啟空間與帳戶選單')
+    open_menu()
+    pending=next(item for item in snapshot()['footer'] if item['text']=='繼續配置')
+    assert not pending['enabled']
+    assert '不可用' in hover(pending,'沒有尚未完成的配置')['text']
+    expand=next(item for item in snapshot()['footer'] if item['text']=='擴充並行')
+    assert not expand['enabled']
+    hover(expand,'請先登入空間')
+    click(expand)
+    assert snapshot()['menu'] and not snapshot()['switching'] and not snapshot()['dialog'],'Disabled menu action ran'
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu did not close')
+    wait(lambda:not snapshot()['tooltip'],'Tooltip outlived its menu')
     def logfile(value):return Path(value.replace('\\','/'))
     original_log=logfile(session_log)
     def emit(marker):
@@ -314,6 +338,12 @@ try:
     checkpoint.parent.mkdir(exist_ok=True)
     checkpoint.write_text(json.dumps({'fixture':'terms-progress-must-survive'}))
     saved=checkpoint.read_bytes()
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Menu did not close before pending-state tooltip')
+    open_menu()
+    expand=next(item for item in snapshot()['footer'] if item['text']=='擴充並行')
+    assert not expand['enabled']
+    hover(expand,'已有尚未完成的配置')
+    command('key','Escape');wait(lambda:not snapshot()['menu'],'Pending menu did not close')
     for terms_id,accepted in [('universal',False),('universal',True),
                               ('workspace-apis-addendum',False),('workspace-apis-addendum',True)]:
         Path('terms-id').write_text(terms_id)
@@ -418,7 +448,7 @@ try:
     command('key','Escape');command('key','alt+F4');assert app.wait(timeout=15)==0
     logs=''.join(path.read_text(errors='replace') for path in Path('logfile').glob('*.txt'))
     assert 'uncaught exception:' not in logs and 'finished_all!' in logs
-    print('PASS: one log per process across settings/space operations, directory-change continuation, closed settings dropdown, rendered space/user/project/service menus, named provisioning, managed-key filtering, linking, login/logout/restart, typed removals, retained cloud identities and clear warning.')
+    print('PASS: enabled/disabled tooltips across real space menus, one log per process across settings/space operations, directory-change continuation, closed settings dropdown, rendered space/user/project/service menus, named provisioning, managed-key filtering, linking, login/logout/restart, typed removals, retained cloud identities and clear warning.')
 finally:
     if app.poll() is None: app.kill();app.wait()
     if window_manager.poll() is None: window_manager.terminate();window_manager.wait(timeout=5)

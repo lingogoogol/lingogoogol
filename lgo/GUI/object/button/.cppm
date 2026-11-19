@@ -15,6 +15,31 @@ import lgo.GUI.object.std;
 
 export namespace lgo
 {
+    struct button_tooltip_content_t
+    {
+        std::string text;
+        pos_2D pos;
+        size_2D size;
+    };
+
+    // One lazily-created overlay per engine, independent of button/scroll clips.
+    // Providers are retained only while hovered and removed before owner teardown.
+    class button_tooltip_t
+    {
+        struct impl_t;
+        std::unique_ptr<impl_t> m_impl;
+        explicit button_tooltip_t(engine_t* engine);
+      public:
+        ~button_tooltip_t();
+        static auto shared(engine_t* engine) -> std::shared_ptr<button_tooltip_t>;
+        auto activate(const void* owner,
+            std::function<std::optional<button_tooltip_content_t>()> content) -> void;
+        auto dismiss(const void* owner) -> void;
+        auto snapshot() const -> std::optional<button_tooltip_content_t>;
+        auto set_descriptions(std::function<std::string(std::string_view)> describe) -> void;
+        auto describe(std::string_view label) const -> std::string;
+    };
+
     template<typename t_type>
     class button_template_t: public GUI_object_t
     {
@@ -22,6 +47,9 @@ export namespace lgo
         engine_t* m_engine{};
         click_area_t m_click_area{};
         t_type* m_object{};
+        std::shared_ptr<button_tooltip_t> m_tooltips;
+        std::function<std::string()> m_tooltip;
+
         
         auto button_template_callback_mouse_leave() -> void;
         auto button_template_callback_mouse_move(pos_2D pos) -> void;
@@ -32,6 +60,11 @@ export namespace lgo
         friend class button_t;
     public:
         button_template_t() = default;
+        ~button_template_t() override
+        {
+            hide();
+            if (m_tooltips) m_tooltips->dismiss(this);
+        }
         button_template_t
         (
             engine_t* engine,
@@ -55,20 +88,27 @@ export namespace lgo
     template<typename t_type>
     auto button_template_t<t_type>::button_template_callback_mouse_leave() -> void
     {
-        m_object->button_leave();
+        if (m_click_area.enabled()) m_object->button_leave();
+        m_tooltips->dismiss(this);
         return;
     }
 
     template<typename t_type>
     auto button_template_t<t_type>::button_template_callback_mouse_move(pos_2D pos) -> void
     {
-        m_object->button_move(pos);
+        if (m_click_area.enabled()) m_object->button_move(pos);
+        m_tooltips->activate(this,[this]() -> std::optional<button_tooltip_content_t>
+        {
+            if (!m_click_area.hovered() || !m_tooltip) return std::nullopt;
+            return button_tooltip_content_t{m_tooltip(),m_object->get_pos(),m_object->get_size()};
+        });
         return;
     }
 
     template<typename t_type>
     auto button_template_t<t_type>::button_template_callback_mouse_left_click(pos_2D pos) -> void
     {
+        m_tooltips->dismiss(this);
         m_object->button_left_click(pos);
         return;
     }
@@ -77,6 +117,7 @@ export namespace lgo
     auto button_template_t<t_type>::button_template_callback_mouse_left_release(pos_2D pos) -> void
     {
         m_object->button_left_release(pos);
+        button_template_callback_mouse_move(pos);
         return;
     }
 
@@ -104,7 +145,8 @@ export namespace lgo
             std::bind(&button_template_t<t_type>::button_template_callback_mouse_left_release, this, std::placeholders::_1),
             callback
         },
-        m_object{ object }
+        m_object{ object },
+        m_tooltips{ button_tooltip_t::shared(engine) }
     {}
 
     template<typename t_type>
@@ -161,6 +203,7 @@ export namespace lgo
             return;
         }
         std::unique_lock lock{ m_mutex };
+        m_tooltips->dismiss(this);
         m_click_area.hide();
         hide_end(base);
         return;
@@ -172,6 +215,7 @@ export namespace lgo
     private:
         button_template_t<t_type> m_button{};
         bool m_enabled{true};
+        std::string m_tooltip, m_disabled_reason;
     public:
         button_t() = default;
         template<typename... u_arg>
@@ -187,7 +231,14 @@ export namespace lgo
 
         auto visit_children(const GUI_object_t::child_visitor_t& visit) -> void override
         { t_type::visit_children(visit); visit(m_button); }
-        auto set_enabled(bool enabled) -> void;
+        auto set_enabled(bool enabled, std::string reason = {}) -> void;
+        auto set_tooltip(std::string text) -> void { m_tooltip = std::move(text); }
+        auto tooltip_text() const -> std::string
+        {
+            auto text = m_tooltip.empty() ? m_button.m_tooltips->describe(t_type::button_label()) : m_tooltip;
+            if (!m_enabled) text += "\n不可用：" + (m_disabled_reason.empty() ? std::string{"目前狀態不允許此操作"} : m_disabled_reason);
+            return text;
+        }
         auto enabled() const -> bool { return m_enabled; }
         auto set_pos(pos_2D pos) -> void override;
         auto set_size(size_2D size) -> void override;
@@ -212,17 +263,19 @@ export namespace lgo
         t_type{ engine, depth_tracker, depth_range, pos, std::forward<u_arg>(arg)... },
         m_button{ engine, depth_tracker, depth_range,
             [this, callback = std::move(callback)] { if (m_enabled) callback(); }, static_cast<t_type*>(this) }
-    {}
+    { m_button.m_tooltip = [this] { return tooltip_text(); }; }
 
     template<typename t_type>
-    auto button_t<t_type>::set_enabled(bool enabled) -> void
+    auto button_t<t_type>::set_enabled(bool enabled, std::string reason) -> void
     {
         std::unique_lock lock{this->m_mutex};
+        m_disabled_reason = std::move(reason);
         if (m_enabled == enabled) return;
         m_enabled = enabled;
-        if (!enabled) m_button.hide();
+        // Keep hit testing alive for disabled tooltips; clicks and pressed
+        // state are suppressed independently of hover and rendering.
+        m_button.m_click_area.set_enabled(enabled);
         t_type::button_enabled(enabled);
-        if (enabled && this->status() == this->shown) m_button.show();
     }
 
     template<typename t_type>
@@ -263,7 +316,7 @@ export namespace lgo
             return;
         }
         std::unique_lock lock{ this->m_mutex };
-        if (m_enabled) m_button.show();
+        m_button.show();
         t_type::show_impl(false);
         this->show_end(base);
         return;
@@ -304,6 +357,7 @@ export namespace lgo
 
         auto depth_range_get() const -> depth_range_t;
 
+        auto button_label() const -> std::string { return t_text::get_text(); }
         auto button_enabled(bool enabled) -> void;
         auto button_move(pos_2D) -> void;
         auto button_leave() -> void;
@@ -400,6 +454,7 @@ export namespace lgo
         virtual auto log(std::uint32_t tab_count) const -> void override;
         
         auto visit_children(const child_visitor_t& visit) -> void override { visit(m_rect); visit(m_text); }
+        auto button_label() const -> std::string { return m_text.get_text(); }
         auto button_enabled(bool enabled) -> void;
         auto button_move(pos_2D) -> void;
         auto button_leave() -> void;

@@ -65,6 +65,7 @@ namespace lgo
                     checkbox.checked = !checkbox.checked;
                     checkbox.button->set_text(std::string{checkbox.checked ? "[x] " : "[ ] "} + checkbox.label);
                 }, std::string{checked ? "[x] " : "[ ] "} + name, std_white, size_1D{672});
+            button->set_tooltip("切換選項："+name);
             m_checkboxes.push_back({name,checked,button});
             m_children.emplace_back(button,pos_2D{24,y});
             y += 36;
