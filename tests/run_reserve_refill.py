@@ -121,4 +121,4 @@ with tempfile.TemporaryDirectory(prefix='storage-reserve-refill-') as directory:
         finally:
             server.release.release(256)
             server.shutdown(); server.server_close()
-    print('PASS: configurable shared refill budgets (12/28/4/64/80), rounded gaps including pending IDs, 20,000-create refill, background project/account balancing and retry counted once.')
+    print('PASS: configurable shared refill budgets (12/28/4/64/80), rounded gaps including pending IDs, 20,000-create refill, one-minute allocation/creation usage and retry counted once.')

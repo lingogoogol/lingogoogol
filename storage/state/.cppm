@@ -63,6 +63,38 @@ export {
         auto save() const -> void;
     };
 
+    // Logical allocation/creation load expires after one minute, including
+    // pending creates. Transport retries must not record the same work again.
+    class storage_usage_window_t
+    {
+        using clock = std::chrono::steady_clock;
+        std::mutex m_mutex;
+        std::deque<std::pair<clock::time_point,std::uint64_t>> m_events;
+        std::uint64_t m_total{};
+        auto expire(clock::time_point now) -> void
+        {
+            while (!m_events.empty() && m_events.front().first<=now-std::chrono::minutes{1})
+            {
+                m_total-=m_events.front().second;
+                m_events.pop_front();
+            }
+        }
+      public:
+        auto add(std::uint64_t units, clock::time_point now = clock::now()) -> void
+        {
+            std::lock_guard lock{m_mutex};
+            expire(now);
+            m_events.emplace_back(now,units);
+            m_total+=units;
+        }
+        auto count(clock::time_point now = clock::now()) -> std::uint64_t
+        {
+            std::lock_guard lock{m_mutex};
+            expire(now);
+            return m_total;
+        }
+    };
+
     struct request_control_t
     {
         std::atomic_bool cancelled{};

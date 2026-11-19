@@ -45,13 +45,14 @@ auto storage_session_t::choose(std::uint64_t units) -> std::string
 {
     std::lock_guard lock{routing_mutex};
     if (accounts.empty()) throw std::runtime_error{"請先關聯服務帳戶"};
+    const auto now=std::chrono::steady_clock::now();
     // Compare project load before per-user load. A flat round-robin over sorted
     // addresses would exhaust one project's quota before visiting the next.
     std::map<std::string,std::uint64_t> background_accounts, background_projects;
     for (const auto& [address, unused] : accounts)
     {
         const auto queue=queues.find(address);
-        const auto created=queue==queues.end() ? 0 : queue->second->planned_creations();
+        const auto created=queue==queues.end() ? 0 : queue->second->recent_creations(now);
         background_accounts[address]=created;
         background_projects[address.substr(address.find('@')+1)]+=created;
     }
@@ -62,13 +63,13 @@ auto storage_session_t::choose(std::uint64_t units) -> std::string
         // Allocation and reserve creation are both logical writes (currently
         // 50 Drive quota units each). Read one snapshot so a concurrent refill
         // cannot change a project's total halfway through candidate comparison.
-        auto rank = std::tuple{project_units[project]+background_projects[project],
-            account_units[address]+background_accounts[address],address};
+        auto rank = std::tuple{project_units[project].count(now)+background_projects[project],
+            account_units[address].count(now)+background_accounts[address],address};
         if (!best || rank < *best) best = std::move(rank);
     }
     const auto address = std::get<2>(*best);
-    project_units[address.substr(address.find('@')+1)] += units;
-    account_units[address] += units;
+    project_units[address.substr(address.find('@')+1)].add(units,now);
+    account_units[address].add(units,now);
     return address;
 }
 auto storage_session_t::routing() const -> nlohmann::json

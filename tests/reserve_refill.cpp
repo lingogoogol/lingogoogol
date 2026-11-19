@@ -130,6 +130,22 @@ int main(int argc,char** argv)
             for (int i{};i<100;++i)
                 check(session.choose(1)==other,"Background creation was omitted from project load.");
             check(session.choose(1)==first,"Background creation was omitted from account load.");
+            check(queue->recent_creations(std::chrono::steady_clock::now()+61s)==0,
+                "Background creation usage did not expire after one minute.");
+            check(queue->planned_creations()==100,"Expiring usage changed cumulative create accounting.");
+            storage_session_t expired;
+            expired.accounts=session.accounts;
+            expired.queues=session.queues;
+            const auto old=std::chrono::steady_clock::now()-61s;
+            expired.project_units[first.substr(first.find('@')+1)].add(1000,old);
+            expired.account_units[first].add(1000,old);
+            check(expired.choose(1)==first,"Expired project/account allocation load still affected selection.");
+            storage_usage_window_t usage;
+            const auto start=std::chrono::steady_clock::now();
+            usage.add(7,start);usage.add(11,start+30s);
+            check(usage.count(start+59999ms)==18,"Usage expired before one minute.");
+            check(usage.count(start+60s)==11,"The one-minute boundary did not expire old usage.");
+            check(usage.count(start+90s)==0,"Idle usage was retained after one minute.");
         }
         else if (mode=="partial-gap")
         {

@@ -105,6 +105,7 @@ auto blob_queue_t::process() -> void
                 blob_upload(batch, nlohmann::json{{"version",storage_format::current_version}}.dump(), "");
             }
             batch.method_post();
+            m_creation_usage.add(batch_size);
             multi.add(std::move(batch));
             m_planned_creations.fetch_add(batch_size,std::memory_order_relaxed);
         }

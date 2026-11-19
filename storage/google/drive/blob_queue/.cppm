@@ -39,6 +39,7 @@ export {
         // Cumulative logical creates scheduled by this queue, including work
         // still in flight. Transport retries reuse those logical requests.
         std::atomic_uint64_t m_planned_creations{};
+        storage_usage_window_t m_creation_usage;
         bool m_clearing{false};
         bool m_cleared{false};
         std::deque<std::chrono::steady_clock::time_point> m_cycle_time{};
@@ -74,6 +75,10 @@ export {
             return m_planned_creations.load(std::memory_order_relaxed);
         };
         auto cycle_rate() const -> std::uint64_t;
+        auto recent_creations(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) -> std::uint64_t
+        {
+            return m_creation_usage.count(now);
+        };
 
         auto clear_begin() -> void;
         auto clear_end() -> void;

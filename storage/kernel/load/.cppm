@@ -107,7 +107,7 @@ export
         std::map<std::string,std::shared_ptr<blob_queue_t>> queues;
         mutable std::mutex routing_mutex;
         std::map<std::string,std::string> owners, kinds;
-        std::map<std::string,std::uint64_t> project_units, account_units;
+        std::map<std::string,storage_usage_window_t> project_units, account_units;
         auto remember(const std::string& id, const std::string& owner, std::string kind = {}) -> void;
         auto owner(const std::string& id) const -> std::string;
         auto kind(const std::string& id) const -> std::string;
