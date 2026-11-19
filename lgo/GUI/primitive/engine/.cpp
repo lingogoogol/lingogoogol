@@ -969,6 +969,12 @@ namespace lgo {
             glfwWaitEventsTimeout(0.05);
             return glfwWindowShouldClose(m_window);
         }
+        const auto remaining=std::chrono::duration<double>(m_next_frame-std::chrono::steady_clock::now()).count();
+        if (remaining>0)
+        {
+            // Bound each wait so even a 1 FPS limit leaves background scheduling responsive.
+            glfwWaitEventsTimeout(std::min(remaining,0.05));
+        }
         render_frame();
         return glfwWindowShouldClose(m_window);
     }
@@ -976,11 +982,14 @@ namespace lgo {
     auto engine_t::render_frame() -> void
     {
         // Native messages can re-enter during layout or swapchain operations; never nest GPU work.
-        if (m_rendering || m_recovering || m_device_lost || m_refresh_error || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+        if (m_rendering || m_recovering || m_device_lost || m_refresh_error ||
+            std::chrono::steady_clock::now()<m_next_frame || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
         {
             return;
         }
         m_rendering = true;
+        // Native refresh callbacks use the same deadline, including Win32's modal resize loop.
+        m_next_frame=std::chrono::steady_clock::now()+m_frame_interval;
         try
         {
             update_window_size();
@@ -1001,6 +1010,14 @@ namespace lgo {
             throw;
         }
         m_rendering = false;
+    }
+
+    auto engine_t::frame_rate_limit_set(std::size_t rate) -> void
+    {
+        if (!rate) throw std::runtime_error{"Frame rate limit must be a positive integer."};
+        m_frame_interval=std::max(std::chrono::steady_clock::duration{1},
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>{1.0/static_cast<double>(rate)}));
+        m_next_frame={};
     }
 
     auto engine_t::draw() -> void

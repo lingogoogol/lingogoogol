@@ -163,6 +163,8 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 
 `batch_request` 預設勾選，task 使用 batch 傳輸；取消勾選後，task 改用逐筆 HTTP 請求。worker 數量獨立設定為正整數，預設 64，保存為 `settings.json` 的 `worker_count`；切換 batch 模式不會改動此數值。上傳、下載、複製、搬移、刪除及清除都依 `batch_request` 切換請求格式；folder blob 維持逐筆。`blob_queue` 背景補充始終使用原本的 batch。設定保存在 `settings.json` 的布林欄位 `batch_request`。切換只影響後續派送；已派出的請求保留原模式、服務帳戶、重試及進度，直到完成。增加 worker 數量會開放新的傳輸名額；降低數量不取消超出的在途請求，使用數降到新限制以下後才補送。worker 數量限制 task 共用的前景傳輸槽，不改動 `blob_queue` 每個帳戶的 64 個背景補充名額。拆開的同一組 blob 仍保留原本帳戶配置，每個成功的逐筆請求都有檢查點；暫停／續傳不重送已確認完成的請求。F3 分頁顯示所有已建立的傳輸槽，重用最多 64 個文字元件並僅更新目前頁面，避免大量文字元件拖慢畫面。
 
+「幀率限制」為正整數 FPS，預設 60，保存於 `settings.json` 的 `frame_rate_limit`，套用後立即生效；舊設定缺少此欄位時使用 60。
+
 `batch_size` 是 `settings.json` 的整數欄位，可填 1–100，預設仍為 100；表單位於 worker 數量旁，拒絕零、負數、小數及超出範圍的值。它只限制前景上傳、下載、複製、搬移、刪除與清除的每個 HTTP batch 內含幾筆子請求；不改變 chunk／content 的分組、帳戶配置或 worker 數量，`blob_queue` 背景補充仍每批 100 筆。逐筆模式忽略這個值。每個拆分批次的成功回應會保存，原本整組的進度與下載內容仍在整組完成後更新；設定只影響後續建立的批次。類似的 Python 用戶端曾量測到每批 8 筆、64 個並行 worker 比較大的 batch 更快，但這不是本 C++ 程式的量測結果，作者應在自己的網路與資料上比較；預設不變。較小 batch 會增加外層 HTTP 次數，不減少 Drive 邏輯請求數。
 
 `batch_gzip` 是布林欄位，預設 `true`（新設定及缺少此欄位的舊設定皆啟用；既有明確的 `false` 仍保留）；建置時 CMake 以 `find_package(ZLIB)` 偵測，找到後才啟用壓縮能力。沒有 ZLIB 時仍可建置，checkbox 會停用，手動設定 `true` 也不壓縮，日誌會說明原因。啟用後只壓縮送往 Drive batch endpoint 的 POST multipart body（含背景補充 batch），使用 gzip level 1；Content-Type／boundary 保留，Content-Encoding 為 `gzip`，長度依壓縮後位元組數計算。逐筆模式與其他 endpoint 不壓縮。切換只影響新派送，既有請求及其重試保持原編碼；部分成功重試會重新壓縮尚未完成的子請求。`http_log_codes` 仍記錄未壓縮的 multipart／子請求內容，外層標頭含 `Content-Encoding: gzip`，內層日誌標頭也註記 `gzip`；快取鍵使用未壓縮內容，切換不影響成功回應重播。
@@ -340,6 +342,8 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 `run_token_refresh.py` 另以嚴格的 JSON 子請求驗證批次建立／更新、Host／自訂標頭保存、外層 200 內層 403／404 錯誤摘要、HTTP 狀態碼整數設定（含 0、非標準號碼與數值界限）、逐筆／multi／batch 成功回應與重新導向的記錄、敏感訊息排除，以及無限重試退避與手動重設。它也會嚴格檢查 JWT bearer grant type 與 assertion，使用 OpenSSL 產生一次性的測試金鑰，僅將測試副本的 OAuth endpoint 指向本機模擬服務，其餘使用正式帳戶、簽署、快取與請求實作。測試涵蓋首次背景刷新、`expires_in` 到期、16 個並行及延遲 401、POST／PATCH 重送、批次部分成功與內層 401 後的格式／503 錯誤、同步 easy／multi 重試、持續 401 的上限、OAuth 暫時／永久失敗、設定 0／1／4 次與無限重試、進行中套用新上限、每次重試重新簽署 JWT，以及次數耗盡後的 HTTP／連線原因與帳戶歸屬、異常回應，以及 blob 背景錯誤回報及關閉時的授權等待。所有憑證、token 與佇列均為暫存測試資料，不讀取正式金鑰或呼叫雲端服務。
 
 `python3 tests/run_reserve_refill.py` 使用本機延遲回應驗證每帳戶最多 64 個在途補充 batch、接近 20,000 筆時只補足向上取整的缺口、計入在途 ID 而不重複補送，以及從空佇列補滿 20,000 筆。另注入單一子請求 503，檢查只重送失敗部分、重試不重複增加配置估算，並確認背景補充會影響後續的專案與帳戶選擇。
+
+`python3 tests/run_render_settings.py` 驗證幀率設定的正整數檢查、預設值、取消、保存與重新載入，並在 Wine／Vulkan 實際量測幀率限制。測試只複製公開字型、shader 與 DLL，不使用正式憑證或雲端資料。
 
 `python3 tests/run_batch_mode.py` 以本機延遲回應驗證 200 個同時在途的逐筆請求、6400 個傳輸槽、傳輸中雙向切換而不重建 worker、僅重送單一失敗請求、逐筆回應檢查點、暫停／繼續與已完成回應的暫停競態，以及傳輸中調高／調低 worker 數量、13 與 64 個名額的派送限制；另用 `xdotool` 操作 worker 欄位與 checkbox，驗證無效數值、取消、保存、兩項設定互相獨立及 F3 分頁。
 

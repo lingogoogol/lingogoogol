@@ -30,6 +30,8 @@ export namespace lgo
         std::function<void(size_2D)> m_callback_window_resize{};
         std::function<void(std::uint64_t)> m_callback_frame_rate{};
         std::chrono::steady_clock::time_point m_animation_time{std::chrono::steady_clock::now()};
+        std::chrono::steady_clock::duration m_frame_interval{};
+        std::chrono::steady_clock::time_point m_next_frame{};
 
         vk::raii::Context m_context{};
         vk::raii::Instance m_instance{ nullptr };
@@ -177,6 +179,7 @@ export namespace lgo
         auto cursor_pos_get() const -> pos_2D;
         auto cursor_highlight_set(bool enabled) -> void { m_cursor_highlight = enabled; }
         auto frame_rate() const -> std::uint64_t;
+        auto frame_rate_limit_set(std::size_t rate) -> void;
 
         //This includes both cursor enter and cursor leave.
         using callback_frame_t = std::function<void(double)>;

@@ -55,6 +55,7 @@ auto app() -> void
     fonts.push_back(std::make_unique<lgo::font_face_t>(settings.font_path, lgo::std_font_size.x));
     lgo::font_preference_t::default_get().assign(1, fonts.back().get());
     lgo::engine_t engine{lgo::size_2D{1536, 1024}, "wWinMain.engine", true};
+    engine.frame_rate_limit_set(settings.frame_rate_limit);
     struct font_cleanup_t
     {
         lgo::engine_t& engine;
@@ -970,6 +971,7 @@ auto app() -> void
                 }
                 runtime.batch_request = settings.batch_request;
                 runtime.batch_size = settings.batch_size;
+                engine.frame_rate_limit_set(settings.frame_rate_limit);
                 load_state.m_session = result.session;
                 google_account_t::default_shared_set(result.session ? result.session->account : nullptr);
                 update_account_status();

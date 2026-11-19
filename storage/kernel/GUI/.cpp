@@ -1595,7 +1595,8 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                          settings.network_retries < 0 ? "無限" : std::to_string(settings.network_retries)},
                         {"記錄 HTTP 狀態碼（如 0,200,403；留空停用）", settings.http_log_codes},
                         {"worker 數量（正整數）", std::to_string(settings.worker_count)},
-                        {"batch_size（1–100）", std::to_string(settings.batch_size)}},
+                        {"batch_size（1–100）", std::to_string(settings.batch_size)},
+                        {"幀率限制（FPS，正整數）", std::to_string(settings.frame_rate_limit)}},
                     "確定", std::vector<std::pair<std::string,bool>>{
                         {"batch_request",settings.batch_request},
                         {google_batch_t::gzip_available() ? "batch_gzip" : "batch_gzip（此建置無 ZLIB）",
@@ -1649,8 +1650,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
                         }
                         settings.worker_count = storage_settings_t::parse_worker_count(values[6]);
                         settings.batch_size = storage_settings_t::parse_batch_size(values[7]);
-                        settings.batch_request = values[8]=="true";
-                        settings.batch_gzip = google_batch_t::gzip_available() && values[9]=="true";
+                        settings.frame_rate_limit = storage_settings_t::parse_frame_rate_limit(values[8]);
+                        settings.batch_request = values[9]=="true";
+                        settings.batch_gzip = google_batch_t::gzip_available() && values[10]=="true";
                         settings.http_log_codes = values[5];
                         storage_settings_t::parse_http_log_codes(settings.http_log_codes);
                         if (persistent->m_apply_settings)
