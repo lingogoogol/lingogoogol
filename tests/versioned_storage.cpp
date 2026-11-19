@@ -92,6 +92,60 @@ int main(int argc,char** argv)
             throw std::runtime_error{"Missing row action: "+text+" / "+action};
         };
         auto idle=[&]{wait([&]{return persistent.m_listings.empty();});};
+        auto toolbar_copy_enabled=[&]{return persistent.m_folder_copy->enabled();};
+        auto verify_action_layout=[&](std::string row,bool update)
+        {
+            lgo::scroll_t* viewer{};
+            std::vector<lgo::std_liney_t*> navigation_lines;
+            std::function<void(lgo::GUI_object_t&)> inspect=[&](auto& object)
+            {
+                if (auto scroll=dynamic_cast<lgo::scroll_t*>(&object);
+                    scroll && std::dynamic_pointer_cast<lgo::divy_flex_soft_t>(scroll->content())) viewer=scroll;
+                if (auto div=dynamic_cast<lgo::divx_soft_t*>(&object))
+                {
+                    bool navigation{};
+                    std::vector<lgo::std_liney_t*> lines;
+                    div->visit_children([&](auto& child)
+                    {
+                        if (&child==persistent.m_folder_update.get()) navigation=true;
+                        if (auto line=dynamic_cast<lgo::std_liney_t*>(&child)) lines.push_back(line);
+                    });
+                    if (navigation) navigation_lines=std::move(lines);
+                }
+                object.visit_children(inspect);
+            };
+            inspect(*gui.get_object_shared<lgo::divy_hard_t>(0));
+            check(viewer && navigation_lines.size()==2,"Missing file viewport or navigation separators");
+            const auto right=viewer->get_pos().x+viewer->view_size().x;
+            const auto stride=32+2*lgo::std_margin.x+lgo::std_line_size.x;
+            const auto actions=std::array{"刪除","改名","複製","剪下","下載","更新"};
+            const auto y=row_button(row,"下載")->get_pos().y;
+            const auto* update_button=row_button(row,"更新");
+            check(update_button->enabled()==update,"Update availability does not match the format version");
+            if (!update) check(update_button->tooltip_text().contains("已是最新格式"),"Disabled update has no current-format explanation");
+            for (std::size_t i{};i<6u;++i)
+            {
+                const auto* button=row_button(row,actions[i]);
+                check(button->get_size().x==32 && button->get_pos().x==right-32-std::int64_t(i)*stride &&
+                    button->get_pos().y==y,"File actions are shifted, reordered or clipped");
+            }
+            const auto buttons=std::array{persistent.m_folder_update,persistent.m_folder_download,persistent.m_folder_copy};
+            for(std::size_t i{};i<2;++i)
+            {
+                const auto* line=navigation_lines[i];
+                check(line->get_size().x==lgo::std_line_size.x &&
+                    line->get_pos().x==buttons[i]->get_pos().x+32+lgo::std_margin.x &&
+                    line->get_pos().x+line->get_size().x+lgo::std_margin.x==buttons[i+1]->get_pos().x &&
+                    line->get_pos().y==buttons[i]->get_pos().y,
+                    "Navigation separators are not centered between aligned buttons");
+            }
+            auto points=json::array();
+            for(const auto* line : navigation_lines)
+                points.push_back({line->get_pos().x,line->get_pos().y+line->get_size().y/2});
+            input(json::array({json::array({"move",100,400}),json::array({"capture","layout-"+row+"-"+std::to_string(engine.get_window_size().x),
+                0,0,engine.get_window_size().x,engine.get_window_size().y,points})}));
+        };
+
         if (argc>1 && std::string_view{argv[1]}=="resume-upgrade")
         {
             restore_tasks(&loads,[&](const json&){return session;});
@@ -106,10 +160,12 @@ int main(int argc,char** argv)
         }
         if (argc>1 && std::string_view{argv[1]}=="interrupt-upgrade")
         {
-            begin_directory_task(&loads,session,"directory-upgrade","root",json{{"id","root"},{"type","folder"},{"name","fixture"}},{},"fixture");
+            click(*persistent.m_folder_update);
             wait([&]{return false;});
         }
         operation("directory-create","root",json::object(),{},"layout-current");idle();
+        verify_action_layout("old",true);
+        verify_action_layout("layout-current",false);
         input(json::array({json::array({"move",100,400}),json::array({"capture","layout-after",0,0,1536,1024})}));
         auto tips=lgo::button_tooltip_t::shared(&engine);
         auto hover=[&](const lgo::GUI_object_t& object,std::string_view expected)
@@ -131,6 +187,7 @@ int main(int argc,char** argv)
         input(json::array({json::array({"capture","disabled",paste_hint.pos.x,paste_hint.pos.y,paste_hint.size.x,paste_hint.size.y})}));
         click(*persistent.m_paste_button);
         check(!persistent.m_dialog && !persistent.m_clipboard,"Disabled tooltip made paste clickable");
+        hover(*persistent.m_folder_copy,"根目錄無法複製");
         for (const auto action : {"更新","下載","剪下","複製","改名","刪除"})
         {
             const auto* button = row_button("old",action);
@@ -138,6 +195,7 @@ int main(int argc,char** argv)
         }
         loads.m_session.reset();persistent.m_refresh();for(int i=0;i<3;++i)pump();
         hover(*persistent.m_account_buttons.front(),"請先登入空間");
+        hover(*persistent.m_folder_download,"請先登入空間");
         loads.m_session=session;persistent.m_refresh();idle();
         // A long tooltip wraps by code point and can update while the cursor
         // remains stationary. Disabling under hover must suppress the action.
@@ -155,6 +213,8 @@ int main(int argc,char** argv)
         check(clicked==1,"Enabled button did not invoke exactly once");
         fixture->hide();wait([&]{return !tips->snapshot();});
         fixture.reset();
+        check(!toolbar_copy_enabled(),"Root copy must remain disabled under existing paste rules");
+        check(persistent.m_folder_update->enabled(),"Legacy root update is disabled");
         const auto rename_before=name("old-file");
         const auto tasks_before=loads.m_task_list.size();
         click(*row_button("old","改名"));
@@ -180,6 +240,13 @@ int main(int argc,char** argv)
         check(find("root","renamed").at("id")=="old" && name("old").at("name")=="renamed", "Folder rename lost ID or index name");
         check(name("old-file")==rename_before,"Folder rename changed child metadata");
         pos="old";persistent.m_refresh();idle();
+        check(toolbar_copy_enabled(),"Current folder copy is disabled");
+        click(*persistent.m_folder_copy);
+        check(persistent.m_clipboard && persistent.m_clipboard->source=="root" && persistent.m_clipboard->entity.at("id")=="old", "Navigation copy targeted the wrong folder");
+        click(*persistent.m_folder_download);
+        wait([&]{return !loads.m_task_list.empty() && loads.m_task_list.back()->m_type=="download";});
+        finish(loads.m_task_list.back());
+        check(storage_read("output/renamed/old.bin")=="old","Navigation download used the wrong folder");
         // File rename also updates both the directory entry and blob metadata.
         operation("directory-rename","old",find("old","old.bin"),{},"renamed.bin");idle();
         check(name("old-file").at("name")=="renamed.bin","File rename missed metadata");
@@ -213,22 +280,28 @@ int main(int argc,char** argv)
         wait([&]{return loads.m_task_list.back()->m_label.starts_with("更新：");});
         finish(loads.m_task_list.back());idle();
         check(name(copied.at("id")).at("version_min")==2,"Row update did not convert the file");
+        verify_action_layout("old.bin",false);
         hover(*row_button("old.bin","更新"),"此檔案已是最新格式");
         const auto file_tasks=loads.m_task_list.size();
         click(*row_button("old.bin","更新"));
         check(loads.m_task_list.size()==file_tasks,"Disabled file update started a task");
         begin_task(&loads,session,"download-file","upgraded.bin",copied.at("id"));finish(loads.m_task_list.back());
         check(storage_read("upgraded.bin")=="old","Updated file bytes changed");
-        // Recursive updates cover versions 0/1, empty files,
+        // Navigation update recursively covers versions 0/1, empty files,
         // continuation pages and incompressible legacy 18,750-byte slices.
         pos="root";persistent.m_refresh();idle();
-        begin_directory_task(&loads,session,"directory-upgrade","root",json{{"id","root"},{"type","folder"},{"name","fixture"}},{},"fixture");
+        click(*persistent.m_folder_update);
         wait([&]{return loads.m_task_list.back()->m_label.starts_with("更新：") && loads.m_task_list.back()->m_result==task_result_t::active;});
         finish(loads.m_task_list.back());idle();
-        check(name("root").at("version_min")==2,"Root upgrade or button availability failed");
+        check(name("root").at("version_min")==2 && !persistent.m_folder_update->enabled(),"Root upgrade or button availability failed");
+        hover(*persistent.m_folder_update,"已是最新格式");
         begin_task(&loads,session,"download-file","large-upgraded.bin","large-file");finish(loads.m_task_list.back());
         check(storage_read("large-upgraded.bin")==storage_read("expected-large.bin"),"Repartitioned legacy bytes changed");
         check(name("large-file").at("time")==123 && name("large-file").at("name")=="large.bin","Upgrade changed existing time or name");
+        click(*persistent.m_folder_download);
+        wait([&]{return loads.m_task_list.back()->m_type=="download";});
+        finish(loads.m_task_list.back());
+        check(storage_read("output/fixture/large/large.bin")==storage_read("expected-large.bin"),"Root navigation download failed");
         operation("directory-delete","root",find("root","large"),{},"large");
         operation("directory-delete","root",find("root","old"),{},"old");
         operation("directory-delete",created,copied,{},"old.bin");
@@ -249,9 +322,22 @@ int main(int argc,char** argv)
         };
         inspect(*gui.get_object_shared<lgo::divy_hard_t>(0));
         check(heading && size_label && timestamp,"Missing time column, folder size or timestamp text");
-        glfwSetWindowSize(engine.window_get(),1000,800);for(int i=0;i<5;++i)pump();
+        for (const auto width : {800,1000,1536})
+        {
+            glfwSetWindowSize(engine.window_get(),width,800);for(int i=0;i<10;++i)pump();
+            const auto update=persistent.m_folder_update->get_pos();
+            const auto download=persistent.m_folder_download->get_pos();
+            const auto copy=persistent.m_folder_copy->get_pos();
+            check(update.x<download.x && download.x<copy.x && copy.x+32<=engine.get_window_size().x,
+                "Navigation actions overlap or exceed the resized viewport");
+            check(persistent.m_breadcrumbs->get_pos().x+persistent.m_breadcrumbs->get_size().x<=update.x,
+                "Breadcrumbs overlap current folder actions");
+            const auto* action=row_button("input","刪除");
+            check(action->get_pos().x+action->get_size().x<=engine.get_window_size().x,"Row actions exceed narrow viewport");
+            verify_action_layout("input",false);
+        }
         engine.flush();
-        std::cout<<"PASS: versions 0/1/2, resumable recursive format updates, legacy slice repartitioning, fixed update controls, disabled tooltips, rename and byte comparisons.\n";
+        std::cout<<"PASS: aligned legacy/current file actions and navigation separators across viewport sizes, rendered button tooltips, disabled reasons and click suppression, stationary updates, wrapping, edge placement, modal occlusion, version 2 transfers, GUI rename/cancel/validation, row and root upgrades, 18,750-byte repartitioning, preserved timestamps, navigation copy, and compare.\n";
         lgo::log_file("finished_all!\n");
         return 0;
     }

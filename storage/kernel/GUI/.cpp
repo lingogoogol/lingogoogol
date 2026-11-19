@@ -315,6 +315,19 @@ auto message_loop(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_mult
             persistent->m_switching ? "設定套用中，請稍候" : !load_state->m_session ? "請先登入空間" :
             load_state->m_session->clearing ? "正在清除空間" : !persistent->m_clipboard ? "請先剪下或複製檔案或資料夾" :
             "選取的項目屬於其他空間，請重新剪下或複製");
+    if (persistent->m_folder_update)
+    {
+        const bool ready = persistent->m_current_session==load_state->m_session && load_state->m_session &&
+            !load_state->m_session->clearing && !persistent->m_switching && persistent->m_listings.empty();
+        const auto reason = persistent->m_switching ? "設定套用中，請稍候" : !load_state->m_session ? "請先登入空間" :
+            load_state->m_session->clearing ? "正在清除空間" : "目前資料夾尚未載入完成";
+        persistent->m_folder_update->set_enabled(ready &&
+            persistent->m_current_folder.at("version_min")!=storage_format::current_version,
+            ready ? "目前資料夾及其子內容已是最新格式" : reason);
+        persistent->m_folder_download->set_enabled(ready,reason);
+        persistent->m_folder_copy->set_enabled(ready && persistent->m_breadcrumb_folder!=load_state->m_session->root,
+            ready ? "根目錄無法複製：同一空間內沒有可貼上的目的地" : reason);
+    }
     if (persistent->m_account_menu)
     {
         if (persistent->m_switching || persistent->m_dialog)
@@ -998,6 +1011,9 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
           load_state_t* load_state, blob_queue_t* blob_queue, std::shared_ptr<lgo::scroll_t> viewer_div,
           std::string* pos) -> void
 {
+    persistent->m_folder_update->set_enabled(false,"目前資料夾尚未載入完成");
+    persistent->m_folder_download->set_enabled(false,"目前資料夾尚未載入完成");
+    persistent->m_folder_copy->set_enabled(false,"目前資料夾尚未載入完成");
     // Use `=` instead of `{}`: `nlohmann::json{ expr }` invokes the `std::initializer_list` constructor
     // and wraps the returned array into a 1-element outer array `[expr]`.
     if(persistent->m_listing_builder){*persistent->m_listing_builder={};persistent->m_listing_builder.reset();}
@@ -1045,6 +1061,20 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                    if (summary.name.contains("time")) entry["time"] = summary.name.at("time");
                                    else entry.erase("time");
                                }
+                               const auto summary = storage_format::summarize(target,"folder",[&](const std::string& id)
+                               {
+                                   session->bind(request,id);
+                                   auto value = blob_get_run(request,id,"name,description");
+                                   session->observe(id,nlohmann::json::parse(value.at("name").get<std::string>()),
+                                       nlohmann::json::parse(value.at("description").get<std::string>()));
+                                   return value;
+                               });
+                               auto current = summary.name;
+                               current["id"] = target;
+                               current["type"] = "folder";
+                               current["size"] = summary.size;
+                               current["version_min"] = summary.minimum;
+                               if (target==session->root) current["name"] = session->address;
                                auto path = nlohmann::json::array();
                                std::set<std::string> visited;
                                auto ancestor{target};
@@ -1064,7 +1094,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
                                if (session && ancestor == session->root)
                                    path.push_back({{"id", session->root}, {"name", session->address}});
                                std::reverse(path.begin(), path.end());
-                               return nlohmann::json{{"entries", std::move(entries)}, {"path", std::move(path)}};
+                               return nlohmann::json{{"entries", std::move(entries)}, {"path", std::move(path)}, {"current",std::move(current)}};
                            })};
     persistent->m_directory_status->set_text("目錄更新中");
     const auto source{*pos};
@@ -1099,6 +1129,7 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
             button->set_size(button->get_text_size());
             button->set_tooltip("前往資料夾："+ancestor.at("name").get<std::string>());
         }
+        const auto current = result.at("current");
         auto rows=std::make_shared<std::map<std::string,std::uint64_t>>();
         auto entries=std::make_shared<nlohmann::json>(std::move(result.at("entries")));
         auto next=std::make_shared<std::size_t>(0);
@@ -1197,6 +1228,11 @@ auto list(lgo::engine_t* engine, GUI_persistent_t* persistent, curl_multi_worker
         const auto path_offset{persistent->m_breadcrumbs->scroll_offset()};
         persistent->m_breadcrumbs->set_content(std::move(path));
         persistent->m_breadcrumb_folder = source;
+        persistent->m_current_folder = current;
+        persistent->m_current_session = session;
+        persistent->m_folder_update->set_enabled(current.at("version_min")!=storage_format::current_version,"目前資料夾及其子內容已是最新格式");
+        persistent->m_folder_download->set_enabled(true);
+        persistent->m_folder_copy->set_enabled(source!=session->root,"根目錄無法複製：同一空間內沒有可貼上的目的地");
         persistent->m_directory_rows = std::move(*rows);
         persistent->m_breadcrumbs->set_scroll_offset(same_path ? path_offset : lgo::size_2D{});
         contents->show();
@@ -1366,9 +1402,66 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
     auto browser_div{work_div->add_object_shared<lgo::divy_soft_t>(
         storage_content_depth, work_div->space_2D(lgo::std_margin), lgo::std_margin,
         lgo::alignment_2D{lgo::alignment_x::left, lgo::alignment_y::top})};
-    persistent->m_breadcrumbs = browser_div->add_object_shared<lgo::scroll_t>(
-        storage_content_depth, lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
-            lgo::font_preference_t::default_get()[0]->leading_get() + 8}, lgo::scroll_axes_t::x, lgo::std_margin);
+    auto navigation = browser_div->add_object_shared<lgo::divx_soft_t>(storage_content_depth,
+        lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
+            lgo::font_preference_t::default_get()[0]->leading_get()+8},lgo::size_1D{0},
+        lgo::alignment_2D{lgo::alignment_x::left,lgo::alignment_y::center});
+    persistent->m_breadcrumbs = navigation->add_object_shared<lgo::scroll_t>(
+        storage_content_depth,lgo::size_2D{std::max<std::int64_t>(0,navigation->get_size().x-120),
+            navigation->get_size().y},lgo::scroll_axes_t::x,lgo::std_margin);
+    auto current_ready = [=]
+    {
+        return load_state->m_session && load_state->m_session==persistent->m_current_session &&
+            !persistent->m_switching && !load_state->m_session->clearing && *pos==persistent->m_breadcrumb_folder;
+    };
+    persistent->m_folder_update = navigation->add_object_ghost_shared<progress_button_t>(storage_content_depth,[=]
+    {
+        if (!current_ready()) return;
+        const auto& entry = persistent->m_current_folder;
+        const auto source = *pos==load_state->m_session->root ? *pos : entry.at("parent").get<std::string>();
+        begin_directory_task(load_state,load_state->m_session,"directory-upgrade",source,entry,{},entry.at("name"));
+    },"更新",lgo::std_blue_light,lgo::size_1D{32});
+    persistent->m_folder_download = navigation->add_object_ghost_shared<progress_button_t>(storage_content_depth,[=]
+    {
+        if (current_ready()) folder_download_callback(load_state,persistent->m_current_folder.at("name"),*pos);
+    },"下載",lgo::std_blue_light,lgo::size_1D{32});
+    persistent->m_folder_copy = navigation->add_object_ghost_shared<progress_button_t>(storage_content_depth,[=]
+    {
+        if (current_ready()) persistent->m_clipboard = GUI_persistent_t::clipboard_t{
+            load_state->m_session,persistent->m_current_folder.at("parent"),persistent->m_current_folder,true};
+    },"複製",lgo::std_blue_light,lgo::size_1D{32});
+    persistent->m_folder_update->set_tooltip("將目前資料夾及全部子內容的 blob 格式更新到最新版本。");
+    persistent->m_folder_download->set_tooltip("選擇本機目的地，下載目前資料夾及全部子內容。");
+    persistent->m_folder_copy->set_tooltip("複製目前資料夾；到目的資料夾按「貼上」建立獨立副本。");
+    const auto navigation_separator_height = lgo::font_preference_t::default_get()[0]->leading_get();
+    auto navigation_line_1 = navigation->add_object_ghost_shared<lgo::std_liney_t>(
+        storage_content_depth,lgo::size_1D{navigation_separator_height},lgo::std_blue_light);
+    auto navigation_line_2 = navigation->add_object_ghost_shared<lgo::std_liney_t>(
+        storage_content_depth,lgo::size_1D{navigation_separator_height},lgo::std_blue_light);
+    auto layout_navigation = [nav=std::weak_ptr{navigation},
+        line_1=std::weak_ptr{navigation_line_1},line_2=std::weak_ptr{navigation_line_2},persistent]
+    {
+        const auto navigation = nav.lock();
+        const auto first_line = line_1.lock(), second_line = line_2.lock();
+        if (!navigation || !first_line || !second_line) return;
+        const auto button_gap = 2*lgo::std_margin.x+lgo::std_line_size.x;
+        const auto actions_width = 3*32+2*button_gap;
+        persistent->m_breadcrumbs->set_size({std::max<std::int64_t>(0,navigation->get_size().x-actions_width),
+            navigation->get_size().y});
+        const auto at = navigation->get_pos();
+        for (const auto& [button,index] : std::array{
+            std::pair{persistent->m_folder_update,0},std::pair{persistent->m_folder_download,1},std::pair{persistent->m_folder_copy,2}})
+            button->set_pos({at.x+navigation->get_size().x-actions_width+index*(32+button_gap),
+                at.y+(navigation->get_size().y-button->get_size().y)/2});
+        for (const auto& [line,index] : std::array{std::pair{first_line,0},std::pair{second_line,1}})
+        {
+            const auto height = lgo::font_preference_t::default_get()[0]->leading_get();
+            line->set_size({lgo::std_line_size.x,height});
+            line->set_pos({at.x+navigation->get_size().x-actions_width+index*(32+button_gap)+32+lgo::std_margin.x,
+                at.y+(navigation->get_size().y-height)/2});
+        }
+    };
+    layout_navigation();
     persistent->set_directory_header_font(load_state->m_settings.font_path);
     auto directory_header{browser_div->add_object_shared<directory_columns_t>(
         storage_content_depth, lgo::size_2D{browser_div->space_x(lgo::std_margin).x,
@@ -1397,6 +1490,11 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
         if(persistent->m_listing_builder){*persistent->m_listing_builder={};persistent->m_listing_builder.reset();}
         persistent->m_breadcrumbs->set_content({});
         persistent->m_breadcrumb_folder.clear();
+        persistent->m_current_folder = {};
+        persistent->m_current_session.reset();
+        persistent->m_folder_update->set_enabled(false,"目前資料夾尚未載入完成");
+        persistent->m_folder_download->set_enabled(false,"目前資料夾尚未載入完成");
+        persistent->m_folder_copy->set_enabled(false,"目前資料夾尚未載入完成");
         persistent->m_directory_rows.clear();
         for (auto& listing : persistent->m_listings)
             listing.control->cancel();
@@ -1757,6 +1855,7 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
          header = std::weak_ptr{header_line}, work = std::weak_ptr{work_div},
          status = std::weak_ptr{state_div}, progress = std::weak_ptr{*progress_column},
          separator = std::weak_ptr{column_line}, browser = std::weak_ptr{browser_div}, viewer = std::weak_ptr{viewer_div},
+         nav = std::weak_ptr{navigation}, layout_navigation,
          headings = std::weak_ptr{directory_header},
          center = std::weak_ptr{center_div}, persistent](lgo::size_2D size)
         {
@@ -1771,9 +1870,10 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto viewer_div{viewer.lock()};
             auto browser_div{browser.lock()};
             auto directory_header{headings.lock()};
+            auto navigation{nav.lock()};
             auto center_div{center.lock()};
             if (!main_div || !menu_left || !menu_right || !header_line || !work_div || !state_div ||
-                !progress_column || !column_line || !browser_div || !viewer_div || !directory_header || !center_div)
+                !progress_column || !column_line || !browser_div || !viewer_div || !directory_header || !center_div || !navigation)
             {
                 return;
             }
@@ -1803,8 +1903,9 @@ auto home(lgo::engine_t* engine, lgo::state_t* state, GUI_persistent_t* persiste
             auto browser_size{work_div->space_2D(lgo::std_margin)};
             browser_size.x += browser_div->get_size().x + lgo::std_margin.x;
             browser_div->set_size(browser_size);
-            persistent->m_breadcrumbs->set_size({browser_div->space_x(lgo::std_margin).x,
-                lgo::font_preference_t::default_get()[0]->leading_get() + 8});
+            navigation->set_size({browser_div->space_x(lgo::std_margin).x,
+                lgo::font_preference_t::default_get()[0]->leading_get()+8});
+            layout_navigation();
             auto viewer_size{browser_div->space_2D(lgo::std_margin)};
             viewer_size.y += viewer_div->get_size().y + lgo::std_margin.x;
             viewer_div->set_size(viewer_size);
