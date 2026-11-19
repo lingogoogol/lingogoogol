@@ -2,6 +2,10 @@ module;
 
 #include <vulkan/vk_platform.h>
 #include <glm/glm.hpp>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <dwmapi.h>
 
 module lgo.GUI.primitive;
 
@@ -961,11 +965,9 @@ namespace lgo {
         {
             return true;
         }
-        int width{}, height{};
-        glfwGetFramebufferSize(m_window, &width, &height);
-        if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) || width <= 0 || height <= 0)
+        if (!render_visible())
         {
-            // Minimized surfaces cannot acquire drawable images. Keep pumping close/restore events.
+            // Keep processing transfers and close/restore events while no pixels are visible.
             glfwWaitEventsTimeout(0.05);
             return glfwWindowShouldClose(m_window);
         }
@@ -983,7 +985,7 @@ namespace lgo {
     {
         // Native messages can re-enter during layout or swapchain operations; never nest GPU work.
         if (m_rendering || m_recovering || m_device_lost || m_refresh_error ||
-            std::chrono::steady_clock::now()<m_next_frame || glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+            std::chrono::steady_clock::now()<m_next_frame || !render_visible())
         {
             return;
         }
@@ -1018,6 +1020,84 @@ namespace lgo {
         m_frame_interval=std::max(std::chrono::steady_clock::duration{1},
             std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>{1.0/static_cast<double>(rate)}));
         m_next_frame={};
+    }
+
+    auto engine_t::render_visible() const -> bool
+    {
+        const auto window=glfwGetWin32Window(m_window);
+        if (!IsWindowVisible(window) || IsIconic(window)) return false;
+        int width{},height{};
+        glfwGetFramebufferSize(m_window,&width,&height);
+        if (width<=0 || height<=0) return false;
+
+        // GLFW has no occlusion query. Use native screen regions instead of focus:
+        // an unfocused window can still be partly visible and must keep rendering.
+        using attribute_t=HRESULT (WINAPI*)(HWND,DWORD,PVOID,DWORD);
+        static const auto attribute=[]
+        {
+            // Keep the system DLL loaded for the lifetime of this cached function pointer.
+            const auto library=LoadLibraryW(L"dwmapi.dll");
+            return library ? reinterpret_cast<attribute_t>(GetProcAddress(library,"DwmGetWindowAttribute")) : nullptr;
+        }();
+        const auto cloaked=[&](HWND handle)
+        {
+            DWORD value{};
+            return attribute && SUCCEEDED(attribute(handle,DWMWA_CLOAKED,&value,sizeof(value))) && value;
+        };
+        if (cloaked(window)) return false;
+        struct region_t
+        {
+            HRGN value{CreateRectRgn(0,0,0,0)};
+            ~region_t() { if(value)DeleteObject(value); }
+        } visible,monitors,cover;
+        // On query/allocation failure, keep drawing rather than suppress a visible window.
+        if (!visible.value || !monitors.value || !cover.value) return true;
+        RECT client{};
+        POINT origin{};
+        if (!GetClientRect(window,&client) || !ClientToScreen(window,&origin)) return true;
+        SetRectRgn(visible.value,origin.x,origin.y,origin.x+client.right,origin.y+client.bottom);
+        const auto monitor_callback=+[](HMONITOR,HDC,LPRECT rect,LPARAM data) -> BOOL
+        {
+            const auto region=reinterpret_cast<HRGN>(data);
+            const auto monitor=CreateRectRgnIndirect(rect);
+            if (!monitor) return FALSE;
+            const auto result=CombineRgn(region,region,monitor,RGN_OR);
+            DeleteObject(monitor);
+            return result!=ERROR;
+        };
+        if (!EnumDisplayMonitors(nullptr,nullptr,monitor_callback,reinterpret_cast<LPARAM>(monitors.value))) return true;
+        auto remaining=CombineRgn(visible.value,visible.value,monitors.value,RGN_AND);
+        if (remaining==ERROR) return true;
+        if (remaining==NULLREGION) return false;
+        for (auto above=GetWindow(window,GW_HWNDPREV);above;above=GetWindow(above,GW_HWNDPREV))
+        {
+            if (!IsWindowVisible(above) || IsIconic(above) || cloaked(above)) continue;
+            const auto style=GetWindowLongPtrW(above,GWL_EXSTYLE);
+            if (style&WS_EX_TRANSPARENT) continue;
+            if (style&WS_EX_LAYERED)
+            {
+                COLORREF key{};BYTE alpha{};DWORD flags{};
+                // Per-pixel alpha and color keys do not expose an opaque region.
+                // A layered window with uniform alpha 255 can still fully cover us.
+                if (!GetLayeredWindowAttributes(above,&key,&alpha,&flags) ||
+                    (flags&LWA_COLORKEY) || !(flags&LWA_ALPHA) || alpha!=255) continue;
+            }
+            RECT bounds{};
+            if (!GetWindowRect(above,&bounds)) continue;
+            if (GetWindowRgn(above,cover.value)!=ERROR)
+                OffsetRgn(cover.value,bounds.left,bounds.top);
+            else
+            {
+                // DWM's window rectangle includes invisible resize borders; the
+                // extended frame bounds exclude them, avoiding false occlusion.
+                if (attribute) attribute(above,DWMWA_EXTENDED_FRAME_BOUNDS,&bounds,sizeof(bounds));
+                SetRectRgn(cover.value,bounds.left,bounds.top,bounds.right,bounds.bottom);
+            }
+            remaining=CombineRgn(visible.value,visible.value,cover.value,RGN_DIFF);
+            if (remaining==ERROR) return true;
+            if (remaining==NULLREGION) return false;
+        }
+        return true;
     }
 
     auto engine_t::draw() -> void

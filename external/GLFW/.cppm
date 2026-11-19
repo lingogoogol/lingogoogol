@@ -2,6 +2,8 @@ module;
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 export module external.GLFW;
 
@@ -85,6 +87,7 @@ export
     using ::glfwFocusWindow;
     using ::glfwHideWindow;
     using ::glfwGetWindowAttrib;
+    using ::glfwGetWin32Window;
     using ::glfwSetWindowSizeLimits;
     using ::glfwSetWindowRefreshCallback;
     using ::glfwSetWindowUserPointer;

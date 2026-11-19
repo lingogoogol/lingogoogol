@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise frame pacing and the real settings form without credentials."""
+"""Exercise frame pacing, native visibility and the real settings form without credentials."""
 import os
 from pathlib import Path
 import shutil

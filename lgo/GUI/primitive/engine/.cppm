@@ -117,6 +117,7 @@ export namespace lgo
         auto recreate_swap_chain() -> bool;
         auto update_window_size() -> void;
         auto render_frame() -> void;
+        auto render_visible() const -> bool;
 
         auto transition_image_layout
         (

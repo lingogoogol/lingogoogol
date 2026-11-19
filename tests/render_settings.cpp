@@ -36,6 +36,7 @@ int main(int argc,char** argv)
         lgo::font_preference_t::default_get().assign(1,&face);
         lgo::engine_t engine{{1100,1100},"Render settings regression"};
         struct cleanup_t{lgo::engine_t& e;~cleanup_t(){e.flush();lgo::text_line_t::free();}} cleanup{engine};
+        const auto window=glfwGetWin32Window(engine.window_get());
         std::size_t frames{};
         engine.callback_frame_add([&](double){++frames;});
         auto pump_for=[&](auto duration)
@@ -46,6 +47,7 @@ int main(int argc,char** argv)
         };
         if(argc==2 && std::string_view{argv[1]}=="render")
         {
+            SetWindowPos(window,HWND_TOP,20,20,900,900,SWP_SHOWWINDOW);
             engine.frame_rate_limit_set(10);
             frames=0;pump_for(1100ms);
             check(frames>=3 && frames<=12,"10 FPS limit was not enforced.");
@@ -54,8 +56,47 @@ int main(int argc,char** argv)
             frames=0;pump_for(1100ms);
             check(frames>=5 && frames<=23,"Live 20 FPS limit was not enforced.");
             std::println("PASS: live 20 FPS ({} frames in 1.1 s)",frames);
-            engine.set_exit();
-            check(engine.message_loop(),"Window did not close normally.");
+            const auto stopped=[&](const char* message)
+            {
+                // Drain the native show/move messages before measuring steady state.
+                pump_for(150ms);const auto before=frames;pump_for(350ms);
+                check(frames==before,message);
+            };
+            const auto resumed=[&]
+            {
+                const auto before=frames;pump_for(400ms);
+                check(frames>before,"Rendering did not resume when visible.");
+            };
+            ShowWindow(window,SW_HIDE);stopped("Hidden window kept rendering.");
+            ShowWindow(window,SW_SHOW);resumed();
+            ShowWindow(window,SW_MINIMIZE);stopped("Minimized window kept rendering.");
+            ShowWindow(window,SW_RESTORE);resumed();
+            SetWindowPos(window,nullptr,30000,30000,0,0,SWP_NOSIZE|SWP_NOZORDER);
+            stopped("Off-screen window kept rendering.");
+            SetWindowPos(window,HWND_TOP,20,20,900,900,SWP_SHOWWINDOW);resumed();
+            struct cover_t
+            {
+                HWND window{CreateWindowExW(0,L"STATIC",L"Opaque test cover",WS_POPUP|WS_VISIBLE,
+                    0,0,1500,1150,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr)};
+                ~cover_t(){if(window)DestroyWindow(window);}
+            } cover;
+            check(cover.window!=nullptr,"Cannot create occluding window.");
+            SetWindowPos(cover.window,HWND_TOP,0,0,1500,1150,SWP_SHOWWINDOW);
+            stopped("Fully covered window kept rendering.");
+            SetWindowPos(cover.window,HWND_TOP,0,0,300,300,SWP_SHOWWINDOW);resumed();
+            SetWindowLongPtrW(cover.window,GWL_EXSTYLE,WS_EX_LAYERED);
+            SetLayeredWindowAttributes(cover.window,0,255,LWA_ALPHA);
+            SetWindowPos(cover.window,HWND_TOP,0,0,1500,1150,SWP_SHOWWINDOW);
+            stopped("Opaque layered window did not stop rendering.");
+            // Transparent overlays must not be treated as opaque occluders.
+            SetLayeredWindowAttributes(cover.window,0,100,LWA_ALPHA);
+            SetWindowPos(cover.window,HWND_TOP,0,0,1500,1150,SWP_SHOWWINDOW);resumed();
+            ShowWindow(cover.window,SW_HIDE);resumed();
+            PostMessageW(window,WM_CLOSE,0,0);
+            bool closed{};
+            for(int i=0;i<10 && !closed;++i)closed=engine.message_loop();
+            check(closed,"Window did not close normally.");
+            std::println("PASS: hidden/minimized/off-screen/occluded stop, partial/transparent visibility and restore");
         }
         else
         {
