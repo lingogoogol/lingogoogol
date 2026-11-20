@@ -434,8 +434,7 @@ namespace lgo {
                         vk::PhysicalDeviceFeatures2,
                         vk::PhysicalDeviceVulkan11Features,
                         vk::PhysicalDeviceVulkan12Features,
-                        vk::PhysicalDeviceVulkan13Features,
-                        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                        vk::PhysicalDeviceVulkan13Features
                     >()
                 };
                 std::string reason;
@@ -448,7 +447,10 @@ namespace lgo {
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray) reason = "runtimeDescriptorArray is missing";
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering) reason = "dynamicRendering is missing";
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2) reason = "synchronization2 is missing";
-                else if (!device_feature.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) reason = "extendedDynamicState is missing";
+                // Only viewport and scissor state is dynamic (core since 1.0). Do not
+                // require VK_EXT_extended_dynamic_state: its feature struct is only
+                // valid with the extension enabled, and many Android Vulkan 1.3
+                // drivers do not advertise it.
                 if (reason.empty())
                 {
                     try
@@ -559,10 +561,6 @@ namespace lgo {
             {
                 .synchronization2{ true },
                 .dynamicRendering{ true }
-            },
-            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            {
-                .extendedDynamicState{ true }
             }
         };
         const std::array<const char*, 1> extension_device_cstr_arr{ "VK_KHR_swapchain" };
