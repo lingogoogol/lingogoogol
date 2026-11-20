@@ -47,7 +47,10 @@ int main(int argc,char** argv)
             google_easy_t request; request.path_set(path); request.method_get(); request.run();
             return json::parse(request.payload());
         };
-        pump();
+        // The GUI adds at most 8 transport handles per frame (bounded frame work),
+        // so the pool reaches its limit over several frames, then stops there.
+        wait([&] { return persistent.m_easy_status.size()>=64; });
+        for (int i{};i<10;++i) pump();
         check(persistent.m_easy_status.size()==64 && loads.m_settings.batch_request,"Default mode is not 64 batch slots.");
         if (argc==2 && std::string_view{argv[1]}=="ui")
         {
@@ -99,7 +102,8 @@ int main(int argc,char** argv)
                 });
                 task_batch_submit(loads,multi,std::move(request));
             };
-            loads.m_settings.batch_request=false; loads.m_settings.worker_count=6400; pump();
+            loads.m_settings.batch_request=false; loads.m_settings.worker_count=6400;
+            wait([&] { return persistent.m_easy_status.size()>=6400; });
             check(persistent.m_easy_status.size()==6400,"Direct mode did not create 6400 slots.");
             submit("direct-a",100); submit("direct-b",100);
             loads.m_settings.worker_count=7;

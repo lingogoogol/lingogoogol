@@ -70,19 +70,27 @@ command('windowfocus','--sync',window)
 def click(x,y):command('mousemove','--window',window,x,y,'click','1');time.sleep(.15)
 def open_settings():
     Path('open-settings').touch();return wait(lambda:state() if state()['dialog'] else None,'No settings dialog')
-def checkbox(s):click((s['width']-720)//2+40,(s['height']-692)//2+568)
-def accept(s,ok=True):click((s['width']-720)//2+(640 if ok else 520),(s['height']-692)//2+660)
+# Settings dialog geometry from lgo::modal_dialog_t: one note line, ten fields
+# and the batch_request/batch_gzip checkboxes (values: fields, then checkboxes).
+LINES,FIELDS,CHECKBOXES,WORKERS=1,10,2,6
+BATCH=FIELDS
+HEIGHT=152+28*LINES+68*FIELDS+36*CHECKBOXES
+def origin(s):return (s['width']-720)//2,max(0,(s['height']-HEIGHT)//2)
+def checkbox(s):
+    left,top=origin(s);click(left+40,top+52+28*LINES+68*FIELDS+12)
+def accept(s,ok=True):
+    left,top=origin(s);click(left+(640 if ok else 520),top+HEIGHT-32)
 def workers(s,value):
-    click((s['width']-720)//2+150,(s['height']-692)//2+532)
+    left,top=origin(s);click(left+150,top+52+28*LINES+68*WORKERS+44)
     command('key','ctrl+a')
     command('key','BackSpace') if not value else command('type','--clearmodifiers','--',value)
 try:
-    s=open_settings();assert s['values'][-1]=='true'
-    workers(s,'31');checkbox(s);wait(lambda:state()['values'][-1]=='false','Checkbox did not uncheck')
+    s=open_settings();assert s['values'][BATCH]=='true'
+    workers(s,'31');checkbox(s);wait(lambda:state()['values'][BATCH]=='false','Checkbox did not uncheck')
     accept(s,False);wait(lambda:not state()['dialog'],'Cancel did not close')
     assert state()['batch'] and state()['workers']==64 and not Path('settings.json').exists(),'Cancel applied settings'
-    s=open_settings();assert s['values'][-1]=='true'
-    assert s['values'][6]=='64','Cancel retained the worker edit'
+    s=open_settings();assert s['values'][BATCH]=='true'
+    assert s['values'][WORKERS]=='64','Cancel retained the worker edit'
     for invalid in ('0','-1','1.5','abc','18446744073709551616',''):
         workers(s,invalid);accept(s)
         assert state()['dialog'] and not Path('settings.json').exists(),'Invalid worker count accepted: '+repr(invalid)
@@ -92,11 +100,11 @@ try:
     command('keydown','F3');time.sleep(.1)
     s=state();click(s['next']['x'],s['next']['y']);wait(lambda:state()['page']==1,'F3 did not paginate custom worker slots')
     command('keyup','F3')
-    s=open_settings();assert s['values'][-1]=='false'
+    s=open_settings();assert s['values'][BATCH]=='false'
     checkbox(s);accept(s);wait(lambda:state()['batch'] and not state()['dialog'],'Batch mode not restored')
     assert json.loads(Path('settings.json').read_text())['batch_request'] is True
     assert state()['workers']==128,'Changing batch mode overwrote worker count'
-    s=open_settings();assert s['values'][6]=='128','Worker field did not reload saved value'
+    s=open_settings();assert s['values'][WORKERS]=='128','Worker field did not reload saved value'
     workers(s,'17');accept(s)
     wait(lambda:state()['workers']==17 and not state()['dialog'],'Count-only change did not apply')
     saved=json.loads(Path('settings.json').read_text())
