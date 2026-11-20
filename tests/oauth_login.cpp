@@ -73,6 +73,10 @@ int main(int argc,char** argv)
             const auto key = nlohmann::json::parse(storage_read(path));
             check(key.at("client_email")=="test-service@"+project+".iam.gserviceaccount.com",
                 "Wrong private key was saved.");
+            // Spaces only use keys registered by provisioning (key/accounts.json).
+            check(nlohmann::json::parse(storage_read("key/accounts.json")).value(
+                      "test-service@"+project+".iam.gserviceaccount.com",std::string{})==path,
+                "The created key was not registered as a program-managed account.");
             auto fails = [](auto work)
             {
                 try { work(); } catch (const std::exception&) { return; }
@@ -107,6 +111,7 @@ int main(int argc,char** argv)
             fails([&] { google_oauth_user_t::restore("updated-client.json",user->address(),oauth_purpose_t::cloud); });
             std::filesystem::remove("updated-client.json");
             std::filesystem::remove(path);
+            std::filesystem::remove("key/accounts.json");
             std::filesystem::remove("key");
             std::println("PASS: new/existing Cloud projects, paginated search, API operations, service account/key creation, validation, cancellation, permission denial and atomic key-save rollback.");
             return 0;
@@ -210,19 +215,8 @@ int main(int argc,char** argv)
         blob_upload(reserve,"fixture-reserve-b", "");
         reserve.method_post();
         reserve.run();
-        std::atomic_bool close{};
-        storage_runtime_t runtime{&close};
-        auto session=std::make_shared<storage_session_t>();
-        session->account=account;
-        session->oauth=user;
-        session->address=user->address();
-        session->storage_id=user->storage_id();
-        session->root_path="fixture-clear-root";
-        storage_atomic_write("fixture-queue",nlohmann::json(std::vector<std::string>(21000,"placeholder")).dump());
-        session->queue=std::make_shared<blob_queue_t>("fixture-queue",account.get(),&close);
-        std::atomic_uint64_t progress{},total{};
-        check(runtime.clear(session,control,progress,total).starts_with("created-") && total==2 && progress==2,
-            "appData clear did not finish within its own data space.");
+        // Clearing an appData account is no longer an app path: spaces store data
+        // only through service accounts, and Google users only provision Cloud.
         account->stop();
         std::println("PASS: OAuth login/restore, cached access, shared background refresh and late 401.");
         return 0;
