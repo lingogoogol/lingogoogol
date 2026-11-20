@@ -118,7 +118,8 @@ namespace lgo
         pos_2D texture_pos,
         size_2D texture_axis_x,
         size_2D texture_axis_y,
-        color_t color
+        color_t color,
+        std::array<float, 2> texture_shift
     )
     :
         rect_t
@@ -137,6 +138,7 @@ namespace lgo
         m_texture_pos = texture_pos;
         m_texture_axis_x = texture_axis_x;
         m_texture_axis_y = texture_axis_y;
+        m_texture_shift = texture_shift;
         m_texture_enable = true;
         m_clip_enabled = true;
         return;
@@ -307,6 +309,7 @@ namespace lgo
                 .texture_pos{ m_texture_pos },
                 .texture_axis_x{ m_texture_axis_x },
                 .texture_axis_y{ m_texture_axis_y },
+                .texture_shift{ m_texture_shift },
                 .name{ m_name + ".m_primitive" }
             });
         }

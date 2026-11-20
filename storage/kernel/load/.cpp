@@ -16,6 +16,7 @@ import lgo.GUI;
 import storage.encode;
 import storage.http;
 import storage.google;
+import storage.local;
 
 namespace
 {
@@ -37,14 +38,14 @@ namespace
                          const std::string& chunk,const std::vector<std::string>& ids,
                          const std::string& path,std::uint64_t offset,std::uint64_t size) -> void
     {
-        std::ifstream stream{lgo::create_ifstream(path)};
-        stream.seekg(static_cast<std::streamoff>(offset));
+        auto stream{storage_local::open_read(path)};
+        stream->seekg(static_cast<std::streamoff>(offset));
         for(const auto& id:ids)
         {
             if(task.m_control->cancelled)throw std::runtime_error{"Upload cancelled."};
             const auto count=std::min(size,task.m_bytes_per_content);
-            std::string bytes(count,'\0');stream.read(bytes.data(),count);
-            if(stream.gcount()!=static_cast<std::streamsize>(count))throw std::runtime_error{"The upload source could not be read completely: "+path};
+            std::string bytes(count,'\0');stream->read(bytes.data(),count);
+            if(stream->gcount()!=static_cast<std::streamsize>(count))throw std::runtime_error{"The upload source could not be read completely: "+path};
             auto name=nlohmann::json{{"parent",chunk},{"parent_account",task.m_session->owner(chunk)}};
             auto content=content_blob_encode(std::move(bytes),name,task.m_blob_version);
             out.emplace_back(id,nlohmann::json{{"name",name.dump()},{"description",std::move(content)}}.dump());size-=count;
@@ -250,19 +251,18 @@ auto file_download
     }
     if (restored && file.m_complete)
     {
-        if (std::filesystem::file_size(path_local)!=file.m_size)
+        if (storage_local::size(path_local.string())!=file.m_size)
             throw std::runtime_error{"Completed download size differs from its checkpoint."};
     }
     else if (file.m_written)
     {
-        if (std::filesystem::file_size(path_local) < file.m_written)
+        if (storage_local::size(path_local.string()) < file.m_written)
             throw std::runtime_error{"Saved download is shorter than its checkpoint."};
-        std::filesystem::resize_file(path_local, file.m_written);
+        storage_local::resize(path_local.string(), file.m_written);
     }
     else
     {
-        auto output{lgo::create_ofstream_destroy(path_local.string())};
-        if (!output)
+        if (!storage_local::create(path_local.string()))
             throw std::runtime_error{"Cannot create download file: " + path_local.string()};
     }
     task->m_size += file.m_size;
@@ -282,7 +282,7 @@ auto folder_download
 {
     // json's initializer_list constructor would wrap the returned array in another array.
     nlohmann::json obj_list = list_folder_content(*easy, &pos, task->m_session.get());
-	std::filesystem::create_directories(path_local);
+	storage_local::create_directories(path_local.string());
     task->m_directories.push_back(path_local.string());
 	for (auto i : obj_list)
 	{
@@ -293,7 +293,7 @@ auto folder_download
 				easy,
 				task,
 				i["id"],
-				path_local / i["name"]
+				storage_local::child(path_local.string(), i["name"].get<std::string>())
 			);
 		}
 		else if (i["type"] == "file")
@@ -303,7 +303,7 @@ auto folder_download
 				easy,
 				task,
 				i["id"],
-				path_local / i["name"]
+				storage_local::child(path_local.string(), i["name"].get<std::string>())
 			);
 		}
 		else
@@ -944,7 +944,7 @@ auto upload_file_load_begin
 	blob.m_name =
 		nlohmann::json
 		{
-			{ "name", std::filesystem::path{ file->m_path_local }.filename().string() },
+			{ "name", file->m_name },
 			{ "size", file->m_size },
             { "version", storage_format::current_version },
             { "version_min", file->m_size ? file->m_task->m_blob_version : storage_format::current_version },
@@ -1612,17 +1612,21 @@ auto download_write_ready(download_file_t& file) -> void
     file.m_task->m_output_files.push_back(static_cast<std::size_t>(&file-file.m_task->m_file_arr.data()));
     file.m_output=storage_background([contents,result,path,offset,durable,control]
     {
-        std::ofstream stream{lgo::create_ofstream_preserve(path)};
-        if(!stream)throw std::runtime_error{"Cannot write download file: "+path};
-        stream.seekp(static_cast<std::streamoff>(offset));
+        auto stream{storage_local::open_write(path)};
+        if(!*stream)throw std::runtime_error{"Cannot write download file: "+path};
+        stream->seekp(static_cast<std::streamoff>(offset));
         for(const auto& content:*contents)
         {
             if(control->cancelled)throw std::runtime_error{"Download cancelled."};
-            stream.write(content.data(),content.size());result->first+=content.size();
+            stream->write(content.data(),content.size());result->first+=content.size();
         }
-        stream.close();
-        if(!stream)throw std::runtime_error{"Cannot finish writing download file: "+path};
-        if(durable)storage_flush_file(path);
+        // Desktop: closing reports the final write error, as before storage_local.
+        if(auto* file{dynamic_cast<std::ofstream*>(stream.get())})file->close();
+        else stream->flush();
+        const bool written{static_cast<bool>(*stream)};
+        stream.reset();
+        if(!written)throw std::runtime_error{"Cannot finish writing download file: "+path};
+        if(durable)storage_local::flush(path);
     });
 }
 

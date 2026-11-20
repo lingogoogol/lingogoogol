@@ -2,7 +2,9 @@ export module lgo.GUI.Vulkan:debug;
 
 import std;
 import external.Vulkan;
+#if defined(_WIN32)
 import external.Windows;
+#endif
 
 export namespace lgo
 {
@@ -27,8 +29,10 @@ export namespace lgo
                 // Wine 10 aborts inside its Vulkan thunk when naming a messenger,
                 // rather than returning VkResult. Skip only this optional object
                 // on Wine; native Windows and all other object types keep names.
+#if defined(_WIN32)
                 static const bool wine{ GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr };
                 if (wine) return false;
+#endif
             }
             using native_t = typename t_handle::CType;
             std::uint64_t bits{};

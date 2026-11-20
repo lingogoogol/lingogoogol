@@ -19,11 +19,20 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Gradle passes CMAKE_SYSTEM_NAME=Android; a manual NDK configure passes ANDROID_ABI.
+if(CMAKE_SYSTEM_NAME STREQUAL "Android" OR DEFINED ANDROID_ABI)
+    include("${CMAKE_CURRENT_LIST_DIR}/android/cmake/ndk-import-std.cmake")
+endif()
+
 project(
     lingogoogol
     VERSION 0.0.5.0
     LANGUAGES CXX
 )
+
+if(ANDROID)
+    include("${CMAKE_CURRENT_LIST_DIR}/android/cmake/ndk-project.cmake")
+endif()
 
 option(LGO_BUILD_CONTENT_TESTS "Build offline content codec tests." OFF)
 if(LGO_BUILD_CONTENT_TESTS)
@@ -104,6 +113,18 @@ target_include_directories(
         ${VCPKG_DYNAMIC_INCLUDE_DIR}
 )
 
+if(ANDROID)
+    # BEFORE: ../include holds Windows-configured OpenSSL headers.
+    target_include_directories(
+        common
+        BEFORE
+        INTERFACE
+            "${LGO_ANDROID_DEPENDENCY_PREFIX}/include"
+            "${LGO_ANDROID_DEPENDENCY_PREFIX}/include/freetype2"
+    )
+    target_link_directories(common INTERFACE "${LGO_ANDROID_DEPENDENCY_PREFIX}/lib")
+endif()
+
 if(MSVC)
     target_link_directories(
         common
@@ -114,7 +135,13 @@ if(MSVC)
     )
 endif()
 
+if(ANDROID)
+    add_subdirectory(android/native)
+endif()
 add_subdirectory(external)
 add_subdirectory(lgo)
 add_subdirectory(storage)
-add_subdirectory(other)
+# compare/filegen are desktop command-line tools.
+if(NOT ANDROID)
+    add_subdirectory(other)
+endif()

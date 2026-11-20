@@ -18,5 +18,6 @@ target_link_libraries(
     external.GLFW
     PRIVATE
         common
-        glfw3
+        # Android implements the GLFW API itself on top of GameActivity.
+        $<IF:$<BOOL:${ANDROID}>,android.glfw,glfw3>
 )

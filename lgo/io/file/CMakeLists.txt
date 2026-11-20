@@ -15,7 +15,8 @@ target_link_libraries(
     PRIVATE
         common
     PUBLIC
-        external.Windows
+        $<$<BOOL:${WIN32}>:external.Windows>
+        $<$<BOOL:${ANDROID}>:log>
         lgo.dev.error
         lgo.container.str
 )

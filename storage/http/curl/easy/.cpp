@@ -139,6 +139,12 @@ auto curl_easy_t::configure_transport() -> void
     #endif
     api_curl(curl_easy_setopt(m_interface, CURLOPT_TIMEOUT, 300L));
     api_curl(curl_easy_setopt(m_interface, CURLOPT_CONNECTTIMEOUT, 100L));
+#if defined(__ANDROID__)
+    // OpenSSL cannot read Android's certificate directory directly (its file
+    // names use the pre-1.0 subject hash). android/native/android_main.cpp
+    // collects the system roots into this bundle in the working directory.
+    api_curl(curl_easy_setopt(m_interface, CURLOPT_CAINFO, "cacert.pem"));
+#endif
     return;
 }
 

@@ -17,6 +17,9 @@ export {
     // Divs position children but do not transform their depth ranges. Keep
     // ordinary content behind diagnostics (.16-.19) and modal dialogs (<.14).
     constexpr lgo::depth_range_t storage_content_depth{.2f, .7f};
+    // Windows narrower than this (portrait phones) stack the desktop's side-by-side
+    // areas. The desktop window's 800-pixel minimum never reaches it.
+    constexpr std::int64_t storage_compact_width{600};
     struct easy_status_t
     {
         std::size_t m_text_index{};

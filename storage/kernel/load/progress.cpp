@@ -2,6 +2,7 @@ module;
 #include <nlohmann/json.hpp>
 module storage.kernel.load;
 import std;
+import storage.local;
 import storage.encode;
 
 namespace
@@ -264,7 +265,7 @@ auto download_manifest_restore(google_easy_t& easy, download_task_t& task) -> bo
     if (!s) return false;
     if (task.m_session && s->contains("routing")) task.m_session->restore_routing(s->at("routing"));
     task.m_directories=s->at("directories").get<std::vector<std::string>>();
-    for (const auto& path:task.m_directories) std::filesystem::create_directories(path);
+    for (const auto& path:task.m_directories) storage_local::create_directories(path);
     for (const auto& f:s->at("files")) file_download(&easy,&task,f.at("id"),f.at("path").get<std::string>());
     return true;
 }

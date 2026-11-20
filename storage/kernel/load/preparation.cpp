@@ -2,6 +2,7 @@ module;
 #include <nlohmann/json.hpp>
 module storage.kernel.load;
 import std;
+import storage.local;
 
 namespace
 {
@@ -55,11 +56,11 @@ auto file_upload
 	file->m_task = task;
 	file->m_parent = parent;
 	file->m_type = "file";
-	file->m_name = path_local.filename().string();
+	file->m_name = storage_local::name(path_local.string());
     file->m_path_local = path_local.string();
-    file->m_size = std::filesystem::file_size(path_local);
+    file->m_size = storage_local::size(path_local.string());
     file->m_main_id=prepare_id(*task,blob_queue,path_local.string(),"file","source:"+path_local.string(),
-        {{"size",file->m_size},{"mtime",std::filesystem::last_write_time(path_local).time_since_epoch().count()}});
+        {{"size",file->m_size},{"mtime",storage_local::modified(path_local.string())}});
     file->m_next_id=file->m_main_id;
     task->m_size += file->m_size;
     file->m_self_i = task->m_entity_arr.size();
@@ -81,27 +82,22 @@ auto folder_upload
 	folder->m_task = task;
 	folder->m_parent = parent;
 	folder->m_type = "folder";
-	folder->m_name = path_local.filename().string();
+	folder->m_name = storage_local::name(path_local.string());
     folder->m_path_local=path_local.string();
 	folder->m_self_i = task->m_entity_arr.size();
     task->m_entity_arr.emplace_back(folder);
-    std::vector<std::filesystem::path> children;
-    for (const auto& child : std::filesystem::directory_iterator{path_local})
-    {
-        if (task->m_control->cancelled) throw std::runtime_error{"Task cancelled."};
-        children.push_back(child.path());
-    }
-    std::ranges::sort(children);
+    const auto children{storage_local::children(path_local.string())};
+    if (task->m_control->cancelled) throw std::runtime_error{"Task cancelled."};
     std::vector<std::string> names;
-    for (const auto& child : children) names.push_back(child.filename().string());
+    for (const auto& child : children) names.push_back(storage_local::name(child.path));
     folder->m_main_id=prepare_id(*task,blob_queue,path_local.string(),"folder","children:"+path_local.string(),names);
     folder->m_next_id=folder->m_main_id;
     for (const auto& child : children)
     {
-        if (std::filesystem::is_regular_file(child))
-            folder->m_entity_arr.push_back(file_upload(blob_queue, task, child, folder.get()));
-        else if (std::filesystem::is_directory(child))
-            folder->m_entity_arr.push_back(folder_upload(blob_queue, task, child, folder.get()));
+        if (child.kind == storage_local::kind_t::file)
+            folder->m_entity_arr.push_back(file_upload(blob_queue, task, child.path, folder.get()));
+        else if (child.kind == storage_local::kind_t::directory)
+            folder->m_entity_arr.push_back(folder_upload(blob_queue, task, child.path, folder.get()));
     }
     for (const auto index : folder->m_entity_arr)
     {

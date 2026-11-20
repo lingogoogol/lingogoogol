@@ -22,8 +22,15 @@ export namespace lgo
 
         auto pixmap_get() const -> const pixmap_t&;
         auto advance_get() const -> pos_2D;
+        // Unrounded horizontal advance in logical pixels. Equals `advance_get().x`
+        // at raster scale 1 (hinted advances are whole pixels); at other scales,
+        // lay out runs by rounding the running sum to avoid accumulated error.
+        auto advance_exact_get() const -> double;
         auto bbox_pos_get() const -> size_2D;
         auto bbox_size_get() const -> size_2D;
+        // Logical-pixel offset from `bbox_pos_get()` to where the bitmap's origin
+        // really is (under half a framebuffer pixel; zero at raster scale 1).
+        auto bbox_shift_get() const -> std::array<float, 2>;
     private:
         //Load data without modifying m_code and m_face.
         auto init1(std::uint32_t index) -> void;
@@ -34,6 +41,8 @@ export namespace lgo
         size_2D m_bbox_pos{};
         size_2D m_bbox_size{};
         pos_2D m_advance{};
+        double m_advance_exact{};
+        std::array<float, 2> m_bbox_shift{};
         char32_t m_code{};
         font_face_t* m_face{};
     };

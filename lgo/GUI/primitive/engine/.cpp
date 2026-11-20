@@ -2,10 +2,15 @@ module;
 
 #include <vulkan/vk_platform.h>
 #include <glm/glm.hpp>
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <dwmapi.h>
+#endif
+#if defined(__ANDROID__)
+#include "android/native/glfw_android.h"
+#endif
 
 module lgo.GUI.primitive;
 
@@ -404,6 +409,10 @@ namespace lgo {
             glfwSetScrollCallback(m_window, GLFW_callback_wheel);
             glfwSetKeyCallback(m_window, GLFW_callback_key);
             glfwSetCharCallback(m_window, GLFW_callback_char);
+#if defined(__ANDROID__)
+            glfwSetWindowSurfaceCallbackANDROID(m_window, GLFW_callback_surface);
+            glfwSetTouchDragCallbackANDROID(m_window, GLFW_callback_touch_drag);
+#endif
 
             rect_primitive_t::init(this);
             m_device.waitIdle();
@@ -423,6 +432,71 @@ namespace lgo {
             glfwTerminate();
             throw;
         }
+    }
+
+#if defined(__ANDROID__)
+    // Android destroys the activity's surface whenever the app leaves the screen.
+    // Release only what references it; the device and GPU resources stay.
+    auto engine_t::GLFW_callback_touch_drag(GLFWwindow* window, double x, double y) -> int
+    {
+        auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        if (!engine || engine->m_recovering || engine->m_refresh_error || !engine->m_touch_drag_test) return GLFW_FALSE;
+        return engine->m_touch_drag_test(pos_2D{ static_cast<std::int64_t>(x), static_cast<std::int64_t>(y) })
+            ? GLFW_TRUE : GLFW_FALSE;
+    }
+
+    auto engine_t::GLFW_callback_surface(GLFWwindow* window, int available) -> void
+    {
+        auto* engine{ static_cast<engine_t*>(glfwGetWindowUserPointer(window)) };
+        auto gpu_guard{ engine->gpu_lock() };
+        try
+        {
+            if (!available)
+            {
+                if (*engine->m_device) engine->m_device.waitIdle();
+                engine->m_swap_chain_image_view.clear();
+                engine->m_swap_chain_image.clear();
+                engine->m_semaphore_image.clear();
+                engine->m_semaphore_draw.clear();
+                engine->m_swap_chain.clear();
+                engine->m_surface.clear();
+            }
+            else if (!*engine->m_surface)
+                engine->create_surface();
+            engine->m_swap_chain_dirty = true;
+        }
+        catch (const vk::SystemError& error)
+        {
+            // A failure here is a lost device; the regular recovery rebuilds it.
+            log_file(std::string{ "Android surface change failed: " } + error.what() + "\n");
+            engine->m_surface_lost = available != 0;
+            engine->device_lost();
+        }
+    }
+#endif
+
+    auto engine_t::update_content_area() -> void
+    {
+        m_content_offset = pos_2D{};
+        m_content_size = size_2D{ m_swap_chain_extent.width, m_swap_chain_extent.height };
+#if defined(__ANDROID__)
+        int x{}, y{}, width{}, height{};
+        glfwGetWindowContentAreaANDROID(m_window, &x, &y, &width, &height);
+        if (width > 0 && height > 0 && x >= 0 && y >= 0 &&
+            static_cast<std::uint32_t>(x + width) <= m_swap_chain_extent.width &&
+            static_cast<std::uint32_t>(y + height) <= m_swap_chain_extent.height)
+        {
+            m_content_offset = pos_2D{ x, y };
+            m_content_size = size_2D{ width, height };
+        }
+#endif
+    }
+
+    auto engine_t::text_input_active_set([[maybe_unused]] bool active) -> void
+    {
+#if defined(__ANDROID__)
+        glfwSetTextInputActiveANDROID(m_window, active);
+#endif
     }
 
     auto engine_t::create_surface() -> void
@@ -461,12 +535,18 @@ namespace lgo {
         //Create a physical device.
         std::vector<vk::raii::PhysicalDevice> device_available{ m_instance.enumeratePhysicalDevices() };
         std::multimap<int, vk::raii::PhysicalDevice> device_score{};
+        // Android: the log folder is private to the app, so the error shown to
+        // the user lists the reasons itself.
+        std::string rejected;
         for (vk::raii::PhysicalDevice device : device_available)
         {
             vk::PhysicalDeviceProperties device_property{ device.getProperties() };
             if (device_property.apiVersion < Vulkan_version_encode(0, 1, 1, 0))
             {
                 log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": Vulkan 1.1 is required\n");
+                rejected += std::string{ "\n" } + device_property.deviceName.data() + ": Vulkan 1.1 is required (" +
+                    std::to_string(vk::apiVersionMajor(device_property.apiVersion)) + "." +
+                    std::to_string(vk::apiVersionMinor(device_property.apiVersion)) + ")";
                 continue;
             }
             try
@@ -515,6 +595,7 @@ namespace lgo {
                 if (!reason.empty())
                 {
                     log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": " + reason + "\n");
+                    rejected += std::string{ "\n" } + device_property.deviceName.data() + ": " + reason;
                     continue;
                 }
                 int score{ 0 };
@@ -528,11 +609,17 @@ namespace lgo {
             catch (const vk::SystemError& error)
             {
                 log_file(std::string{ "Cannot query Vulkan GPU " } + device_property.deviceName.data() + ": " + error.what() + "\n");
+                rejected += std::string{ "\n" } + device_property.deviceName.data() + ": " + error.what();
             }
         }
         if (device_score.empty())
         {
+#if defined(__ANDROID__)
+            throw vulkan_unsupported_t{ "No compatible Vulkan GPU is available." + rejected };
+#else
+            (void)rejected;
             throw vulkan_unsupported_t{ "No compatible Vulkan GPU is available. See the per-GPU capability checks in logfile/." };
+#endif
         }
         std::exception_ptr last_error;
         for (const auto& [score, candidate] : device_score | std::views::reverse)
@@ -1108,6 +1195,13 @@ namespace lgo {
 
     auto engine_t::render_visible() const -> bool
     {
+#if !defined(_WIN32)
+        // Without Win32 occlusion queries, follow the window system: a hidden
+        // window (on Android, an activity without a surface) has no framebuffer.
+        int framebuffer_width{},framebuffer_height{};
+        glfwGetFramebufferSize(m_window,&framebuffer_width,&framebuffer_height);
+        return framebuffer_width>0 && framebuffer_height>0;
+#else
         const auto window=glfwGetWin32Window(m_window);
         if (!IsWindowVisible(window) || IsIconic(window)) return false;
         int width{},height{};
@@ -1182,6 +1276,7 @@ namespace lgo {
             if (remaining==NULLREGION) return false;
         }
         return true;
+#endif
     }
 
     auto engine_t::draw() -> void
@@ -1308,15 +1403,16 @@ namespace lgo {
                 vk::SubpassContents::eInline
             );
         }
+        update_content_area();
         m_command_buffer.setViewport
         (
             0,
             vk::Viewport
             {
-                0.0f,
-                0.0f,
-                static_cast<float>(m_swap_chain_extent.width),
-                static_cast<float>(m_swap_chain_extent.height),
+                static_cast<float>(m_content_offset.x),
+                static_cast<float>(m_content_offset.y),
+                static_cast<float>(m_content_size.x),
+                static_cast<float>(m_content_size.y),
                 0.0f,
                 1.0f
             }
@@ -1529,7 +1625,12 @@ namespace lgo {
 
     auto engine_t::get_framebuffer_size() const -> size_2D
     {
-        return size_2D{ m_swap_chain_extent.width, m_swap_chain_extent.height };
+        return m_content_size;
+    }
+
+    auto engine_t::get_content_offset() const -> pos_2D
+    {
+        return m_content_offset;
     }
 
     auto engine_t::callback_window_resize_set(std::function<void(size_2D)> callback) -> void

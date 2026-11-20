@@ -1,0 +1,10 @@
+add_library(storage.local STATIC)
+target_sources(storage.local PUBLIC FILE_SET CXX_MODULES FILES .cppm)
+if(ANDROID)
+    # Storage Access Framework documents through JNI; see android.cpp.
+    target_sources(storage.local PRIVATE android.cpp)
+    target_link_libraries(storage.local PRIVATE common android.glfw)
+else()
+    target_sources(storage.local PRIVATE .cpp)
+    target_link_libraries(storage.local PRIVATE common lgo.io storage.state)
+endif()

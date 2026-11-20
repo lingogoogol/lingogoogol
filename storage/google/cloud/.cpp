@@ -1,8 +1,15 @@
 module;
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #undef min
 #undef max
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include <nlohmann/json.hpp>
 module storage.google.cloud;
 import std;
@@ -129,6 +136,7 @@ namespace
     {
         // MoveFileEx without REPLACE_EXISTING preserves another process's file
         // even if it appeared after the initial existence check.
+#if defined(_WIN32)
         const auto temporary = path.wstring()+L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
         storage_atomic_write(temporary,content);
         if (!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH))
@@ -136,6 +144,21 @@ namespace
             DeleteFileW(temporary.c_str());
             throw std::runtime_error{"無法保存服務帳戶金鑰，既有檔案不會被覆寫"};
         }
+#else
+        // renameat2(RENAME_NOREPLACE) likewise refuses, atomically, to replace an
+        // existing file. Android's SELinux policy denies hard links (link()) to
+        // apps, so only fall back to link() where renameat2 is unsupported.
+        const auto temporary = path.string()+"."+std::to_string(::getpid())+".tmp";
+        storage_atomic_write(temporary,content);
+        constexpr unsigned rename_noreplace{1}; // RENAME_NOREPLACE in <linux/fs.h>
+        bool saved{::syscall(SYS_renameat2,AT_FDCWD,temporary.c_str(),AT_FDCWD,path.c_str(),rename_noreplace)==0};
+        if (!saved && (errno==ENOSYS || errno==EINVAL)) saved = ::link(temporary.c_str(),path.c_str())==0;
+        const auto error{errno};
+        ::unlink(temporary.c_str()); // Already gone after a successful rename.
+        if (!saved)
+            throw std::runtime_error{error==EEXIST ? "無法保存服務帳戶金鑰，既有檔案不會被覆寫"
+                : "無法保存服務帳戶金鑰（errno "+std::to_string(error)+"）"};
+#endif
     }
 }
 

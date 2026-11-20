@@ -1,9 +1,12 @@
 module;
 
-// This project targets Windows, including when cross compiled from Linux.
+#if defined(_WIN32)
 // Winsock shutdown can wake Schannel's blocking select without closing/reusing
 // a socket underneath curl; only the worker performs closesocket and curl APIs.
 #include <winsock2.h>
+#else
+#include "storage/socket.hpp"
+#endif
 
 module storage.http.curl.worker;
 

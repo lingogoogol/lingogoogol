@@ -26,4 +26,5 @@ target_link_libraries(
         storage.encode
         storage.http
         storage.google
+        storage.local
 )

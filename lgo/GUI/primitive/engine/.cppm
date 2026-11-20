@@ -24,6 +24,10 @@ export namespace lgo
         pos_2D m_window_pos{};
         size_2D m_window_size{};
         size_2D m_framebuffer_size{};
+        // The drawable part of the framebuffer, in framebuffer pixels: all of it
+        // on desktop; on Android, the area not covered by system bars or the keyboard.
+        pos_2D m_content_offset{};
+        size_2D m_content_size{};
         bool m_swap_chain_dirty{ true };
         bool m_rendering{ false };
         std::exception_ptr m_refresh_error{};
@@ -106,6 +110,12 @@ export namespace lgo
         static auto GLFW_callback_wheel(GLFWwindow* window, double x, double y) -> void;
         static auto GLFW_callback_key(GLFWwindow* window, int key, int scancode, int action, int mods) -> void;
         static auto GLFW_callback_char(GLFWwindow* window, unsigned int codepoint) -> void;
+#if defined(__ANDROID__)
+        static auto GLFW_callback_surface(GLFWwindow* window, int available) -> void;
+        static auto GLFW_callback_touch_drag(GLFWwindow* window, double x, double y) -> int;
+#endif
+        std::function<bool(pos_2D)> m_touch_drag_test{};
+        auto update_content_area() -> void;
         static VKAPI_ATTR auto VKAPI_CALL debug_callback
         (
             vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -172,7 +182,14 @@ export namespace lgo
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;
         auto get_window_size() -> const size_2D&;
+        // Size and offset of the drawable area; GUI logical pixels map onto it.
         auto get_framebuffer_size() const -> size_2D;
+        auto get_content_offset() const -> pos_2D;
+        // Shows the soft keyboard while a text field has focus (Android only).
+        auto text_input_active_set(bool active) -> void;
+        // Android: whether a touch beginning at this position drags like a mouse
+        // (scrollbars) rather than scrolling the area under the finger.
+        auto touch_drag_test_set(std::function<bool(pos_2D)> test) -> void { m_touch_drag_test = std::move(test); }
         auto callback_window_resize_set(std::function<void(size_2D)> callback) -> void;
         auto callback_frame_rate_set(std::function<void(std::uint64_t)> callback) -> void;
         auto get_cursor_pos() -> pos_2D;

@@ -56,6 +56,7 @@ export namespace lgo
         pos_2D m_texture_pos{};
         size_2D m_texture_axis_x{};
         size_2D m_texture_axis_y{};
+        std::array<float, 2> m_texture_shift{};
         mutable std::recursive_mutex m_mutex{};
         bool m_texture_enable{};
         const pos_2D* m_clip_pos{};
@@ -92,6 +93,10 @@ export namespace lgo
             pos_2D texture_pos{};
             size_2D texture_axis_x{};
             size_2D texture_axis_y{};
+            // Sub-pixel offset of the texture origin, in logical pixels. Glyphs use
+            // it at non-integer display scales (phones), where a whole logical pixel
+            // spans several framebuffer pixels. Zero on desktop.
+            std::array<float, 2> texture_shift{};
             std::string name{};
         };
         rect_primitive_t() = default;

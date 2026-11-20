@@ -1,7 +1,13 @@
 module;
 #include <nlohmann/json.hpp>
+#if defined(_WIN32)
 #include <winsock2.h>
 #include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include "storage/socket.hpp"
+#endif
 #include <openssl/sha.h>
 module storage.state;
 import std;
@@ -52,8 +58,14 @@ namespace
                 // A locked cache can remain orphaned. It must not turn an
                 // already durable successful transfer into a failed task.
                 if (error)
+                {
+#if defined(_WIN32)
                     OutputDebugStringW((L"Cannot remove completed task cache: "+path.wstring()+
                                         L" (Windows error "+std::to_wstring(error.value())+L")\n").c_str());
+#else
+                    std::cerr << "Cannot remove completed task cache: " << path.string() << " (" << error.message() << ")\n";
+#endif
+                }
             }
         }};
 
@@ -88,9 +100,45 @@ namespace
             index.push_back(id);
         storage_atomic_write("task", index.dump());
     }
+#if !defined(_WIN32)
+    // POSIX counterparts of the CreateFileW/WriteFile/FlushFileBuffers calls below.
+    struct descriptor_t
+    {
+        int value{-1};
+        ~descriptor_t() { if (value >= 0) ::close(value); }
+    };
+
+    auto write_all(int descriptor, std::string_view content, std::uint64_t offset) -> bool
+    {
+        while (!content.empty())
+        {
+            const auto written{::pwrite(descriptor, content.data(), std::min<std::size_t>(content.size(), 0x40000000),
+                                        static_cast<off_t>(offset))};
+            if (written < 0 && errno == EINTR) continue;
+            if (written <= 0) return false;
+            content.remove_prefix(static_cast<std::size_t>(written));
+            offset += static_cast<std::uint64_t>(written);
+        }
+        return true;
+    }
+
+    // MOVEFILE_WRITE_THROUGH also persists the rename itself; on POSIX that is
+    // an fsync of the directory. Best effort: some file systems refuse it.
+    auto sync_directory(const std::filesystem::path& file) -> void
+    {
+        const auto directory{file.has_parent_path() ? file.parent_path() : std::filesystem::path{"."}};
+        const descriptor_t handle{::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC)};
+        if (handle.value >= 0) ::fsync(handle.value);
+    }
+#endif
 } // namespace
 auto storage_flush_file(const std::filesystem::path& path) -> void
 {
+#if !defined(_WIN32)
+    const descriptor_t file{::open(path.c_str(), O_WRONLY | O_CLOEXEC)};
+    if (file.value < 0 || ::fsync(file.value) != 0)
+        throw std::runtime_error{"Cannot flush download: " + path.string()};
+#else
     const auto handle{CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
     if (handle == INVALID_HANDLE_VALUE)
@@ -99,6 +147,7 @@ auto storage_flush_file(const std::filesystem::path& path) -> void
     CloseHandle(handle);
     if (!ok)
         throw std::runtime_error{"Cannot flush download: " + path.string()};
+#endif
 }
 auto storage_read(const std::filesystem::path& path) -> std::string
 {
@@ -110,6 +159,14 @@ auto storage_read(const std::filesystem::path& path) -> std::string
 auto storage_rewrite_tail(const std::filesystem::path& path, std::uint64_t offset,
                           std::string_view tail) -> void
 {
+#if !defined(_WIN32)
+    const descriptor_t file{::open(path.c_str(), O_WRONLY | O_CREAT | O_CLOEXEC, 0644)};
+    if (file.value < 0) throw std::runtime_error{"Cannot edit queue: "+path.string()};
+    if (!write_all(file.value, tail, offset))
+        throw std::runtime_error{"Cannot write queue tail: "+path.string()};
+    if (::ftruncate(file.value, static_cast<off_t>(offset + tail.size())) != 0 || ::fsync(file.value) != 0)
+        throw std::runtime_error{"Cannot flush queue tail: "+path.string()};
+#else
     const auto handle=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,
                                  OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     if (handle==INVALID_HANDLE_VALUE) throw std::runtime_error{"Cannot edit queue: "+path.string()};
@@ -128,6 +185,7 @@ auto storage_rewrite_tail(const std::filesystem::path& path, std::uint64_t offse
     }
     if (!SetEndOfFile(handle) || !FlushFileBuffers(handle))
         throw std::runtime_error{"Cannot flush queue tail: "+path.string()};
+#endif
 }
 auto storage_atomic_write(const std::filesystem::path& path, std::string_view content) -> void
 {
@@ -135,6 +193,19 @@ auto storage_atomic_write(const std::filesystem::path& path, std::string_view co
         std::filesystem::create_directories(path.parent_path());
     auto temporary{path};
     temporary += ".tmp";
+#if !defined(_WIN32)
+    {
+        const descriptor_t file{::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)};
+        if (file.value < 0)
+            throw std::runtime_error{"Cannot create checkpoint: " + path.string()};
+        if (!write_all(file.value, content, 0) || ::fsync(file.value) != 0)
+            throw std::runtime_error{"Cannot flush checkpoint: " + path.string()};
+    }
+    // rename() replaces atomically; POSIX has no sharing violations to wait out.
+    if (std::rename(temporary.c_str(), path.c_str()) != 0)
+        throw std::runtime_error{"Cannot save checkpoint: "+path.string()+" (errno "+std::to_string(errno)+")"};
+    sync_directory(path);
+#else
     const auto handle{CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                   FILE_ATTRIBUTE_NORMAL, nullptr)};
     if (handle == INVALID_HANDLE_VALUE)
@@ -166,6 +237,7 @@ auto storage_atomic_write(const std::filesystem::path& path, std::string_view co
             throw std::runtime_error{"Cannot save checkpoint: "+path.string()+" (Windows error "+std::to_string(error)+")"};
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
+#endif
 }
 auto storage_digest(std::string_view content) -> std::string
 {

@@ -80,11 +80,13 @@ namespace lgo
                         return { -1.0f, -1.0f };
                     }
                     size_2D d{ p - m_texture_pos };
+                    const float d_x{ static_cast<float>(d.x) - m_texture_shift[0] };
+                    const float d_y{ static_cast<float>(d.y) - m_texture_shift[1] };
                     float det_f{ static_cast<float>(det) };
                     return
                     {
-                        static_cast<float>(d.x * m_texture_axis_y.y - d.y * m_texture_axis_y.x) / det_f,
-                        static_cast<float>(-d.x * m_texture_axis_x.y + d.y * m_texture_axis_x.x) / det_f
+                        (d_x * static_cast<float>(m_texture_axis_y.y) - d_y * static_cast<float>(m_texture_axis_y.x)) / det_f,
+                        (-d_x * static_cast<float>(m_texture_axis_x.y) + d_y * static_cast<float>(m_texture_axis_x.x)) / det_f
                     };
                 }
             };
@@ -374,6 +376,7 @@ namespace lgo
         {
             const auto logical{m_engine->get_window_size()};
             const auto frame{m_engine->get_framebuffer_size()};
+            const auto origin{m_engine->get_content_offset()};
             const auto cursor{m_engine->cursor_pos_get()};
             const float sx{float(frame.x) / logical.x}, sy{float(frame.y) / logical.y};
             // Independent X/Y framebuffer scales preserve a logical circle on HiDPI screens.
@@ -382,7 +385,8 @@ namespace lgo
             command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *m_solid_pipeline_state.interface_get());
             command_buffer.pushConstants<float>(m_solid_pipeline_state.layout_get(),
                 vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, highlight);
-            command_buffer.setScissor(0, vk::Rect2D{.offset{0, 0},
+            command_buffer.setScissor(0, vk::Rect2D{
+                .offset{static_cast<std::int32_t>(origin.x), static_cast<std::int32_t>(origin.y)},
                 .extent{static_cast<std::uint32_t>(frame.x), static_cast<std::uint32_t>(frame.y)}});
             command_buffer.bindVertexBuffers(0, *m_cursor_vertices.interface_get(), {0});
             command_buffer.draw(4, 1, 0, 0);
@@ -402,6 +406,7 @@ namespace lgo
         m_texture_pos{ ctor.texture_pos },
         m_texture_axis_x{ ctor.texture_axis_x },
         m_texture_axis_y{ ctor.texture_axis_y },
+        m_texture_shift{ ctor.texture_shift },
         m_name{ ctor.name }
     {
         m_texture_enable = ctor.image_view;
@@ -575,6 +580,7 @@ namespace lgo
         // Clamp before conversion so a shrinking window cannot produce negative Vulkan offsets.
         const auto window_size{ m_engine->get_window_size() };
         const auto framebuffer_size{ m_engine->get_framebuffer_size() };
+        const auto origin{ m_engine->get_content_offset() };
         const auto clip_pos{ m_clip_pos ? *m_clip_pos : pos_2D{} };
         const auto clip_size{ m_clip_size ? *m_clip_size : window_size };
         const auto left{ std::clamp<std::int64_t>(clip_pos.x, 0, window_size.x) };
@@ -589,7 +595,7 @@ namespace lgo
         const auto y{ top * framebuffer_size.y / window_size.y };
         vk::Rect2D scissor_rect
         {
-            .offset{ static_cast<std::int32_t>(x), static_cast<std::int32_t>(y) },
+            .offset{ static_cast<std::int32_t>(origin.x + x), static_cast<std::int32_t>(origin.y + y) },
             .extent
             {
                 static_cast<std::uint32_t>(right * framebuffer_size.x / window_size.x - x),

@@ -81,6 +81,13 @@ export namespace lgo
                 });
                 route.move = engine->callback_mouse_move_add([engine](pos_2D pos)
                 { if (auto node{routes.at(engine).captured}) node->m_move(pos); });
+                // Android: a finger on a scrollbar drags it like the mouse.
+                engine->touch_drag_test_set([engine](pos_2D pos)
+                {
+                    for (auto node : candidates(engine,pos))
+                        if (node->m_track(pos)) return true;
+                    return false;
+                });
                 route.button = engine->callback_mouse_button_add([engine](int button, int action, int)
                 {
                     if (button != GLFW_MOUSE_BUTTON_LEFT) return;
@@ -111,6 +118,7 @@ export namespace lgo
                 m_engine->callback_mouse_scroll_remove(route.wheel);
                 m_engine->callback_mouse_move_remove(route.move);
                 m_engine->callback_mouse_button_remove(route.button);
+                m_engine->touch_drag_test_set({});
                 routes.erase(m_engine);
             }
             m_engine = nullptr;
@@ -160,6 +168,17 @@ export namespace lgo
         std::int64_t m_grab{};
         bool m_layout{};
         static constexpr std::int64_t bar_width{2}, bar_space{8}, wheel_step{32};
+#if defined(__ANDROID__)
+        // A finger cannot hit a 2px bar: touches this close to a track grab it.
+        static constexpr std::int64_t track_touch_margin{12};
+#else
+        static constexpr std::int64_t track_touch_margin{0};
+#endif
+        auto near_track(const rect_t& track, pos_2D pos) const -> bool
+        {
+            const size_2D margin{track_touch_margin,track_touch_margin};
+            return inside(track.get_pos()-margin,track.get_size()+size_2D{2*margin.x,2*margin.y},pos);
+        }
         auto x_enabled() const -> bool { return m_axes != scroll_axes_t::y; }
         auto y_enabled() const -> bool { return m_axes != scroll_axes_t::x; }
         auto hit(pos_2D pos) const -> bool
@@ -328,17 +347,19 @@ export namespace lgo
                     return wheel(delta);
                 }, [this](pos_2D pos)
                 {
-                    return (max_scroll().x && inside(m_x_track.get_pos(),m_x_track.get_size(),pos)) ||
-                           (max_scroll().y && inside(m_y_track.get_pos(),m_y_track.get_size(),pos));
+                    return (max_scroll().x && near_track(m_x_track,pos)) ||
+                           (max_scroll().y && near_track(m_y_track,pos));
                 }, [this](pos_2D pos)
                 {
                     set_scroll_offset(m_offset); // Dragging takes over immediately from wheel momentum.
-                    const bool x{max_scroll().x && inside(m_x_track.get_pos(),m_x_track.get_size(),pos)};
+                    const bool x{max_scroll().x && near_track(m_x_track,pos)};
                     m_drag_axis = x ? 0 : 1;
                     const auto& thumb{x ? m_x_thumb : m_y_thumb};
-                    m_grab = inside(thumb.get_pos(),thumb.get_size(),pos)
-                        ? (x ? pos.x-thumb.get_pos().x : pos.y-thumb.get_pos().y)
-                        : (x ? thumb.get_size().x : thumb.get_size().y)/2;
+                    // Grab the thumb where it was pressed along the track (the
+                    // cross position may lie beside the thin bar on a touch).
+                    const auto along{x ? pos.x-thumb.get_pos().x : pos.y-thumb.get_pos().y};
+                    const auto length{x ? thumb.get_size().x : thumb.get_size().y};
+                    m_grab = along >= 0 && along < length ? along : length/2;
                     drag(pos);
                 },[this](pos_2D pos) { drag(pos); },[this] { m_drag_axis = -1; }, [this](double seconds) { animate(seconds); });
             show_end(base); layout();

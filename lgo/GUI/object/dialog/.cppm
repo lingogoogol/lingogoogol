@@ -34,7 +34,13 @@ export namespace lgo
         std::shared_ptr<text_line_std_t> m_error;
         std::optional<bool> m_decision;
         std::int64_t m_height{};
+        // 720 on desktop; narrower windows (phones) shrink the panel and let a
+        // panel taller than the window scroll.
+        std::int64_t m_width{720};
+        std::int64_t m_scroll{};
+        size_2D m_window{};
         engine_t::callback_key_t* m_key{};
+        engine_t::callback_mouse_scroll_t* m_wheel{};
 
       public:
         modal_dialog_t(engine_t* engine, depth_tracker_t* depth, std::string title,
@@ -44,6 +50,7 @@ export namespace lgo
         ~modal_dialog_t()
         {
             if(m_key)m_state.get_engine()->callback_key_remove(m_key);
+            if(m_wheel)m_state.get_engine()->callback_mouse_scroll_remove(m_wheel);
             m_state.clear_state();
         }
         auto resize(size_2D size) -> void;

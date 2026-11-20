@@ -1,8 +1,16 @@
+module;
+
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 module lgo.io.file;
 
 import std;
 
+#if defined(_WIN32)
 import external.Windows;
+#endif
 
 import lgo.dev.error;
 import lgo.container.str;
@@ -122,6 +130,10 @@ namespace lgo
 
     auto log_file(const std::string& in) -> void
     {
+#if defined(__ANDROID__)
+        // The log folder is private to the app; mirror to logcat for diagnosis.
+        __android_log_write(ANDROID_LOG_INFO, "lingogoogol", in.c_str());
+#endif
         auto& state{ logfile() };
         std::unique_lock lock{ state.mutex };
         if (get_logfile_path().empty())
@@ -179,7 +191,13 @@ namespace lgo
 
     auto log_console(const std::string& in) -> void
     {
+#if defined(_WIN32)
         OutputDebugStringW(to_wstring(in).data());
+#elif defined(__ANDROID__)
+        __android_log_write(ANDROID_LOG_INFO, "lingogoogol", in.c_str());
+#else
+        std::cerr << in;
+#endif
         return;
     }
 }

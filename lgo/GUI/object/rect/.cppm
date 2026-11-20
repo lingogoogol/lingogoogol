@@ -26,6 +26,7 @@ export namespace lgo
         pos_2D m_texture_pos{};
         size_2D m_texture_axis_x{};
         size_2D m_texture_axis_y{};
+        std::array<float, 2> m_texture_shift{};
         bool m_texture_enable{};
         rect_primitive_t* m_primitive{};
         pos_2D m_clip_pos{};
@@ -91,7 +92,9 @@ export namespace lgo
             pos_2D texture_pos,
             size_2D texture_axis_x,
             size_2D texture_axis_y,
-            color_t color = std_white
+            color_t color = std_white,
+            // Sub-pixel texture offset in logical pixels; see rect_primitive_t::ctor_t.
+            std::array<float, 2> texture_shift = {}
         );
 
         auto get_pos() const -> pos_2D override;

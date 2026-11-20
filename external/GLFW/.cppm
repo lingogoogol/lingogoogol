@@ -1,9 +1,15 @@
 module;
 
 #define GLFW_INCLUDE_VULKAN
+#if !defined(_WIN32)
+// The Android NDK has no desktop OpenGL headers, and nothing here uses OpenGL.
+#define GLFW_INCLUDE_NONE
+#endif
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#endif
 
 export module external.GLFW;
 
@@ -87,7 +93,9 @@ export
     using ::glfwFocusWindow;
     using ::glfwHideWindow;
     using ::glfwGetWindowAttrib;
+#if defined(_WIN32)
     using ::glfwGetWin32Window;
+#endif
     using ::glfwSetWindowSizeLimits;
     using ::glfwSetWindowRefreshCallback;
     using ::glfwSetWindowUserPointer;

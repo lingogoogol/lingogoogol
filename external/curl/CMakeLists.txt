@@ -12,5 +12,5 @@ target_link_libraries(
     external.curl
     PRIVATE
         common
-        $<IF:$<BOOL:${MINGW}>,curl,libcurl>
+        $<IF:$<BOOL:${MSVC}>,libcurl,curl>
 )

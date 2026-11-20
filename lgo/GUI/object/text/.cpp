@@ -443,22 +443,40 @@ namespace lgo
         m_engine->command_queue_get().waitIdle();
 
         m_rect_id.resize(text_w.size());
+        // Cell widths come from the rounded running pen position, not from each
+        // rounded advance: at non-integer display scales per-glyph rounding made
+        // letter spacing uneven. At scale 1 every advance is whole, so it is the same.
+        double pen{};
+        std::int64_t pen_rounded{};
         for (std::size_t i{ 0 }; i < text_w.size(); ++i)
         {
             font_face_t* face{ face_arr[i] };
+            // The cell starts at the rounded pen position; shift the glyph by the
+            // rounding error so it is drawn where the unrounded pen puts it.
+            const auto bbox_shift{ m_glyph[i]->m_font.bbox_shift_get() };
+            const std::array<float, 2> texture_shift
+            {
+                static_cast<float>(pen - static_cast<double>(pen_rounded)) + bbox_shift[0],
+                bbox_shift[1]
+            };
+            pen += m_glyph[i]->m_font.advance_exact_get();
+            const std::int64_t pen_next{ std::llround(pen) };
+            const std::int64_t cell_width{ pen_next - pen_rounded };
+            pen_rounded = pen_next;
             //Since (0, 0) is at the top-left of the cell and +y points downward, the baseline is at
             //`y = face->ascender_get()` from the top of the cell, and `m_bbox_pos` is `(bitmap_left, -bitmap_top)`.
             m_rect_id[i] = m_div.add_object<rect_t>
             (
                 m_depth_range,
-                size_2D{ m_glyph[i]->m_font.advance_get().x, face->height_get() },
+                size_2D{ cell_width, face->height_get() },
                 m_clip_pos,
                 m_clip_size,
                 &m_glyph[i]->m_image_view,
                 pos_2D{ 0, face->ascender_get() } + m_glyph[i]->m_font.bbox_pos_get(),
                 size_2D{ m_glyph[i]->m_font.bbox_size_get().x, 0 },
                 size_2D{ 0, m_glyph[i]->m_font.bbox_size_get().y },
-                m_color
+                m_color,
+                texture_shift
             );
         }
         update_glyph_clips();

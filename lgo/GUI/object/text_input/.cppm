@@ -185,6 +185,7 @@ export namespace lgo
                                                     { text_input_key_callback(key, action, mods); });
         m_callback = m_engine->callback_cha_add(
             std::bind(&text_input_constraint_impl_t::text_input_cha_callback, this, std::placeholders::_1));
+        m_engine->text_input_active_set(true);
         return;
     }
 
@@ -194,7 +195,10 @@ export namespace lgo
             m_engine->callback_cha_remove(m_callback);
         m_callback = nullptr;
         if (m_key_callback)
+        {
             m_engine->callback_key_remove(m_key_callback);
+            m_engine->text_input_active_set(false);
+        }
         m_key_callback = nullptr;
         return;
     }

@@ -53,7 +53,8 @@ namespace lgo
                 const auto width = std::max<std::int64_t>(1,std::min<std::int64_t>(640,size.x-32));
                 std::vector<std::string> wrapped;
                 std::string line;
-                std::int64_t used{};
+                // Matches the text line's rounded running pen position.
+                double used{};
                 // Decode whole UTF-8 code points; never split a Chinese glyph
                 // or a supplementary character when wrapping long labels.
                 for (std::size_t i{};i<text.size();)
@@ -65,7 +66,7 @@ namespace lgo
                     char32_t code = lead & (count==0 ? 0x7f : count==1 ? 0x1f : count==2 ? 0x0f : 0x07);
                     for (int c{};c<count && i<text.size();++c)
                         code = (code<<6) | (static_cast<unsigned char>(text[i++]) & 0x3f);
-                    const auto advance = font_char_t{code}.advance_get().x;
+                    const auto advance = font_char_t{code}.advance_exact_get();
                     if (!line.empty() && used+advance>width)
                     { wrapped.push_back(std::move(line)); line.clear(); used=0; }
                     line += text.substr(start,i-start);

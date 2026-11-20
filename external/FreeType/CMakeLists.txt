@@ -12,5 +12,6 @@ target_link_libraries(
     external.FreeType
     PRIVATE
         common
-        $<IF:$<CONFIG:Debug>,freetyped,freetype>
+        # The Android dependency script builds only the release library.
+        $<IF:$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:${ANDROID}>>>,freetyped,freetype>
 )

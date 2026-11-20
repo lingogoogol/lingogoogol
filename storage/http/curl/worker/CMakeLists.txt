@@ -7,5 +7,6 @@ target_sources(storage.http.curl.worker
 
 target_link_libraries(storage.http.curl.worker
     PRIVATE common external.curl storage.http.curl.curl storage.http.curl.easy storage.http.curl.multi
-        $<IF:$<BOOL:${MINGW}>,ws2_32,Ws2_32>
+        $<$<BOOL:${MINGW}>:ws2_32>
+        $<$<BOOL:${MSVC}>:Ws2_32>
 )

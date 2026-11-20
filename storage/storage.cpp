@@ -1,13 +1,20 @@
 #include <nlohmann/json.hpp>
+#if defined(__ANDROID__)
+#include "android/native/bridge.hpp"
+#endif
 
 import std;
 
+#if defined(_WIN32)
 import external.Windows;
+#endif
 import external.Vulkan;
 import external.GLFW;
 import lgo.container.str;
+#if defined(_WIN32)
 import external.processenv;
 import external.shellapi;
+#endif
 
 import lgo.math;
 import lgo.io;
@@ -17,13 +24,18 @@ import storage.http;
 import storage.encode;
 import storage.google;
 import storage.kernel;
+#if defined(__ANDROID__)
+import storage.local;
+#endif
 
 std::atomic_bool close_app{false};
 
 auto app() -> void
 {
+#if defined(_WIN32)
     // Explorer may start with bin as CWD. Packaged GUI resources and state
     // always belong beside bin; command-line helper tools retain their CWD.
+    // Android: the entry point (android/native) sets the app's data directory.
     std::vector<wchar_t> executable_name(32768);
     const auto length = GetModuleFileNameW(nullptr,executable_name.data(),
         static_cast<DWORD>(executable_name.size()));
@@ -34,6 +46,7 @@ auto app() -> void
     std::ranges::transform(directory,directory.begin(),[](wchar_t c)
         { return c>=L'A' && c<=L'Z' ? c-L'A'+L'a' : c; });
     if (directory==L"bin") std::filesystem::current_path(executable.parent_path().parent_path());
+#endif
     auto settings{storage_settings_t::load()};
     // Keep one filename for this process; ordinary settings/space operations
     // must not split the session log. A directory change retains this name.
@@ -49,6 +62,10 @@ auto app() -> void
     lgo::log_file("CWD: " + std::filesystem::current_path().string() + "\n");
     lgo::FreeType_t freetype;
     lgo::font_face_t::freetype_set(&freetype);
+#if defined(__ANDROID__)
+    // One logical pixel is one dp; rasterize glyphs at the screen's density.
+    lgo::font_face_t::raster_scale_set(android_display_scale());
+#endif
     // Visible glyphs and the GPU cache retain face pointers across live changes.
     std::vector<std::unique_ptr<lgo::font_face_t>> fonts;
     std::map<std::string,std::size_t> font_cache{{settings.font_path,0}};
@@ -538,7 +555,10 @@ auto app() -> void
         }
         else if (menu_page==menu_page_t::users)
         {
+#if !defined(__ANDROID__)
+            // Android signs in through its Android OAuth client, not client.json.
             if (!std::filesystem::exists(settings.account_path)) return rows;
+#endif
             for (const auto& user : google_oauth_user_t::saved_accounts(settings.account_path,oauth_purpose_t::cloud))
                 rows.push_back({user.address,user.portrait,true,{
                     {"使用",[&,email=user.address]
@@ -607,6 +627,68 @@ auto app() -> void
                     persistent.m_deferred.push_back(show_menu);
                 });
             });
+#if defined(__ANDROID__)
+            // Phone only: copy files from a desktop runtime folder, picked one by
+            // one, into the same places here. Settings stay per device: only the
+            // spaces and their account associations come from settings.json.
+            actions.emplace_back("匯入檔案",[&]
+            {
+                std::size_t imported{};
+                std::vector<std::string> unknown;
+                for (const auto& document : android_pick_documents(false))
+                {
+                    const auto name=storage_local::name(document);
+                    try
+                    {
+                        const auto stream=storage_local::open_read(document);
+                        const std::string content{std::istreambuf_iterator<char>{*stream},{}};
+                        const auto data=nlohmann::json::parse(content,nullptr,false);
+                        const auto safe=!name.empty() && name.find_first_of("/\\")==std::string::npos && name!="." && name!="..";
+                        if (!safe || !data.is_object()) throw std::runtime_error{"unknown"};
+                        if (name=="settings.json" && data.contains("spaces"))
+                        {
+                            for (const auto& space : data.at("spaces"))
+                            {
+                                const auto id=space.at("id").get<std::string>();
+                                auto accounts=space.value("accounts",std::vector<std::string>{});
+                                const auto found=std::ranges::find(settings.spaces,id,&storage_space_t::id);
+                                if (found==settings.spaces.end())
+                                    settings.spaces.push_back({id,space.at("name").get<std::string>(),std::move(accounts),false});
+                                else
+                                    for (auto& account : accounts)
+                                        if (std::ranges::find(found->accounts,account)==found->accounts.end())
+                                            found->accounts.push_back(std::move(account));
+                            }
+                        }
+                        else if (name=="accounts.json")
+                        {
+                            const std::filesystem::path registry{"key/accounts.json"};
+                            auto managed=std::filesystem::exists(registry) ?
+                                nlohmann::json::parse(storage_read(registry)) : nlohmann::json::object();
+                            for (const auto& [address,path] : data.items())
+                                if (!managed.contains(address)) managed[address]=path;
+                            storage_atomic_write(registry,managed.dump(2));
+                        }
+                        else if (data.value("type",std::string{})=="service_account" && data.contains("private_key"))
+                            storage_atomic_write(std::filesystem::path{"key"}/name,content);
+                        else if (data.size()==2 && data.contains("account") && data.contains("id"))
+                            storage_atomic_write(std::filesystem::path{settings.root_path}/name,content);
+                        else throw std::runtime_error{"unknown"};
+                        ++imported;
+                    }
+                    catch (const std::exception&) { unknown.push_back(name); }
+                }
+                sync_settings();
+                std::string text{"已匯入 "+std::to_string(imported)+" 個檔案"};
+                if (!unknown.empty())
+                {
+                    text+="；無法辨識：";
+                    for (const auto& name : unknown) text+=(name==unknown.front() ? "" : "、")+name;
+                }
+                persistent.m_directory_status->set_text(text);
+                persistent.m_deferred.push_back(show_menu);
+            });
+#endif
         }
         else
         {
@@ -807,6 +889,10 @@ auto app() -> void
     while (!message_loop(&engine, &persistent, &multi, &load_state, load_state.m_session ? load_state.m_session->queue.get() : nullptr))
     {
         using namespace std::chrono_literals;
+#if defined(__ANDROID__)
+        // A foreground service keeps the process alive while transfers run in the background.
+        android_set_transfers_active(!load_state.m_task_list.empty());
+#endif
         if (cloud_job.valid() && parallel_total)
         {
             parallel_displayed=parallel_completed->load();
@@ -911,11 +997,16 @@ auto app() -> void
                             if (!accepted) { show_menu(); return; }
                             begin_cloud("開啟 Google 條款頁面",[url]
                             {
+#if defined(_WIN32)
                                 const std::wstring browser_url{url.begin(),url.end()};
                                 const auto result=ShellExecuteW(nullptr,L"open",
                                     browser_url.c_str(),nullptr,nullptr,1);
                                 if (reinterpret_cast<std::intptr_t>(result)<=32)
                                     throw std::runtime_error{"無法啟動瀏覽器，請開啟 "+url};
+#else
+                                if (!android_open_url(url))
+                                    throw std::runtime_error{"無法啟動瀏覽器，請開啟 "+url};
+#endif
                                 return cloud_result_t{cloud_result_t::kind_t::terms_opened};
                             });
                         });
@@ -1134,14 +1225,19 @@ auto report_error(std::string_view title, const std::exception& error) noexcept 
         const std::string message{std::string{title} + ": " + error.what() +
                                   "\nSee the configured logfile directory for details."};
         lgo::log_file(message + "\n");
+#if defined(_WIN32)
         MessageBoxW(nullptr, lgo::to_wstring(message).c_str(), L"Storage", MB_OK | MB_ICONERROR);
+#else
+        android_report_error(message);
+#endif
     }
     catch (...)
     {
     }
 }
 
-auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
+// Shared by wWinMain and the Android entry point (android/native).
+auto storage_main() -> int
 {
     int result{};
     try
@@ -1172,10 +1268,21 @@ auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
         catch (...)
         {
         }
+#if defined(_WIN32)
         MessageBoxW(nullptr, L"Unknown application error. See the configured logfile directory.", L"Storage",
                     MB_OK | MB_ICONERROR);
+#else
+        android_report_error("Unknown application error. See the configured logfile directory.");
+#endif
         result = 1;
     }
     lgo::log_file("finished_all!\n");
     return result;
 }
+
+#if defined(_WIN32)
+auto __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) -> int
+{
+    return storage_main();
+}
+#endif
