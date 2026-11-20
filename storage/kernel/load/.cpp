@@ -163,6 +163,9 @@ auto collect_finished_tasks(load_state_t& state, curl_multi_worker_t& multi) -> 
                 if(task.m_journal)
                 {
                     auto journal=task.m_journal;
+                    // A signed-out task keeps its journal for the next login. Forget
+                    // it here, or restore_tasks would skip it as an existing task.
+                    if(task.m_result==task_result_t::signed_out)state.m_known_journals.erase(journal->path());
                     storage_background([journal]{journal->retire_memory();});
                 }
                 entry = state.m_finished_tasks.erase(entry);continue;
