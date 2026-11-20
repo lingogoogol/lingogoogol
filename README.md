@@ -357,7 +357,7 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `python3 tests/run_spaces_gui.py` 使用 `xdotool` 實際點擊正式程式入口的空間選單與名稱／確認視窗，驗證空間、使用者照片與 email、專案 ID／狀態篩選、具名建立專案（首次不先查詢、POST 403 失敗、GET 403 後沿用同一 ID 重試，操作查詢 503 後跨程序續接、搜尋索引延遲期間立即顯示與重啟保存、目前名稱／有效狀態／權限檢查，以及索引更新後不重複列出）、服務帳戶名稱驗證、只列程式建立的帳戶、關聯、登入／登出及重啟保存；兩種移除都檢查錯誤確認文字、取消與正確確認，並驗證移除不刪除 Cloud 資源或私鑰。也開啟並取消清除警告；另外驗證設定取消／套用後不彈出空間選單，同一次執行在套用設定與空間操作後沿用日誌，變更日誌資料夾保留檔名並可切回原檔接續。OAuth 協定沿用本機 PKCE／DPoP／nonce 模擬服務，僅在測試副本替換 Wine 尚不支援的 Windows CNG KSP。原生 Windows KSP 與真實 Google 授權仍需在 Windows 上驗證。這兩組測試只使用一次性設定、金鑰與佇列，不讀正式憑證或呼叫 Google。
 
-舊的 `run_oauth_login.py`、`run_task_lifecycle.py`、`run_gui_settings.py` 與 `run_directory_operations.py` 場景仍保留作為歷史回歸資料；其單帳戶設定與舊 blob fixture 不適用新的空間格式，目前以以上兩組測試驗證空間功能。
+`run_oauth_login.py`、`run_task_lifecycle.py`、`run_gui_settings.py` 與 `run_directory_operations.py` 使用空間格式的夾具（`key/accounts.json` 登記的服務帳戶、`root/<空間 ID>` 紀錄、`settings.json` 中已登入的空間）。`run_oauth_login.py` 只驗證 OAuth、Cloud 建立與 CNG 失敗；舊的服務帳戶下拉選單已由空間選單取代，改由 `run_spaces_gui.py` 驗證。`run_gui_settings.py` 與 `run_directory_operations.py` 的正式程式 GUI 情境，在測試建置中由程式輸出按鈕、列與捲軸的實際位置（`gui-ui.json`），不依賴固定座標；對話框按鈕依 `lgo::modal_dialog_t` 的版面計算。`run_directory_operations.py` 另需 `openbox` 視窗管理器：沒有視窗管理器時，Wine 回報最大化的視窗大小與 X11 實際大小不一致。
 
 `python3 tests/run_text_scroll.py` 不使用帳戶或網路，以實際滑鼠操作水平捲軸，驗證原生橫向滾輪、左右 Shift＋滾輪、平滑位移及停止位置、拖曳捕捉與放開、軌道點擊、縮放、延後載入文字、字型重載及隱藏後的事件清理；並檢查 Vulkan 截圖，確認中文字不超出裁切區、黑色滑塊與其餘軌道的預設／自訂雙色，以及文字按鈕變色時滑塊顏色不變。
 

@@ -65,7 +65,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {})
         if path == '/drive/v3/files':
             return self.reply(200, {'files': [{'id': 'root'}, {'id': 'outside-app-root'}]})
-        return self.reply(200, {'name': '{"next":"null"}', 'description': '[]'})
+        return self.reply(200, {'name': json.dumps({'parent': 'null', 'parent_account': 'null',
+                                                    'next': 'null', 'next_account': 'null'}), 'description': '[]'})
 
     def delete_result(self, path):
         phase = self.server.phase
@@ -107,8 +108,9 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, b''.join(parts) + b'--fixture--\r\n', 'multipart/mixed; boundary=fixture')
 
 
-# Coordinates are client coordinates at the production 1536 x 1024 initial size.
-# No real file picker, credentials or Drive endpoint is involved.
+# Toolbar positions come from gui-ui.json, written by the test build each frame.
+# Dialog controls follow lgo::modal_dialog_t's layout. No real file picker,
+# credentials or Drive endpoint is involved.
 interaction = r'''
 import hashlib
 import json
@@ -143,6 +145,40 @@ try:
     def click(x, y):
         run('mousemove', '--window', window, x, y, 'click', '1')
         time.sleep(.2)
+    def gui():
+        while True:
+            try:
+                return json.loads(Path('gui-ui.json').read_text())
+            except (FileNotFoundError, json.JSONDecodeError):
+                time.sleep(.02)
+    def tool(label):
+        wait_for(lambda: label in gui()['toolbar'] and not gui()['dialog'], 'Missing toolbar button: ' + label)
+        at = gui()['toolbar'][label]
+        click(at['x'], at['y'])
+    # lgo::modal_dialog_t: (note lines, fields, checkboxes) of each dialog.
+    SETTINGS = (1, 10, 2)  # fields: log, font, client, root, retries, HTTP codes, ...
+    CLEAR = (5, 1, 0)
+    def geometry(layout):
+        lines, fields, checkboxes = layout
+        height = 152 + 28 * lines + 68 * fields + 36 * checkboxes
+        s = gui()
+        return (s['window_w'] - 720) // 2, max(0, (s['window_h'] - height) // 2), height
+    def field(layout, index):
+        wait_for(lambda: gui()['dialog'], 'Dialog did not open.')
+        left, top, _ = geometry(layout)
+        click(left + 200, top + 52 + 28 * layout[0] + 68 * index + 44)
+    def accept(layout, ok=True):
+        wait_for(lambda: gui()['dialog'], 'Dialog did not open.')
+        left, top, height = geometry(layout)
+        click(left + (640 if ok else 520), top + height - 32)
+    def root_id():
+        return json.loads(Path('root/space-test').read_text())['id']
+    # The app may rewrite settings.json for other reasons (e.g. space state);
+    # judge only the values this test edits.
+    def edited():
+        value = json.loads(Path('settings.json').read_text())
+        return value.get('logfile_path', 'logfile'), value.get('http_log_codes', '')
+    initial_settings = edited()
     def capture(name):
         try:
             from PIL import ImageGrab
@@ -154,29 +190,29 @@ try:
     capture('f3-desktop')
     run('keyup', 'F3')
     time.sleep(.3)
-    click(1064, 24)  # Settings
+    tool('設定')  # Settings
     capture('settings-dialog')
-    click(936, 774)  # Cancel
-    assert not Path('settings.json').exists(), 'Cancel saved settings.'
-    click(1064, 24)
-    click(500, 338)
+    accept(SETTINGS, False)  # Cancel
+    assert edited() == initial_settings, 'Cancel saved settings.'
+    tool('設定')
+    field(SETTINGS, 0)
     run('key', 'ctrl+a')
     run('type', 'changed-logfile')
-    click(500, 406)
+    field(SETTINGS, 1)
     run('key', 'ctrl+a')
     run('type', 'font/alternate.ttf')
-    click(500, 610)
+    field(SETTINGS, 4)
     run('key', 'BackSpace', 'BackSpace')
     run('type', '2')
-    click(500, 678)
-    run('type', '403,600')
-    click(1056, 774)
-    assert not Path('settings.json').exists(), 'Invalid HTTP status code was accepted.'
-    click(500, 678)
+    field(SETTINGS, 5)
+    run('type', '403,abc')  # Any integer is a valid code; a non-integer token is not.
+    accept(SETTINGS)
+    assert edited() == initial_settings, 'Invalid HTTP status code was accepted.'
+    field(SETTINGS, 5)
     run('key', 'ctrl+a')
     run('type', '403,503')
-    click(1056, 774)
-    wait_for(lambda: Path('settings.json').exists(), 'Settings were not applied.')
+    accept(SETTINGS)
+    wait_for(lambda: edited() != initial_settings, 'Settings were not applied.')
     value = json.loads(Path('settings.json').read_text())
     assert value['logfile_path'] == 'changed-logfile' and value['network_retries'] == 2
     assert value['http_log_codes'] == '403,503'
@@ -196,11 +232,11 @@ try:
         with urlopen('http://127.0.0.1:' + os.environ['STORAGE_GPU_TEST_PORT'] + '/fixture/' + value) as response:
             response.read()
     def start_clear():
-        click(1480, 24)
-        click(500, 540)
+        tool('清除')
+        field(CLEAR, 0)
         subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
         run('key', 'ctrl+v')
-        click(1056, 632)
+        accept(CLEAR)
     def acknowledge_cancel():
         value = wait_ui(lambda s: s.get('text') == '清除：已取消', 'Cancelled clear did not finish draining.')
         assert value['confirm']['shown'] and not value['retry']['shown'] and not value['cancel']['shown']
@@ -209,22 +245,22 @@ try:
         action('confirm')
         wait_ui(lambda s: s.get('rows') == 0, 'Confirm did not remove the cancelled row.')
     mode('cancel')
-    click(1480, 24)  # Clear
-    click(1056, 632)  # Empty confirmation must be rejected.
-    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'root'
-    click(500, 540)
+    tool('清除')  # Clear
+    accept(CLEAR)  # Empty confirmation must be rejected.
+    assert root_id() == 'root'
+    field(CLEAR, 0)
     subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
     run('key', 'ctrl+v')
     time.sleep(.3)
     capture('clear-dialog')
-    click(936, 632)  # Typed confirmation followed by Cancel must still do nothing.
-    assert (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'root'
-    click(1480, 24)
-    click(500, 540)
+    accept(CLEAR, False)  # Typed confirmation followed by Cancel must still do nothing.
+    assert root_id() == 'root'
+    tool('清除')
+    field(CLEAR, 0)
     subprocess.run(['wine64', sys.argv[2], '清除'], check=True)
     run('key', 'ctrl+v')
     time.sleep(.3)
-    click(1056, 632)
+    accept(CLEAR)
     value = wait_ui(lambda s: s.get('rows') == 1 and s['cancel']['shown'], 'Running clear controls did not appear.')
     assert value['cancel']['x'] == value['retry']['x'], 'Sole Cancel reserves a hidden Retry slot.'
     assert value['cancel']['y'] >= value['text_y'] + value['text_h'], 'Actions overlap clear text.'
@@ -246,17 +282,17 @@ try:
     wait_ui(lambda s: s.get('text', '').startswith('清除失敗：'), 'Second clear did not reach the network error.')
     mode('success')
     action('retry')
-    wait_for(lambda: (Path('root') / hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'new-root', 'Retried clear did not finish.')
+    wait_for(lambda: root_id() == 'new-root', 'Retried clear did not finish.')
     value = wait_ui(lambda s: s.get('text') == '清除完成', 'Clear completion was not displayed.')
     assert value['confirm']['shown'] and not value['retry']['shown'] and not value['cancel']['shown']
     assert value['confirm']['x'] == value['retry']['x']
     action('confirm')
     wait_ui(lambda s: s.get('rows') == 0, 'Confirm did not remove the completed row.')
-    click(1064, 24)
-    click(500, 678)
+    tool('設定')
+    field(SETTINGS, 5)
     run('key', 'ctrl+a')
     run('key', 'BackSpace')
-    click(1056, 774)
+    accept(SETTINGS)
     wait_for(lambda: json.loads(Path('settings.json').read_text()).get('http_log_codes') == '',
              'Blank HTTP filter was not applied.')
     run('key', 'alt+F4')
@@ -326,6 +362,35 @@ int wmain(int argc, wchar_t** argv) {
             if (value != previous) { storage_atomic_write("clear-ui.json", value); previous = value; }
         }
 '''
+    observation += r'''        {
+            // Toolbar label centers, found by text while no dialog repeats them.
+            static nlohmann::json toolbar=nlohmann::json::object();
+            if (!persistent.m_dialog)
+                if (auto main{state.get_object_shared<lgo::divy_hard_t>(0)})
+                {
+                    auto found=nlohmann::json::object();
+                    std::function<void(lgo::GUI_object_t&)> find=[&](lgo::GUI_object_t& object)
+                    {
+                        if (auto text=dynamic_cast<lgo::text_line_t*>(&object))
+                        {
+                            const auto label=text->get_text();
+                            if ((label=="設定" || label=="清除") && !found.contains(label))
+                            {
+                                const auto at{text->get_pos()}; const auto size{text->get_size()};
+                                found[label]={{"x",at.x+size.x/2},{"y",at.y+size.y/2}};
+                            }
+                        }
+                        object.visit_children(find);
+                    };
+                    find(*main);
+                    if (found.size()==2) toolbar=found;
+                }
+            const auto value=nlohmann::json{{"toolbar",toolbar},{"dialog",bool(persistent.m_dialog)},
+                {"window_w",engine.get_window_size().x},{"window_h",engine.get_window_size().y}}.dump();
+            static std::string previous_ui;
+            if (value!=previous_ui) { storage_atomic_write("gui-ui.json",value); previous_ui=value; }
+        }
+'''
     observed = observed.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
     (test / 'observed.cpp').write_text(observed)
     command = shlex.split(entry['command'])
@@ -346,8 +411,13 @@ int wmain(int argc, wchar_t** argv) {
     shutil.copy2(test / 'font/NotoSansTC-VariableFont_wght.ttf', test / 'font/alternate.ttf')
     (test / 'root').mkdir()
     (test / 'blob_queue').mkdir()
-    (test / 'key.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
-    (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root')
+    # One signed-in space whose program-managed service account owns the root.
+    (test / 'key').mkdir()
+    (test / 'key/program-0.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
+    (test / 'key/accounts.json').write_text(json.dumps({'mock@example.invalid': 'key/program-0.json'}))
+    (test / 'root' / 'space-test').write_text(json.dumps({'account': 'mock@example.invalid', 'id': 'root'}))
+    (test / 'settings.json').write_text(json.dumps({'spaces': [{'id': 'space-test', 'name': '測試空間',
+        'accounts': ['mock@example.invalid'], 'signed_in': True}], 'selected_space': 'space-test'}))
     (test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps(['gui-placeholder'] * 21000))
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
