@@ -74,33 +74,24 @@ int main(int argc, char** argv)
             check(storage_settings_t{}.root_path=="root", "Default root directory changed.");
             storage_atomic_write("settings.json", R"({"root_path":"custom-roots"})");
             check(storage_settings_t::load().root_path=="custom-roots", "Custom root directory changed.");
-            storage_atomic_write("settings.json", R"({"root_path":"root/root"})");
-            check(storage_settings_t::load().root_path=="root", "Old default introduced an extra root directory.");
+            // Old account settings, including the earlier "root/root" default, are
+            // not converted since spaces were introduced (see README).
+            // Spaces replaced per-account logins: each space keeps its accounts and
+            // sign-in state, and the browser's selection is saved independently.
             auto saved_settings = storage_settings_t::load();
-            check(saved_settings.signed_out_service_accounts.empty(), "Old settings signed out existing accounts.");
-            saved_settings.signed_out_service_accounts.insert("service@example.invalid");
+            check(saved_settings.spaces.empty() && saved_settings.selected_space.empty(),
+                  "Settings without spaces acquired a space or selection.");
+            saved_settings.spaces = {
+                {.id{"space-a"}, .name{"空間 A"}, .accounts{"service@example.invalid","other@example.invalid"}, .signed_in{true}},
+                {.id{"space-b"}, .name{"空間 B"}, .accounts{"service@example.invalid"}, .signed_in{false}}};
+            saved_settings.selected_space = "space-b";
             saved_settings.save();
-            check(storage_settings_t::load().signed_out_service_accounts==saved_settings.signed_out_service_accounts,
-                  "Service sign-out state was not saved and restored.");
-            check(!storage_settings_t::load().signed_in_accounts, "Legacy settings acquired an explicit login list.");
-            saved_settings.signed_in_accounts.emplace();
-            saved_settings.signed_in_accounts->emplace("service@example.invalid",
-                storage_account_login_t{"service@example.invalid","key/service.data","custom-roots",false});
-            saved_settings.signed_in_accounts->emplace("appdata:fixture:user@example.invalid",
-                storage_account_login_t{"user@example.invalid","client.json","user-roots",true});
-            saved_settings.selected_account = "service@example.invalid";
-            saved_settings.save();
-            const auto logins = storage_settings_t::load();
-            check(logins.signed_in_accounts && logins.signed_in_accounts->size()==2 &&
-                  logins.selected_account==saved_settings.selected_account &&
-                  logins.signed_in_accounts->at("service@example.invalid").root_directory=="custom-roots" &&
-                  logins.signed_in_accounts->at("appdata:fixture:user@example.invalid").oauth,
-                  "All logins and the independent browser selection were not saved.");
-            saved_settings.signed_in_accounts->clear();
-            saved_settings.selected_account.clear();
-            saved_settings.save();
-            check(storage_settings_t::load().signed_in_accounts && storage_settings_t::load().signed_in_accounts->empty(),
-                  "Explicit sign-out-all became legacy automatic login.");
+            const auto spaces = storage_settings_t::load();
+            check(spaces.spaces.size()==2 && spaces.selected_space=="space-b" &&
+                  spaces.spaces[0].id=="space-a" && spaces.spaces[0].name=="空間 A" &&
+                  spaces.spaces[0].accounts==saved_settings.spaces[0].accounts && spaces.spaces[0].signed_in &&
+                  spaces.spaces[1].accounts==saved_settings.spaces[1].accounts && !spaces.spaces[1].signed_in,
+                  "Spaces, their accounts and sign-in state or the selection were not saved.");
             check(storage_service_accounts().empty() && !std::filesystem::exists("key"),
                   "A missing service account directory was created or rejected.");
             const auto credential = [](std::string email)
@@ -114,11 +105,15 @@ int main(int argc, char** argv)
             storage_atomic_write("key/missing.json",R"({"client_email":"missing@example.invalid"})");
             storage_atomic_write("key/wrong.json",R"({"client_email":42,"private_key":"key"})");
             storage_atomic_write("key/nested/ignored.json",credential("nested@example.invalid"));
+            // Only keys registered by in-app provisioning are service accounts.
+            check(storage_service_accounts().empty(), "Unregistered key files were treated as service accounts.");
+            storage_atomic_write("key/accounts.json",nlohmann::json{{"b@example.invalid","key/arbitrary.data"},
+                                                                    {"a@example.invalid","key/no extension"}}.dump());
             const auto accounts = storage_service_accounts();
-            check(accounts.size()==3 && accounts[0].address=="a@example.invalid" &&
-                  accounts[0].account_path=="key/duplicate.json" && accounts[1].account_path=="key/no extension" &&
-                  accounts[2].address=="b@example.invalid" && accounts[2].account_path=="key/arbitrary.data",
-                  "Service account contents, ordering, duplicates or invalid-file isolation changed.");
+            check(accounts.size()==2 && accounts[0].address=="a@example.invalid" &&
+                  accounts[0].account_path=="key/no extension" &&
+                  accounts[1].address=="b@example.invalid" && accounts[1].account_path=="key/arbitrary.data",
+                  "Registered service accounts, their key paths or ordering changed.");
             std::atomic_bool close{};
             for (const auto name : {"root", "blob_queue"})
             {
@@ -130,37 +125,40 @@ int main(int argc, char** argv)
             }
             std::filesystem::current_path("..");
             std::filesystem::remove_all("layout-probe");
-            std::puts("PASS: service account discovery, missing directory and invalid-file isolation; new root paths and unrelated legacy files preserved.");
+            std::puts("PASS: spaces and selection saved; only registered service accounts; new root paths and unrelated legacy files preserved.");
             return 0;
         }
         if (phase=="configured-root")
         {
-            const auto credential = storage_read("key.json");
             std::filesystem::create_directory("root-probe");
+            std::filesystem::copy("key","root-probe/key",std::filesystem::copy_options::recursive);
             std::filesystem::current_path("root-probe");
-            storage_atomic_write("key.json",credential);
             storage_atomic_write("root","unrelated legacy root");
             storage_atomic_write("blob_queue/"+storage_digest("mock@example.invalid"),
                                  nlohmann::json(std::vector<std::string>(25000,"placeholder")).dump());
             storage_settings_t settings;
             settings.root_path = "custom/nested-roots";
             settings.network_retries = 0;
+            settings.spaces = {{.id{"space-test"}, .name{"測試空間"}, .accounts{"mock@example.invalid"}, .signed_in{true}}};
             std::atomic_bool close{};
             {
                 storage_runtime_t runtime{&close};
                 const auto control = std::make_shared<request_control_t>();
-                const auto session = runtime.open(settings,control);
-                const auto expected = settings.root_path+"/"+storage_digest(session->storage_id);
+                const auto& space = settings.spaces.front();
+                const auto session = runtime.open_space(settings,space,control);
+                const auto expected = settings.root_path+"/"+space.id;
                 check(session->root_path==expected && session->root=="fresh-root" &&
-                      storage_read(expected)==session->root && storage_read("root")=="unrelated legacy root",
+                      nlohmann::json::parse(storage_read(expected)).at("id")==session->root &&
+                      storage_read("root")=="unrelated legacy root",
                       "Missing configured roots were not created independently of the legacy root file.");
-                storage_atomic_write(expected,"configured-root");
-                check(runtime.open(settings,control)->root=="configured-root",
-                      "Login did not read the configured root file.");
+                storage_atomic_write(expected,nlohmann::json{{"account","mock@example.invalid"},{"id","configured-root"}}.dump());
+                check(runtime.open_space(settings,space,control)->root=="configured-root",
+                      "Opening the space did not read the configured root file.");
                 settings.root_path = "restored-roots";
-                const auto restored = runtime.open(settings,control,session->address,"checkpoint-root");
-                check(std::filesystem::is_directory(settings.root_path) && restored->root=="checkpoint-root",
-                      "Checkpoint restoration did not create the missing configured directory.");
+                const auto restored = runtime.open_space(settings,space,control);
+                check(std::filesystem::is_directory(settings.root_path) &&
+                      std::filesystem::exists(settings.root_path+"/"+space.id) && restored->root=="fresh-root",
+                      "Opening a space did not create the missing configured directory and root.");
             }
             std::filesystem::current_path("..");
             std::filesystem::remove_all("root-probe");
@@ -193,9 +191,16 @@ int main(int argc, char** argv)
         storage_runtime_t runtime{&close};
         storage_settings_t settings;
         settings.network_retries = 0;
+        settings.spaces = {{.id{"space-test"}, .name{"測試空間"}, .accounts{"mock@example.invalid"}, .signed_in{true}},
+                           {.id{"space-second"}, .name{"第二空間"}, .accounts{"second@example.invalid"}, .signed_in{true}}};
         auto control{std::make_shared<request_control_t>()};
-        auto session{runtime.open(settings, control)};
+        auto session{runtime.open_space(settings, settings.spaces.at(0), control)};
         google_account_t::default_shared_set(session->account);
+        // The mock's synthetic items are used without first being listed, which
+        // is what records an item's owner in the app; register them directly.
+        for (const auto& [id, kind] : {std::pair{"retry-file","file"},{"cancel-file","file"},
+                                       {"fast-folder","folder"},{"slow-folder","folder"}})
+            session->remember(id, "mock@example.invalid", kind);
         load_state_t loads;
         loads.m_session = session;
         loads.m_settings = settings;
@@ -244,6 +249,9 @@ int main(int argc, char** argv)
                               check(intent["account_email"] == session->address, "Saved account changed.");
                               return session;
                           });
+            // Journals are replayed in the background; the GUI loop adds the task.
+            const auto restored{std::chrono::steady_clock::now() + 20s};
+            while (loads.m_task_list.empty() && std::chrono::steady_clock::now() < restored) pump();
             check(loads.m_task_list.size() == 1, "Expected one persisted task.");
         }
         else if (phase == "signout-resume")
@@ -263,6 +271,7 @@ int main(int argc, char** argv)
             }
             check(download->m_result==task_result_t::active,"Download completed before sign-out fixture.");
             const auto index = storage_read("task");
+            const auto download_journal{download->m_journal->path()}, upload_journal{upload->m_journal->path()};
             for (auto task : {std::static_pointer_cast<load_task_t>(download),upload})
                 finish_task(*task,task_result_t::signed_out,"等待帳號登入");
             multi.interrupt();
@@ -275,14 +284,25 @@ int main(int argc, char** argv)
             }
             check(storage_read("task")==index,"Sign-out removed durable checkpoints.");
             check(std::filesystem::exists(download->m_journal->path()/"state"),"Download checkpoint was deleted.");
-            session=runtime.open(settings,control);
+            session=runtime.open_space(settings,settings.spaces.at(0),control);
             loads.m_session=session;
             auto restore = [&](const auto&) { return session; };
             restore_tasks(&loads,restore);
             restore_tasks(&loads,restore);
-            check(loads.m_task_list.size()==2,"Login lost tasks or restored duplicates.");
-            check(loads.m_task_list.back()->m_control->user_paused,"Login lost explicit pause state.");
-            loads.m_task_list.back()->pause(false);
+            // Background replay adds one row per frame, and the resumed download
+            // may finish before the paused upload's row appears: count rows by journal.
+            while (!(loads.m_known_journals.contains(download_journal) && loads.m_known_journals.contains(upload_journal)) &&
+                   std::chrono::steady_clock::now()<deadline) pump();
+            for (int i{}; i<20; ++i) pump();
+            std::map<std::filesystem::path,int> rows;
+            for (const auto* list : {&loads.m_task_list,&loads.m_finished_tasks})
+                for (const auto& task : *list) if (task->m_journal) ++rows[task->m_journal->path()];
+            check(rows[upload_journal]==1 && rows[download_journal]<=1 &&
+                  loads.m_known_journals.contains(download_journal),"Login lost tasks or restored duplicates.");
+            const auto paused{std::ranges::find_if(loads.m_task_list,[&](const auto& task)
+                { return task->m_journal && task->m_journal->path()==upload_journal; })};
+            check((*paused)->m_control->user_paused,"Login lost explicit pause state.");
+            (*paused)->pause(false);
             while (!loads.m_task_list.empty())
             {
                 check(std::chrono::steady_clock::now()<deadline,"Resumed transfer did not complete.");
@@ -512,7 +532,10 @@ int main(int argc, char** argv)
             storage_atomic_write("refused.bin", "keep");
             loads.m_confirm = [](std::string, auto done) { done(false); };
             begin_task(&loads, session, "download-file", "refused.bin", "retry-file");
-            auto refused{loads.m_finished_tasks.back()};
+            // The refusal finishes once its journal is durable (asynchronous writes).
+            auto refused{loads.m_task_list.back()};
+            const auto refused_deadline{std::chrono::steady_clock::now() + 10s};
+            while (refused->m_result == task_result_t::active && std::chrono::steady_clock::now() < refused_deadline) pump();
             check(refused->m_result == task_result_t::failed, "Refused overwrite was not terminal.");
             click(refused->m_confirm_button, [&] { return refused->m_dismissed; });
             pump();
@@ -557,7 +580,12 @@ int main(int argc, char** argv)
                 loads.m_task_list.back()->pause(true);
             }
             else
+            {
                 restore_tasks(&loads, [&](const nlohmann::json&) { return session; });
+                // Journals are replayed in the background; the GUI loop adds the tasks.
+                const auto restored{std::chrono::steady_clock::now() + 20s};
+                while (loads.m_task_list.size() < 2 && std::chrono::steady_clock::now() < restored) pump();
+            }
             check(loads.m_task_list.size() == 2, "Paused tasks did not survive restart.");
             for (int i{}; i < 30; ++i)
                 pump();
@@ -600,25 +628,22 @@ int main(int argc, char** argv)
         else if (phase == "account-switch")
         {
             begin_task(&loads, session, "upload-file", "second.bin", pos);
-            auto saved_settings{settings};
-            saved_settings.account_path = "second.json";
-            auto second{runtime.open(saved_settings, control)};
-            check(session->root_path=="root/"+storage_digest(session->storage_id) &&
-                  second->root_path=="root/"+storage_digest(second->storage_id) &&
-                  session->root_path!=second->root_path && second->root=="second-root",
-                  "Service accounts did not use separate hashed roots in the same directory.");
+            auto second{runtime.open_space(settings, settings.spaces.at(1), control)};
+            check(session->root_path=="root/space-test" && second->root_path=="root/space-second" &&
+                  second->root=="second-root",
+                  "Spaces did not use separate root records in the same directory.");
             auto custom_settings = settings;
             custom_settings.root_path = "custom-roots";
-            const auto custom_path = "custom-roots/"+storage_digest(session->storage_id);
-            storage_atomic_write(custom_path,session->root);
-            const auto custom = runtime.open(custom_settings,control);
+            const std::string custom_path{"custom-roots/space-test"};
+            storage_atomic_write(custom_path,nlohmann::json{{"account","mock@example.invalid"},{"id",session->root}}.dump());
+            const auto custom = runtime.open_space(custom_settings,custom_settings.spaces.at(0),control);
             check(custom->root_path==custom_path && custom->root==session->root && custom->queue==session->queue,
                   "Custom root directory changed the account or created a separate blob queue.");
             loads.m_session = second;
             google_account_t::default_shared_set(second->account);
-            loads.m_settings = saved_settings;
             pos = second->root;
             persistent.m_refresh();
+            second->remember("retry-file", "second@example.invalid", "file");
             begin_task(&loads, second, "download-file", "second-output.bin", "retry-file");
             const auto deadline{std::chrono::steady_clock::now() + 20s};
             while (!loads.m_task_list.empty())
@@ -705,7 +730,10 @@ int main(int argc, char** argv)
             storage_atomic_write("protected.bin", "keep me");
             loads.m_confirm = [](std::string, auto done) { done(false); };
             begin_task(&loads, session, "download-file", "protected.bin", "test-file");
-            auto declined{std::dynamic_pointer_cast<download_task_t>(loads.m_finished_tasks.back())};
+            // The refusal finishes once its journal is durable (asynchronous writes).
+            auto declined{std::dynamic_pointer_cast<download_task_t>(loads.m_task_list.back())};
+            const auto declined_deadline{std::chrono::steady_clock::now() + 10s};
+            while (declined->m_result == task_result_t::active && std::chrono::steady_clock::now() < declined_deadline) pump();
             check(!declined->m_error.empty(), "Declined overwrite has no failure reason.");
             check(storage_read("protected.bin") == "keep me",
                   "Declined overwrite destroyed the destination.");
@@ -797,6 +825,8 @@ int main(int argc, char** argv)
             if (phase.ends_with("crash") && bytes && bytes < total)
             {
                 check(std::filesystem::exists("task"), "Task checkpoint is missing.");
+                // Journal writes are asynchronous: crash once this progress is durable.
+                owner->m_journal->wait();
                 std::_Exit(73); // Simulate abrupt termination; no destructors or catch blocks.
             }
         }

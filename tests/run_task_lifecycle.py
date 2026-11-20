@@ -94,13 +94,19 @@ class Handler(BaseHTTPRequestHandler):
                 with self.server.lock:
                     self.server.retry += 1; failed = self.server.retry == 1
                 if failed: return 503, {}
-                return 200, {'name': json.dumps({'size':3, 'next':'null'}), 'description':'["retry-chunk"]'}
-            if identifier == 'retry-chunk': return 200, {'description':'["retry-data"]'}
+                # Space-format metadata, owned by the requesting account.
+                return 200, {'name': json.dumps({'name':'retry-file','size':3,'parent':'root','parent_account':account,
+                                                 'next':'null','next_account':'null','account':account}),
+                             'description':'["retry-chunk"]'}
+            if identifier == 'retry-chunk':
+                return 200, {'name': json.dumps({'parent':'retry-file','parent_account':account,'account':account}),
+                             'description':'["retry-data"]'}
             if identifier == 'retry-data': return 200, {'description': base64.urlsafe_b64encode(b'ABC').decode()}
             if identifier == 'cancel-file': time.sleep(.5)
             if identifier == 'slow-folder': time.sleep(1)
             if identifier in ('fast-folder', 'slow-folder'):
-                return 200, {'name':json.dumps({'name':identifier,'parent':'root','next':'null'}), 'description':'[]'}
+                return 200, {'name':json.dumps({'name':identifier,'parent':'root','parent_account':account,
+                                                'next':'null','next_account':'null'}), 'description':'[]'}
             with self.server.lock:
                 self.server.gets[identifier] = self.server.gets.get(identifier,0)+1
                 value = blobs.get(identifier)
@@ -170,8 +176,12 @@ class Handler(BaseHTTPRequestHandler):
             header, _, payload = request.partition('\r\n\r\n')
             method, path, *_ = header.splitlines()[0].split(' ')
             status,value=self.resource(method,path,payload)
-            has_content |= (method == 'PATCH' and len(payload) > 20000 or
-                            method == 'GET' and len(value.get('description', '')) > 20000)
+            # Content blobs hold a Base64 string; indexes hold JSON arrays. Do not
+            # judge by size: version 2 content is zstd-compressed and can be tiny.
+            def content(description):
+                return isinstance(description, str) and description != '' and not description.startswith('[')
+            has_content |= (method == 'PATCH' and content(json.loads(payload).get('description')) or
+                            method == 'GET' and isinstance(value, dict) and content(value.get('description')))
             response.append(f'--fixture\r\nContent-Type: application/http\r\nContent-ID: response-{identifier}\r\n\r\nHTTP/1.1 {status} OK\r\n\r\n'+json.dumps(value)+'\r\n')
             if interrupted and len(response) == 50:
                 # Apply half of an uncheckpointed batch, then lose its response.
@@ -208,16 +218,23 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
     for resource in ('font','shader'): shutil.copytree(runtime/resource,test/resource)
     (test / 'root').mkdir()
     (test / 'blob_queue').mkdir()
-    (test/'key.json').write_text(json.dumps({'client_email':'mock@example.invalid','private_key':'mock-only-key'}))
-    (test/'second.json').write_text(json.dumps({'client_email':'second@example.invalid','private_key':'mock-only-key'}))
-    (test/'root'/hashlib.sha256(b'second@example.invalid').hexdigest()).write_text('second-root')
+    # Space layout (storage_runtime_t::open_space): program-managed keys in the
+    # key/ registry and one account/ID root record per space.
+    (test/'key').mkdir()
+    registry={}
+    for index,address in enumerate(('mock@example.invalid','second@example.invalid')):
+        (test/'key'/f'program-{index}.json').write_text(json.dumps({'client_email':address,'private_key':'mock-only-key'}))
+        registry[address]=f'key/program-{index}.json'
+    (test/'key'/'accounts.json').write_text(json.dumps(registry))
+    (test/'root'/'space-second').write_text(json.dumps({'account':'second@example.invalid','id':'second-root'}))
     (test/'blob_queue'/hashlib.sha256(b'second@example.invalid').hexdigest()).write_text(json.dumps([f'second-{i}' for i in range(25000)]))
     (test/'second.bin').write_bytes(b'second source'*10000)
-    (test/'root'/hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root'); (test/'blob_queue'/hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps([f'blob-{i}' for i in range(25000)]))
+    (test/'root'/'space-test').write_text(json.dumps({'account':'mock@example.invalid','id':'root'})); (test/'blob_queue'/hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps([f'blob-{i}' for i in range(25000)]))
     (test/'source.bin').write_bytes(bytes(range(256))*20000)
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);server.daemon_threads=True
-    server.lock=threading.Lock();server.blobs={'root':{'name':'{"next":"null"}','description':'[]'}}
-    server.other={'second-root':{'name':'{"next":"null"}','description':'[]'}};server.violations=[]
+    top=json.dumps({'parent':'null','parent_account':'null','next':'null','next_account':'null'})
+    server.lock=threading.Lock();server.blobs={'root':{'name':top,'description':'[]'}}
+    server.other={'second-root':{'name':top,'description':'[]'}};server.violations=[]
     server.gets={};server.upload_calls=server.download_batches=server.retry=server.reserves=0;server.phase=''
     server.clear_batches=server.clear_missing=0;server.clear_batch_sizes=[]
     server.delete_calls={};server.clear_retry_id=None
@@ -249,17 +266,21 @@ with tempfile.TemporaryDirectory(prefix='storage-task-test-') as directory:
                 assert len(json.loads(server.blobs['root']['description']))==1, 'Duplicate upload publication.'
             if phase.endswith('crash') and phase!='clear-crash':
                 index=json.loads((test/'task').read_text());assert len(index)==1
-                saved=json.loads((test/'task.data'/index[0]/'state').read_text());assert saved['progress']>0
+                # Progress lives in its own file beside the journal (task_journal_t).
+                progress=test/'task.data'/index[0]/(hashlib.sha256(b'task').hexdigest()+'.progress')
+                assert json.loads(progress.read_text())['progress']>0
         assert 'fresh-root' in server.blobs and all(
             identifier == 'fresh-root' or identifier.startswith('reserve-') for identifier in server.blobs
         ), 'Clear did not remove the entire original account inventory.'
         assert 'second-root' in server.other, 'Clear affected a different account.'
         account_hashes = {hashlib.sha256(email).hexdigest() for email in
                           (b'mock@example.invalid', b'second@example.invalid')}
-        for directory in ('root', 'blob_queue'):
-            assert {p.name for p in (test / directory).iterdir()} == account_hashes, 'State names differ by login order.'
-        assert (test/'root'/hashlib.sha256(b'mock@example.invalid').hexdigest()).read_text() == 'fresh-root'
-        assert (test/'root'/hashlib.sha256(b'second@example.invalid').hexdigest()).read_text() == 'second-root'
+        # Each queue may keep its tail-edit journal (<queue>.tail) beside it.
+        assert {p.name.removesuffix('.tail') for p in (test / 'blob_queue').iterdir()} == account_hashes, \
+            'Queue names differ by login order.'
+        assert {p.name for p in (test / 'root').iterdir()} == {'space-test', 'space-second'}, 'Root records are not per space.'
+        assert json.loads((test/'root'/'space-test').read_text())['id'] == 'fresh-root'
+        assert json.loads((test/'root'/'space-second').read_text())['id'] == 'second-root'
 
         assert not server.violations, server.violations
         assert max(server.clear_batch_sizes)==100, 'Clear did not use full batches.'
