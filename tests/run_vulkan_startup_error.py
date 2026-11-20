@@ -31,13 +31,16 @@ if args.inside:
     try:
         deadline = time.monotonic() + 30
         while True:
-            windows = subprocess.run(['xdotool', 'search', '--name', '^Storage$'],
+            # Only mapped windows can take focus: an unmapped match fails with
+            # BadMatch (X_SetInputFocus), so keep polling until focusing succeeds.
+            windows = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '^Storage$'],
                                      capture_output=True, text=True)
             if windows.returncode == 0:
                 dialog = windows.stdout.splitlines()[0]
-                subprocess.run(['xdotool', 'windowfocus', '--sync', dialog], check=True)
-                subprocess.run(['xdotool', 'key', 'Return'], check=True)
-                break
+                focus = subprocess.run(['xdotool', 'windowfocus', '--sync', dialog], capture_output=True)
+                if focus.returncode == 0:
+                    subprocess.run(['xdotool', 'key', 'Return'], check=True)
+                    break
             if process.poll() is not None or time.monotonic() >= deadline:
                 raise RuntimeError('The Vulkan startup error dialog did not appear.')
             time.sleep(.05)
