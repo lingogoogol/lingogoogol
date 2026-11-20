@@ -1,8 +1,11 @@
 import base64,json,pathlib,re,threading,time,urllib.parse
+from compression import zstd
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 base=pathlib.Path.cwd()
 lock=threading.RLock()
-blobs={k:{'name':json.dumps({'name':k,'parent':'null','next':'null'}),'description':'[]'} for k in ('root','other')}
+# Space-format metadata: every link names the account that owns its target.
+blobs={k:{'name':json.dumps({'name':k,'parent':'null','parent_account':'null','next':'null','next_account':'null'}),
+          'description':'[]'} for k in ('root','other')}
 fixture=base/'download-fixture.json'
 if fixture.exists(): blobs.update(json.loads(fixture.read_text()))
 fail_content=True
@@ -17,7 +20,11 @@ def decode_file(id):
         blob=blobs[id]; name=json.loads(blob['name'])
         for chunk in json.loads(blob['description']):
             for content in json.loads(blobs[chunk]['description']):
-                text=blobs[content]['description']; result+=base64.urlsafe_b64decode(text+'='*((-len(text))%4))
+                text=blobs[content]['description']; raw=base64.urlsafe_b64decode(text+'='*((-len(text))%4))
+                # As content_blob_decode: versioned content is one zstd frame;
+                # unversioned (legacy) content is raw Base64URL.
+                if json.loads(blobs[content].get('name','{}')).get('version',0): raw=zstd.decompress(raw)
+                result+=raw
         id=name['next']
     return result
 
@@ -59,7 +66,9 @@ class Handler(BaseHTTPRequestHandler):
     def patch(self,id,data):
         global fail_content,fail_publish
         with lock:
-            if id=='root':
+            # Metadata-only updates (e.g. the page's name/next links) carry no
+            # children to verify; only a published listing does.
+            if id=='root' and 'description' in data:
                 for child in json.loads(data['description']):
                     try: verify(child,base/'input'/child['name'])
                     except Exception as e: violations.append(str(e)); return 400,{'error':str(e)}

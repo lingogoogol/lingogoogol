@@ -45,21 +45,38 @@ try {
     load_state_t loads{};
     std::atomic_bool close{true}; // The fixture supplies IDs; never create cloud blobs.
     blob_queue_t queue{"blob_queue", &google_account_t::default_get(), &close};
+    // Uploads choose their account and reserve through the space session, as
+    // opened by storage_runtime_t::open_space; the fixture's single account owns
+    // the root and the pre-filled queue.
+    auto session=std::make_shared<storage_session_t>();
+    const std::string address{"mock@example.invalid"};
+    session->address=address;
+    session->root="root";
+    session->root_account=address;
+    session->accounts[address]=std::shared_ptr<google_account_t>(&google_account_t::default_get(),[](auto*) {});
+    session->queues[address]=std::shared_ptr<blob_queue_t>(&queue,[](auto*) {});
+    session->account=session->accounts.at(address);
+    session->queue=session->queues.at(address);
+    session->remember(session->root,address,"folder");
+    loads.m_session=session; // The signed-in space whose folders the GUI lists.
     std::string pos{"root"};
     std::shared_ptr<lgo::divy_soft_t> column{};
     GUI_persistent_t persistent{};
     curl_multi_worker_t multi{};
     home(&engine,&gui,&persistent,&column,&loads,&multi,&queue,&pos);
-    auto main=gui.get_object_shared<lgo::divy_hard_t>(0);
-    auto work=main->get_object_shared<lgo::divx_soft_t>(3);
-    auto viewer=work->get_object_shared<lgo::divy_soft_t>(3);
-    check(viewer && viewer->len().x==0,"initial folder is not empty");
+    // The listing's rows, by entity ID; positional lookups in the GUI tree break
+    // whenever the toolbar or status area changes.
+    const auto& rows=persistent.m_directory_rows;
+    check(rows.empty(),"initial folder is not empty");
     int notifications=0;
     auto refresh=loads.m_on_upload_linked;
     loads.m_on_upload_linked=[&](const std::string& dest) { ++notifications; if(notifications==4) inject_loss(engine,true); refresh(dest); };
     auto add=[&](std::string path, bool folder) {
         auto t=std::make_shared<upload_task_t>();
-        t->m_state=&loads; t->m_type="upload"; t->m_name=path; t->m_pos.m_main_id=pos;
+        t->m_state=&loads; t->m_session=session; t->m_type="upload"; t->m_name=path; t->m_pos.m_main_id=pos;
+        // Like begin_task: the journal makes ID reservation idempotent, so content
+        // prepared ahead of dispatch keeps the IDs its chunk index publishes.
+        t->m_journal=task_journal_t::create(nlohmann::json{{"kind",folder ? "upload-folder" : "upload-file"},{"path",path},{"pos",pos}});
         t->m_progress_div=column->add_object<lgo::text_line_scroll_std_t>(lgo::depth_range_t{0,0.5},path,lgo::std_blue_light,lgo::size_1D{256},false);
         t->m_progress_text=column->get_object_shared<lgo::text_line_scroll_std_t>(t->m_progress_div);
         if(folder) folder_upload(&queue,t.get(),path,&t->m_pos);
@@ -92,10 +109,10 @@ try {
     }
     check(notifications==3,"missing upload notification");
     check(pos=="other","refresh changed current folder");
-    check(viewer->len().x==0,"upload refreshed an unrelated view");
+    check(rows.empty(),"upload refreshed an unrelated view");
     pos="root";
     auto download=std::make_shared<download_task_t>();
-    download->m_state=&loads;download->m_type="download";download->m_name="downloaded.bin";
+    download->m_state=&loads;download->m_session=session;download->m_type="download";download->m_name="downloaded.bin";
     download->m_progress_div=column->add_object<lgo::text_line_scroll_std_t>(lgo::depth_range_t{0,0.5},"download",lgo::std_white,lgo::size_1D{256},false);
     download->m_progress_text=column->get_object_shared<lgo::text_line_scroll_std_t>(download->m_progress_div);
     std::string file_id;
@@ -129,8 +146,9 @@ try {
     check(loads.m_end.empty(),"GPU error interrupted completion bookkeeping");
     check(notifications==4,"visible upload did not refresh");
     check(pos=="root","visible refresh navigated away");
-    auto label=viewer->get_object_shared<lgo::button_text_t<lgo::text_line_scroll_std_t>>(9);
-    check(label && label->get_text().find("visible.bin")!=std::string::npos,"uploaded file missing from GUI list");
+    std::string visible_id;
+    for(auto& entity:visible->m_entity_arr) if(auto file=dynamic_cast<upload_file_t*>(entity.get())) visible_id=file->m_main_id;
+    check(!visible_id.empty() && rows.contains(visible_id),"uploaded file missing from GUI list");
     engine.flush(); lgo::text_line_t::free(); gui.clear_state();
     std::println("PASS: active upload/download GPU recovery, unchanged tasks, exact downloaded bytes, publication and refresh");
     return 0;
