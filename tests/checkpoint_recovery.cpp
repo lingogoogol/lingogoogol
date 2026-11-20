@@ -43,9 +43,15 @@ int main(int argc, char** argv)
             CloseHandle(reader);
             check(failed && storage_read("dirty/state")==initial,
                   "Record failure changed the initial snapshot.");
+            // A failed write stays queued with its error until the owner retries
+            // it (as a retried request does); it is never skipped or reordered.
+            journal.retry_writes();
             journal.set("value",1);
             task_journal_t restored{"dirty",json::parse(initial)};
             check(restored.field("value")==json(1),"Retry discarded an unchanged dirty field.");
+            // Opening a journal compacts replayed records into the snapshot; later
+            // updates must append records without rewriting that snapshot.
+            const auto compacted=storage_read("dirty/state");
             reader=CreateFileW(L"dirty/00000000000000000001.record.tmp",GENERIC_READ,FILE_SHARE_READ,
                                nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
             check(reader!=INVALID_HANDLE_VALUE,"Cannot lock entity record.");
@@ -62,14 +68,15 @@ int main(int argc, char** argv)
             catch (const std::runtime_error&) { failed=true; }
             CloseHandle(reader);
             check(failed,"Locked entity record did not report failure.");
+            journal.retry_writes();
             check(journal.allocate("file:a",1,reserve,fields,"fixture","file")==std::vector<std::string>{"id-a"} && reservations==1,
                   "Entity flush retry allocated a replacement ID.");
+            check(storage_read("dirty/state")==compacted,"An entity update rewrote the snapshot.");
             task_journal_t replay{"dirty",json::parse(storage_read("dirty/state"))};
             const auto entity=replay.data();
             check(entity.at("allocations").at("file:a").at(0)=="id-a" && entity.at("source:a").at("size")==1 &&
                   entity.at("routing").at("owners").at("id-a")=="fixture","Entity replay lost metadata or ownership.");
             check(replay.allocate("file:a",1,reserve).front()=="id-a" && reservations==1,"Replay consumed another ID.");
-            check(storage_read("dirty/state")==initial,"An entity update rewrote the initial snapshot.");
         }
         else if (phase == "queue-crash")
         {
@@ -161,14 +168,16 @@ int main(int argc, char** argv)
             const auto other=previous.get();
             queue->stop();
             check(task.m_entity_arr.size()==files+2 && task.m_size==files,"Fresh preparation lost entries.");
-            const auto initial_state=storage_read("fresh-journal/state");
-            task_journal_t reloaded{"fresh-journal",json::parse(initial_state)};
-            const auto durable=reloaded.data();
+            // Count records before reopening: opening a journal compacts its
+            // records into the snapshot and removes them.
             std::uint64_t record_bytes{};
             std::size_t record_count{};
             for (const auto& entry : std::filesystem::directory_iterator{"fresh-journal"})
                 if (entry.path().extension()==".record")
                 { ++record_count; record_bytes+=entry.file_size(); }
+            task_journal_t reloaded{"fresh-journal",json::parse(storage_read("fresh-journal/state"))};
+            const auto durable=reloaded.data();
+            const auto initial_state=storage_read("fresh-journal/state");
             check(record_count==files+2,"Preparation did not save one record per entity.");
             check(record_bytes<files*2048,"New entities rewrote the inherited routing table.");
             std::set<std::string> allocated(other.begin(),other.end());
