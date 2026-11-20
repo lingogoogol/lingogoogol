@@ -53,6 +53,6 @@ target_link_libraries(
     storage.encode
     PRIVATE
         common
-        external.Windows
-        external.wincrypt
+        $<$<BOOL:${WIN32}>:external.Windows>
+        $<$<BOOL:${WIN32}>:external.wincrypt>
 )

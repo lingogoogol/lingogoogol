@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include "storage/blob_format.hpp"
+#include "storage/base64url.hpp"
 import std;
 import storage.encode;
 import storage.state;
@@ -49,6 +50,21 @@ auto main() -> int
             for(auto& byte:input) byte=static_cast<char>(random()&255);
             roundtrip(input); roundtrip(std::string(size,'x'));
         }
+        // The Android build encodes with storage/base64url.hpp; both directions
+        // must interoperate with this platform's base64url_encode/decode.
+        for (std::size_t size=0;size<=1000;++size)
+        {
+            std::string input(size,'\0');
+            for(auto& byte:input) byte=static_cast<char>(random()&255);
+            const auto encoded=base64url_encode(input);
+            check(storage_base64url::decode(encoded)==input,"Portable decoder rejected native Base64URL");
+            check(base64url_decode(storage_base64url::encode(input))==input,"Native decoder rejected portable Base64URL");
+            auto trimmed=storage_base64url::encode(input);
+            while(!trimmed.empty() && trimmed.back()=='=') trimmed.pop_back();
+            check(storage_base64url::decode(trimmed)==input,"Portable decoder rejected unpadded Base64URL");
+        }
+        check(!storage_base64url::decode("!") && !storage_base64url::decode("A") && !storage_base64url::decode("QQ=A"),
+              "Portable decoder accepted malformed Base64URL");
         std::string full(storage_format::content_capacity,'\0');
         for(auto& byte:full) byte=static_cast<char>(random()&255);
         roundtrip(full); roundtrip(std::string(full.size(),'A'));

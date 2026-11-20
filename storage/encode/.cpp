@@ -1,10 +1,19 @@
+module;
+
+#if !defined(_WIN32)
+#include "storage/base64url.hpp"
+#endif
+
 module storage.encode;
 
 import std;
 
+#if defined(_WIN32)
 import external.Windows;
 import external.wincrypt;
+#endif
 
+#if defined(_WIN32)
 auto base64url_encode(std::string in) -> std::string
 {
     //`CryptBinaryToStringA` fails when input length is 0.
@@ -111,3 +120,16 @@ auto base64url_decode(std::string in) -> std::string
     )) throw std::runtime_error{ "Cannot decode Base64URL download content." };
     return out;
 }
+#else
+auto base64url_encode(std::string in) -> std::string
+{
+    return storage_base64url::encode(in);
+}
+
+auto base64url_decode(std::string in) -> std::string
+{
+    auto out{ storage_base64url::decode(in) };
+    if (!out) throw std::runtime_error{ "Invalid Base64URL download content." };
+    return std::move(*out);
+}
+#endif
