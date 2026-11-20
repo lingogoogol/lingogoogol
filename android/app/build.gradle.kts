@@ -1,3 +1,11 @@
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.BuiltArtifactsLoader
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
 plugins {
     id("com.android.application")
 }
@@ -99,11 +107,103 @@ val appAssets = tasks.register<AppAssetsTask>("appAssets") {
     compiler.set(slangc)
 }
 
+// One APK per ABI in ../../install/<target triple>_<build type>/storage-android.apk
+// (e.g. aarch64-linux-android29_Debug), named like the Windows build's
+// install/x64-win32-pe-mingw_Release. Derived from the universal
+// debug APK, which stays unchanged: keep only one ABI's native libraries, align
+// (16 KB pages) and re-sign with the same fixed key. AGP ignores
+// android.injected.build.abi outside Android Studio deployments, and ABI splits
+// would rename the universal app-debug.apk.
+abstract class AbiApksTask : DefaultTask() {
+    @get:InputDirectory abstract val apkFolder: DirectoryProperty
+    @get:Internal abstract val loader: Property<BuiltArtifactsLoader>
+    @get:Input abstract val folders: MapProperty<String, String> // ABI -> <triple>_<build type>
+    @get:Internal abstract val installDir: DirectoryProperty
+    @get:InputDirectory abstract val buildTools: DirectoryProperty
+    @get:InputFile abstract val keystore: RegularFileProperty
+    @get:Input abstract val keyAlias: Property<String>
+    @get:Internal abstract val storePassword: Property<String>
+    @get:Internal abstract val keyPassword: Property<String>
+    @get:Inject abstract val exec: ExecOperations
+
+    @TaskAction
+    fun generate() {
+        val universal = File(loader.get().load(apkFolder.get())!!.elements.single().outputFile)
+        val windows = System.getProperty("os.name").startsWith("Windows")
+        val tools = buildTools.get().asFile
+        val zipalign = tools.resolve(if (windows) "zipalign.exe" else "zipalign").path
+        val apksigner = tools.resolve(if (windows) "apksigner.bat" else "apksigner").path
+        val work = temporaryDir
+        for ((abi, folder) in folders.get()) {
+            val stripped = work.resolve("$abi.apk")
+            ZipFile(universal).use { zip ->
+                ZipOutputStream(stripped.outputStream()).use { out ->
+                    for (entry in zip.entries()) {
+                        if (entry.name.startsWith("lib/") && !entry.name.startsWith("lib/$abi/")) continue
+                        val copy = ZipEntry(entry.name).apply {
+                            method = entry.method
+                            time = entry.time
+                            // Stored (uncompressed) native libraries need their size and CRC.
+                            if (entry.method == ZipEntry.STORED) {
+                                size = entry.size
+                                compressedSize = entry.compressedSize
+                                crc = entry.crc
+                            }
+                        }
+                        out.putNextEntry(copy)
+                        zip.getInputStream(entry).use { it.copyTo(out) }
+                        out.closeEntry()
+                    }
+                }
+            }
+            val aligned = work.resolve("$abi-aligned.apk")
+            exec.exec { commandLine(zipalign, "-P", "16", "-f", "4", stripped.path, aligned.path) }
+            val target = installDir.get().asFile.resolve(folder)
+            target.mkdirs()
+            val signed = target.resolve("storage-android.apk.tmp")
+            // Passwords go through the environment, never the command line.
+            exec.exec {
+                environment("LGO_STORE_PASSWORD", storePassword.get())
+                environment("LGO_KEY_PASSWORD", keyPassword.get())
+                // No v4 (.idsig) signature file: installation does not need it.
+                commandLine(apksigner, "sign", "--v4-signing-enabled", "false", "--ks", keystore.get().asFile.path,
+                    "--ks-pass", "env:LGO_STORE_PASSWORD", "--key-pass", "env:LGO_KEY_PASSWORD",
+                    "--ks-key-alias", keyAlias.get(), "--out", signed.path, aligned.path)
+            }
+            // Replace the published APK only once it is complete.
+            Files.move(signed.toPath(), target.resolve("storage-android.apk").toPath(),
+                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        }
+    }
+}
+
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(appAssets, AppAssetsTask::outputDir)
+        if (variant.buildType == "debug") {
+            val signing = android.signingConfigs.getByName("debug")
+            val installRoot = workspace.resolve("install")
+            val minSdk = android.defaultConfig.minSdk!!
+            val buildType = variant.buildType!!.replaceFirstChar { it.uppercase() }
+            val abis = mapOf("arm64-v8a" to "aarch64-linux-android${minSdk}_$buildType",
+                             "x86_64" to "x86_64-linux-android${minSdk}_$buildType")
+            tasks.register<AbiApksTask>("installAbiApks") {
+                apkFolder.set(variant.artifacts.get(SingleArtifact.APK))
+                loader.set(variant.artifacts.getBuiltArtifactsLoader())
+                folders.set(abis)
+                installDir.set(installRoot)
+                buildTools.set(androidComponents.sdkComponents.sdkDirectory.map { it.dir("build-tools/${android.buildToolsVersion}") })
+                keystore.set(signing.storeFile!!)
+                keyAlias.set(signing.keyAlias!!)
+                storePassword.set(signing.storePassword!!)
+                keyPassword.set(signing.keyPassword!!)
+                outputs.files(abis.values.map { installRoot.resolve("$it/storage-android.apk") })
+            }
+        }
     }
 }
+
+tasks.matching { it.name == "assembleDebug" }.configureEach { finalizedBy("installAbiApks") }
 
 dependencies {
     implementation("androidx.games:games-activity:4.4.2")

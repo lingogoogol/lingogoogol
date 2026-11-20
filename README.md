@@ -391,6 +391,8 @@ cd android
 
 Gradle 從 `../font/NotoSansTC-VariableFont_wght.ttf` 打包字型、以 `slangc` 編譯 shader，並以 `../android-keystore/debug.keystore` 簽章；可用 `-Plgo.font=`、`-Plgo.keystore=`、`-Plgo.slangc=` 指定其他位置。簽章金鑰必須與 Google Cloud 的 Android OAuth 用戶端登記的 SHA-1 相同。
 
+`assembleDebug` 完成後會自動執行 `installAbiApks`，以 `app-debug.apk`（含兩種 ABI）為來源，為每個 ABI 產生只含該 ABI 原生函式庫的 APK，放在 `../install/<target triple>_<build type>/storage-android.apk`：`aarch64-linux-android29_Debug`（手機）與 `x86_64-linux-android29_Debug`（模擬器）。它以 16 KB 頁面對齊，並以同一把 debug 金鑰重新簽章，所以 Google 登入照常可用。資料夾名稱與桌面版的 `install/x64-win32-pe-mingw_Release` 相同格式；其中 Debug 指 APK 的建置類型，C++ 仍以 Release 最佳化編譯。
+
 `python3 tests/run_compact_layout.py [輸出資料夾]` 在桌面版以 412 寬視窗繪製窄螢幕版面（主畫面、空間選單、對話框、傳輸列），對照本機模擬 Drive 並輸出截圖。
 
 ## 歡迎貢獻
