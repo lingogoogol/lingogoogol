@@ -363,6 +363,36 @@ GUI 命名回歸測試也包含於 GPU 測試程式，檢查自動名稱、複�
 
 `python3 tests/run_scroll.py` 驗證通用 `scroll_t` 的 X／Y／雙軸視窗、內容原點、部分可見按鈕的命中範圍、父子裁切交集、巢狀滾輪路由與邊界傳遞、子捲軸拖曳、遮擋、縮放、延後新增文字、內容替換和清理。另驗證不同更新頻率下的加速度／速度上限、提前煞車、精確停止、反向目標、滾輪動畫中間位置、div 動畫預設關閉、連續佈局變更、祖先平移、停用時完成定位與隱藏後更新。另以實際像素確認水平與垂直捲軸的黑色滑塊、原色軌道及自訂雙色。測試透過真實滑鼠事件與 Vulkan 截圖，不需要帳戶或網路。
 
+## Android 版
+
+Android 版（`android/`）與桌面版使用同一套 C++ 程式碼與 lgo.GUI 畫面：GUI 引擎在 Android 上透過 GameActivity 實作 GLFW API（`android/native/glfw.cpp`），以 Vulkan 繪製；Kotlin 只負責系統功能（檔案選擇器、Google 登入、背景傳輸服務、剪貼簿）。需要支援 Vulkan 1.1 以上的 Android 10 以上裝置，畫面固定直向。
+
+### 與桌面版的差異
+
+- **版面**：視窗寬度小於 600 邏輯像素時使用窄螢幕版面（桌面版最小視窗 800 寬，不會進入）：工具列移到標題下方並可左右捲動，狀態文字獨立一行；檔案清單每項兩行（檔名與大小、操作按鈕），不顯示時間欄；傳輸列與診斷資訊移到畫面底部；對話框寬度隨螢幕縮小，超出畫面時可上下捲動；空間選單每列的操作移到第二行。一個邏輯像素等於 1 dp，字形依螢幕密度點陣化。
+- **觸控**：點一下等於滑鼠點擊；拖曳等於滾輪捲動，但從捲軸（含兩側約 12 邏輯像素的觸控範圍）開始拖曳時，捲軸跟著手指移動，可快速捲過長清單；長按顯示按鈕提示，不會點擊。返回手勢等於 Esc。文字欄位取得焦點時顯示系統鍵盤，鍵盤的完成鍵等於 Enter。
+- **本機檔案**：上傳、下載使用系統檔案選擇器（Storage Access Framework）。上傳可選多個檔案或一個資料夾；下載選擇目的資料夾。授權會保存，未完成的傳輸重新開啟後可接續。
+- **執行目錄**：App 私有資料夾的結構與桌面版執行目錄相同（`settings.json`、`key/`、`root/`、`blob_queue/`、`task/`、`task.data/`、`logfile/`），字型與 shader 隨 App 附帶，啟動時複製。設定只存在各裝置，不同步。
+- **匯入檔案**：空間選單底部的「匯入檔案」用檔案選擇器逐一選取桌面版的檔案並複製到手機：`key/` 的服務帳戶金鑰與 `accounts.json`（合併，不覆寫既有登記）、`root/` 的空間紀錄（保留檔名），以及 `settings.json` 的空間清單與帳戶關聯（其他設定不匯入，匯入的空間預設登出）。不會匯入 `blob_queue` 與傳輸紀錄：兩台裝置共用同一份預備 blob 會配置到相同 ID。
+- **Google 使用者**：使用 Google Play 服務授權 Android 類型的 OAuth 用戶端（以套件名稱 `io.github.lingogoogol` 與簽章 SHA-1 對應），不使用 `client.json`，設定頁也不顯示字型檔案與用戶端設定兩欄。新增 Google 使用者時一律顯示 Google 帳戶選擇畫面，即使先前移除的帳戶仍保有授權，也由使用者自行選擇帳戶。手機不保存 refresh token；授權失效時回報錯誤，請移除該 Google 使用者後重新新增。
+- **背景傳輸**：有傳輸工作時以前景服務（通知「傳輸進行中」）保持 App 執行；Android 15 起此類服務每日最多 6 小時，中斷的工作會依檢查點接續。
+- 桌面版與手機可以同時寫入同一個空間；目前沒有同時修改同一資料夾的衝突偵測。
+
+### 建置
+
+需要 Android SDK（platform 37、build-tools 37.0.0）、NDK 30.0.16248370、JDK 17 以上，以及 PATH 上的 CMake 4.2 以上（SDK 內附的 CMake 早於 `CMAKE_CXX_STDLIB_MODULES_JSON`）與 Ninja、`slangc`。NDK 的 libc++ 未替 Android 目標提供 `import std` 清單，`android/cmake/` 會在 configure 時產生，並關閉 bionic 的 `_FORTIFY_SOURCE` 包裝函式（它們是 `static inline`，無法由 `std` module 匯出）。
+
+```bash
+# 第三方函式庫（OpenSSL 3.4.1、curl 8.23.0、zstd、FreeType、Vulkan-Headers 等，驗證 SHA-256）
+android/scripts/build-dependencies.sh          # 預設輸出到 ../lib/android/<ABI>
+cd android
+./gradlew assembleDebug                        # app/build/outputs/apk/debug/app-debug.apk
+```
+
+Gradle 從 `../font/NotoSansTC-VariableFont_wght.ttf` 打包字型、以 `slangc` 編譯 shader，並以 `../android-keystore/debug.keystore` 簽章；可用 `-Plgo.font=`、`-Plgo.keystore=`、`-Plgo.slangc=` 指定其他位置。簽章金鑰必須與 Google Cloud 的 Android OAuth 用戶端登記的 SHA-1 相同。
+
+`python3 tests/run_compact_layout.py [輸出資料夾]` 在桌面版以 412 寬視窗繪製窄螢幕版面（主畫面、空間選單、對話框、傳輸列），對照本機模擬 Drive 並輸出截圖。
+
 ## 歡迎貢獻
 
 歡迎透過 [Issue](https://github.com/lingogoogol/lingogoogol/issues) 回報問題、討論設計或提出功能需求，也歡迎直接提交 [Pull Request](https://github.com/lingogoogol/lingogoogol/pulls) 改善程式與文件。
