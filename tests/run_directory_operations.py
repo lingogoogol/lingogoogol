@@ -28,17 +28,25 @@ build = source.parent / 'build/x64-win32-pe-mingw_Release'
 runtime = source.parent / 'install/x64-win32-pe-mingw_Release'
 
 
+# The fixture space has one service account, which owns every blob.
+ADDRESS = 'mock@example.invalid'
+SPACE = 'space-test'
+
+
+# Current-format (version 2) metadata: entries and blobs carry size, time and
+# type, so listings need not read every child to fill them in (the slow
+# compatibility path for version-0 data).
 def entry(identifier, kind='folder', name=None):
-    result = {'id': identifier, 'type': kind, 'name': name or identifier}
-    if kind == 'file':
-        result['size'] = 0
-    return result
+    return {'id': identifier, 'type': kind, 'name': name or identifier, 'account': ADDRESS,
+            'size': 0, 'time': 0, 'version_min': 2}
 
 
 def blob(name, parent, content, next_page='null', file=False):
-    metadata = {'name': name, 'parent': parent, 'next': next_page}
+    metadata = {'name': name, 'parent': parent, 'parent_account': ADDRESS if parent != 'null' else 'null',
+                'next': next_page, 'next_account': ADDRESS if next_page != 'null' else 'null',
+                'type': 'file' if file else 'folder', 'size': 0, 'time': 0, 'version': 2, 'version_min': 2}
     if file:
-        metadata['size'] = 0
+        metadata['account'] = ADDRESS
     return {'name': json.dumps(metadata), 'description': json.dumps(content)}
 
 
@@ -53,8 +61,8 @@ def fixture():
         'tree2': blob('tree', 'root', []),
         'child': blob('child', 'tree', [entry('nested', 'file')]),
         'nested': blob('nested', 'child', ['chunk'], file=True),
-        'chunk': {'name': '{"parent":"nested"}', 'description': '["data"]'},
-        'data': {'name': '{"parent":"chunk"}', 'description': 'YWJj'},
+        'chunk': {'name': json.dumps({'parent': 'nested', 'parent_account': ADDRESS, 'account': ADDRESS}), 'description': '["data"]'},
+        'data': {'name': json.dumps({'parent': 'chunk', 'parent_account': ADDRESS}), 'description': 'YWJj'},
         'conflict': blob('conflict', 'root', []),
         'other-conflict': blob('conflict', 'destination', []),
         'malformed': blob('malformed', 'root', [entry('unrelated')]),
@@ -63,6 +71,9 @@ def fixture():
         'restart-child': blob('restart-child', 'restart', []),
     }
 
+    # Every listed child exists, as on Drive: operations may read child metadata.
+    for i in range(99):
+        result[f'filler-{i}'] = blob(f'filler-{i}', 'destination', [])
     # Cross the reservation batch boundary without thousands of HTTP requests.
     for i in range(101):
         result[f'batched-{i}'] = blob('batched', 'root', [], f'batched-{i+1}' if i < 100 else 'null', True)
@@ -74,7 +85,7 @@ def pool_fixture(test):
     count = 6500
     file = entry('pool-file', 'file', 'pool')
     file['size'] = count * 3
-    result = {'root': blob('root', 'null', [file, entry('tiny-file', 'file', 'tiny')]),
+    result = {'root': blob('root', 'null', [file, entry('tiny-file', 'file', 'tiny'), entry('destination')]),
               'destination': blob('destination', 'root', []),
               'pool-file': blob('pool', 'root', [f'pool-chunk-{i}' for i in range(count // 100)], file=True),
               'tiny-file': blob('tiny', 'root', [], file=True)}
@@ -83,12 +94,12 @@ def pool_fixture(test):
     result['pool-file']['name'] = json.dumps(metadata)
     expected = b''
     for chunk in range(count // 100):
-        result[f'pool-chunk-{chunk}'] = {'name': json.dumps({'parent': 'pool-file'}),
+        result[f'pool-chunk-{chunk}'] = {'name': json.dumps({'parent': 'pool-file', 'parent_account': ADDRESS, 'account': ADDRESS}),
             'description': json.dumps([f'pool-data-{i}' for i in range(chunk*100, (chunk+1)*100)])}
         for i in range(chunk*100, (chunk+1)*100):
             content = i.to_bytes(3, 'little')
             expected += content
-            result[f'pool-data-{i}'] = {'name': json.dumps({'parent': f'pool-chunk-{chunk}'}),
+            result[f'pool-data-{i}'] = {'name': json.dumps({'parent': f'pool-chunk-{chunk}', 'parent_account': ADDRESS}),
                 'description': base64.urlsafe_b64encode(content).decode()}
     (test / 'expected.bin').write_bytes(expected)
     return result
@@ -169,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
         return status, result
 
     def reserved_ids(self):
-        path = self.server.test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()
+        path = self.server.test / 'blob_queue' / hashlib.sha256(ADDRESS.encode()).hexdigest()
         stamp = path.stat().st_mtime_ns
         if stamp != getattr(self.server, 'queue_stamp', None):
             self.server.queue_ids = set(json.loads(path.read_text()))
@@ -202,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
                     fail = not self.server.unlink_failure
                     self.server.unlink_failure = True
                 if fail:
+                    # Tell the client which pause is the content DELETE failure.
+                    (self.server.test / 'unlink-delete-failed').write_text('yes')
                     return 503, {}
         if self.server.phase == 'pool':
             marker = self.server.test / 'pool-stage'
@@ -316,7 +329,86 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
     original_link[original_link.index('storage/google/easy/libstorage.google.easy.a')] = str(test / 'mock.obj')
     original_link.append('storage/google/easy/CMakeFiles/storage.google.easy.dir/.cppm.obj')
     original_link[original_link.index('-o') + 1] = str(test / 'production.exe')
-    subprocess.run(original_link, cwd=build, check=True)
+    # The production GUI build only adds an observer that writes the positions
+    # of the elements the driver uses (gui-ui.json); no behavior changes.
+    observed = (source / 'storage/storage.cpp').read_text(encoding='utf-8-sig')
+    observation = r'''        {
+            auto rect=[](lgo::GUI_object_t& object)
+            {
+                const auto at{object.get_pos()}; const auto size{object.get_size()};
+                return nlohmann::json{{"x",at.x},{"y",at.y},{"w",size.x},{"h",size.y}};
+            };
+            auto label=[](lgo::GUI_object_t& object)
+            {
+                std::string text;
+                std::function<void(lgo::GUI_object_t&)> find=[&](lgo::GUI_object_t& child)
+                {
+                    if (auto line=dynamic_cast<lgo::text_line_t*>(&child); line && text.empty()) text=line->get_text();
+                    child.visit_children(find);
+                };
+                find(object);
+                return text;
+            };
+            auto toolbar=nlohmann::json::object();
+            lgo::scroll_t* viewer{};
+            if (auto main{state.get_object_shared<lgo::divy_hard_t>(0)})
+            {
+                std::function<void(lgo::GUI_object_t&)> inspect=[&](lgo::GUI_object_t& object)
+                {
+                    if (auto button=dynamic_cast<lgo::button_classic_std_t*>(&object))
+                        if (const auto text{label(*button)}; text=="貼上" || text=="新增資料夾") toolbar[text]=rect(*button);
+                    if (auto scroll=dynamic_cast<lgo::scroll_t*>(&object); scroll && scroll->axes()==lgo::scroll_axes_t::y &&
+                        (!viewer || scroll->view_size().x*scroll->view_size().y > viewer->view_size().x*viewer->view_size().y))
+                        viewer=scroll;
+                    object.visit_children(inspect);
+                };
+                inspect(*main);
+            }
+            auto rows=nlohmann::json::array(), crumbs=nlohmann::json::array(), view=nlohmann::json::object();
+            if (viewer)
+            {
+                if (viewer->content()) viewer->content()->visit_children([&](lgo::GUI_object_t& row)
+                {
+                    auto value=nlohmann::json{{"actions",nlohmann::json::array()}};
+                    std::function<void(lgo::GUI_object_t&)> find=[&](lgo::GUI_object_t& object)
+                    {
+                        if (auto name=dynamic_cast<lgo::text_line_scroll_std_t*>(&object); name && !value.contains("name"))
+                        { value["name"]=name->get_text(); value["rect"]=rect(*name); }
+                        if (auto action=dynamic_cast<progress_button_t*>(&object))
+                        { auto at=rect(*action); at["text"]=action->get_text(); value["actions"].push_back(at); }
+                        object.visit_children(find);
+                    };
+                    find(row);
+                    if (value.contains("name")) rows.push_back(value);
+                });
+                const auto offset{viewer->scroll_offset()}; const auto maximum{viewer->max_scroll()};
+                const auto thumb_at{viewer->scrollbar_pos(false)}; const auto thumb_size{viewer->scrollbar_size(false)};
+                view={{"rect",rect(*viewer)},{"offset",offset.y},{"max",maximum.y},
+                      {"thumb",{{"x",thumb_at.x},{"y",thumb_at.y},{"w",thumb_size.x},{"h",thumb_size.y}}}};
+            }
+            if (persistent.m_breadcrumbs->content()) persistent.m_breadcrumbs->content()->visit_children([&](lgo::GUI_object_t& child)
+            {
+                if (auto crumb=dynamic_cast<progress_button_t*>(&child))
+                { auto at=rect(*crumb); at["text"]=crumb->get_text(); crumbs.push_back(at); }
+            });
+            const auto value=nlohmann::json{{"toolbar",toolbar},{"rows",rows},{"crumbs",crumbs},{"viewer",view},
+                {"dialog",bool(persistent.m_dialog)},{"status",persistent.m_directory_status->get_text()},
+                {"window_w",engine.get_window_size().x},
+                {"window_h",engine.get_window_size().y}}.dump();
+            static std::string previous;
+            if (value!=previous) { storage_atomic_write("gui-ui.json",value); previous=value; }
+        }
+'''
+    assert observed.count('        lgo::text_line_t::pending_load();') == 1
+    observed = observed.replace('        lgo::text_line_t::pending_load();', observation + '        lgo::text_line_t::pending_load();')
+    (test / 'observed.cpp').write_text(observed, encoding='utf-8')
+    command = shlex.split(next(item['command'] for item in commands if Path(item['file']) == source / 'storage/storage.cpp'))
+    command[command.index('-o') + 1] = str(test / 'observed.obj')
+    command[command.index('-c') + 1] = str(test / 'observed.cpp')
+    subprocess.run(command, cwd=build, check=True)
+    production = list(original_link)
+    production[production.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test / 'observed.obj')
+    subprocess.run(production, cwd=build, check=True)
     command = [arg for arg in original_link if arg not in ('-mwindows', '-municode') and not arg.startswith('-Wl,--out-implib')]
     command[command.index('-o') + 1] = str(test / 'test.exe')
     command[command.index('storage/CMakeFiles/storage.dir/storage.cpp.obj')] = str(test / 'test.obj')
@@ -327,9 +419,16 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
         shutil.copytree(runtime / resource, test / resource)
     (test / 'root').mkdir()
     (test / 'blob_queue').mkdir()
-    (test / 'key.json').write_text(json.dumps({'client_email': 'mock@example.invalid', 'private_key': 'unused-fixture-key'}))
-    (test / 'root' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text('root')
-    (test / 'blob_queue' / hashlib.sha256(b'mock@example.invalid').hexdigest()).write_text(json.dumps([f'reserve-{i}' for i in range(40000)]))
+    # Space layout (storage_runtime_t::open_space): a program-managed key in the
+    # key/ registry, one root record per space and one reserve queue per account.
+    (test / 'key').mkdir()
+    (test / 'key/program-0.json').write_text(json.dumps({'client_email': ADDRESS, 'private_key': 'unused-fixture-key'}))
+    (test / 'key/accounts.json').write_text(json.dumps({ADDRESS: 'key/program-0.json'}))
+    (test / 'root' / SPACE).write_text(json.dumps({'account': ADDRESS, 'id': 'root'}))
+    # The production GUI opens this signed-in space (test.exe phases build their own settings).
+    (test / 'settings.json').write_text(json.dumps({'spaces': [{'id': SPACE, 'name': '測試空間', 'accounts': [ADDRESS],
+                                                               'signed_in': True}], 'selected_space': SPACE}))
+    (test / 'blob_queue' / hashlib.sha256(ADDRESS.encode()).hexdigest()).write_text(json.dumps([f'reserve-{i}' for i in range(40000)]))
     (test / 'empty.bin').write_bytes(b'')
     server = FixtureServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
@@ -348,7 +447,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
             server.phase = phase
             if phase.startswith('unlink-'):
                 server.unlink_failure = False
-                for marker in ('unlink-observed', 'unlink-release'):
+                for marker in ('unlink-observed', 'unlink-release', 'unlink-delete-failed'):
                     (test / marker).unlink(missing_ok=True)
                 server.blobs = {
                     'root': blob('root', 'null', [entry('keep-file', 'file', 'shared')], 'root2'),
@@ -378,7 +477,8 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
-                stdout, stderr = process.communicate(timeout=120 if phase == "pool" else 60)
+                # A hang guard: backend makes ~1600 sequential mock requests under Wine.
+                stdout, stderr = process.communicate(timeout=180)
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -448,7 +548,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                     cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
                 try:
-                    stdout, stderr = process.communicate(timeout=70)
+                    stdout, stderr = process.communicate(timeout=150)  # Hang guard for slow Wine GUI runs.
                 finally:
                     if process.poll() is None:
                         os.killpg(process.pid, signal.SIGKILL)
@@ -470,12 +570,19 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 value['size'] = size
                 size_entries.append(value)
             server.blobs['nav-5']['description'] = json.dumps(size_entries)
+            # Every listed file exists, with the size its entry reports.
+            for value in size_entries[1:]:
+                file = blob(value['id'], 'nav-5', [], file=True)
+                metadata = json.loads(file['name'])
+                metadata['size'] = value['size']
+                file['name'] = json.dumps(metadata)
+                server.blobs[value['id']] = file
             process = subprocess.Popen(['xvfb-run', '-a', '-s', '-screen 0 1600x1200x24',
                 'python3', str(source / 'tests/directory_gui_driver.py'), str(test / 'test.exe'), 'breadcrumbs'],
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
-                stdout, stderr = process.communicate(timeout=60)
+                stdout, stderr = process.communicate(timeout=150)  # Hang guard for slow Wine GUI runs.
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
@@ -490,7 +597,7 @@ with tempfile.TemporaryDirectory(prefix='storage-directory-test-') as directory:
                 cwd=test, env={**os.environ, 'WINEDEBUG': '-all', 'STORAGE_GPU_TEST_PORT': str(server.server_port)},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
-                stdout, stderr = process.communicate(timeout=60)
+                stdout, stderr = process.communicate(timeout=150)  # Hang guard for slow Wine GUI runs.
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)

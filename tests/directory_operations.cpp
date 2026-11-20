@@ -42,7 +42,8 @@ int main(int argc, char** argv)
         storage_runtime_t runtime{&close};
         storage_settings_t settings;
         settings.network_retries = 0;
-        auto session{runtime.open(settings, std::make_shared<request_control_t>())};
+        settings.spaces.push_back({.id{"space-test"}, .name{"測試空間"}, .accounts{"mock@example.invalid"}, .signed_in{true}});
+        auto session{runtime.open_space(settings, settings.spaces.front(), std::make_shared<request_control_t>())};
         google_account_t::default_shared_set(session->account);
         load_state_t loads;
         loads.m_session = session;
@@ -71,7 +72,9 @@ int main(int argc, char** argv)
             check(!message_loop(&engine, &persistent, &multi, &loads, session->queue.get()),
                   "Unexpected window close.");
             lgo::text_line_t::pending_load();
-            check(persistent.m_easy_idle.size()+loads.m_end.size()==load_easy_count,
+            // The pool grows by at most 8 handles per frame up to the limit.
+            check(persistent.m_easy_idle.size()+loads.m_end.size()==persistent.m_easy_status.size() &&
+                  persistent.m_easy_status.size()<=load_easy_count,
                   "Transfers lost or allocated an extra physical pool slot.");
             for (const auto& [key, callback] : loads.m_end)
                 check(persistent.m_easy_status.contains(key),"A request used a handle outside the shared pool.");
@@ -84,8 +87,11 @@ int main(int argc, char** argv)
                 pump();
             }
         };
+        // `inspect` runs before the row is dismissed: dismissal retires the
+        // finished task's in-memory journal data.
         auto run = [&](std::string kind, std::string source, json entry, std::string destination,
-                       std::string name, bool success = true) {
+                       std::string name, bool success = true,
+                       const std::function<void(const std::shared_ptr<load_task_t>&)>& inspect = {}) {
             begin_directory_task(&loads, session, kind, source, entry, destination, name);
             auto task{loads.m_task_list.back()};
             wait([&]
@@ -97,12 +103,15 @@ int main(int argc, char** argv)
                 throw std::runtime_error{task->m_progress_text->get_text()};
             check(task->m_confirm_button->get_size().x == 32 && task->m_confirm_button->get_size().y < 32,
                   "Progress actions are not compact text buttons.");
+            if (inspect) inspect(task);
             task->m_dismissed = true;
             pump();
             return task;
         };
         auto entry = [](std::string id, std::string name, bool file = false) {
-            json result{{"id", id}, {"name", name}, {"type", file ? "file" : "folder"}};
+            // As listed: every entry names the account that owns its blob.
+            json result{{"id", id}, {"name", name}, {"type", file ? "file" : "folder"},
+                        {"account", "mock@example.invalid"}};
             if (file)
                 result["size"] = 0;
             return result;
@@ -185,7 +194,15 @@ int main(int argc, char** argv)
                   "Stale listing or clipboard became usable after unlink.");
             check(task->m_result == task_result_t::active, "Delete did not remain active while requests were blocked.");
             storage_atomic_write("unlink-release", "yes");
-            wait([&] { return task->m_control->paused.load(); });
+            // The task may already have paused on its own blocked parent read
+            // (network_retries is 0); continue it until the content DELETE fails.
+            wait([&]
+            {
+                if (!task->m_control->paused) return false;
+                if (std::filesystem::exists("unlink-delete-failed")) return true;
+                task->m_control->retry();
+                return false;
+            });
             check(!persistent.m_directory_rows.contains(id), "A failed content DELETE restored the removed row.");
             task->m_control->retry();
             wait([&] { return task->m_result != task_result_t::active; });
@@ -195,6 +212,9 @@ int main(int argc, char** argv)
         }
         else if (phase=="pool")
         {
+            // Operations route by owners learned from listings, as after the
+            // user opens the space: wait until the root listing is shown.
+            wait([&] { return persistent.m_directory_rows.contains("destination"); });
             auto file=entry("pool-file","pool",true);
             file["size"]=19500;
             storage_atomic_write("pool-stage","move");
@@ -347,9 +367,12 @@ int main(int argc, char** argv)
                 input({{"move",bounds.pos.x+bounds.size.x/2,bounds.pos.y+bounds.size.y/2},{"click"}});
             };
             wait([&] { return persistent.m_breadcrumb_folder=="root"; });
+            // Jumping straight to a deep folder skips the listings that would
+            // record its owner; ancestors' owners come from their metadata.
+            session->remember("nav-7","mock@example.invalid","folder");
             pos="nav-7"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-7"; });
-            check(names().size()==9 && names().front()=="mock","Direct navigation did not load every actual ancestor with the service account name.");
+            check(names().size()==9 && names().front()=="測試空間","Direct navigation did not load every actual ancestor with the space name.");
             input(json::array()); // Verify rendered separator pixels before moving the path.
             check(viewer->get_pos().y>=crumbs->get_pos().y+crumbs->get_size().y &&
                   crumbs->max_scroll().x>0,"Breadcrumbs are not a separate horizontal viewport above contents.");
@@ -375,29 +398,33 @@ int main(int argc, char** argv)
             wait([&] { return persistent.m_breadcrumb_folder=="nav-6"; });
             check(pos=="nav-6" && names().size()==8 && crumbs->scroll_offset().x==0,"Ancestor click did not truncate the path.");
             input(json::array());
-            click_crumb("mock");
+            click_crumb("測試空間");
             wait([&] { return persistent.m_breadcrumb_folder=="root"; });
             check(pos=="root" && names().size()==1,"Root breadcrumb did not navigate.");
             google_easy_t request;
-            blob_update_name_run(request,"nav-5",json{{"name","moved-parent"},{"parent","root"},{"next","null"}}.dump());
+            // Current-format metadata, as the fixture's blob() writes it.
+            blob_update_name_run(request,"nav-5",json{{"name","moved-parent"},{"parent","root"},
+                {"parent_account","mock@example.invalid"},{"next","null"},{"next_account","null"},{"type","folder"},
+                {"size",0},{"time",0},{"version",2},{"version_min",2}}.dump());
             pos="nav-5"; persistent.m_refresh();
             wait([&] { return persistent.m_breadcrumb_folder=="nav-5"; });
-            check(names()==std::vector<std::string>{"mock","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
+            check(names()==std::vector<std::string>{"測試空間","moved-parent"},"Breadcrumbs used stale navigation history after a move.");
             auto verify_columns = [&]
             {
-                lgo::text_line_t *name_header{}, *size_header{}, *actions_header{};
+                lgo::text_line_t *name_header{}, *size_header{}, *time_header{}, *actions_header{};
                 std::function<void(lgo::GUI_object_t&)> headings = [&](auto& object)
                 {
                     if (auto text{dynamic_cast<lgo::text_line_t*>(&object)})
                     {
                         if (text->get_text()=="檔名") name_header=text;
                         if (text->get_text()=="大小") size_header=text;
+                        if (text->get_text()=="時間") time_header=text;
                         if (text->get_text()=="操作") actions_header=text;
                     }
                     object.visit_children(headings);
                 };
                 headings(*main);
-                check(name_header && size_header && actions_header,"Missing directory column headings.");
+                check(name_header && size_header && time_header && actions_header,"Missing directory column headings.");
                 check(name_header->get_text_size().y<lgo::font_preference_t::default_get()[0]->leading_get(),
                       "Column headings did not use the smaller 12px font.");
                 check(name_header->get_pos().y>=crumbs->get_pos().y+crumbs->get_size().y &&
@@ -422,7 +449,10 @@ int main(int argc, char** argv)
                     {
                         if (auto label{dynamic_cast<lgo::text_line_scroll_std_t*>(&object)}) name=label;
                         else if (auto button{dynamic_cast<progress_button_t*>(&object)}) actions.push_back(button);
-                        else if (auto label{dynamic_cast<lgo::text_line_std_t*>(&object)}) size=label;
+                        // Rows also have a time column, which takes the size column's
+                        // place when that is hidden: take the first label under 「大小」.
+                        else if (auto label{dynamic_cast<lgo::text_line_std_t*>(&object)};
+                                 label && !size && label->get_pos().x==size_header->get_pos().x) size=label;
                         object.visit_children(inspect);
                     };
                     inspect(row);
@@ -446,13 +476,14 @@ int main(int argc, char** argv)
                         ++files;
                         check(size->get_text()==expected->second,"File size has the wrong integer value or unit.");
                     }
-                    else check(name->get_text()=="nav-6" && size->get_text().empty(),
-                               "Folder label includes a type prefix or a size.");
+                    // Folders show their recursive size (nav-6 is empty) like files.
+                    else check(name->get_text()=="nav-6" && size->get_text()=="0 B",
+                               "Folder label includes a type prefix or a wrong size.");
                     ++rows;
                 });
                 check(files==expected_sizes.size() && rows==files+1,
                       "Column checks did not cover folders and every file size boundary.");
-                return std::pair{name_header->get_size().x,size_header->get_size().x};
+                return std::tuple{name_header->get_size().x,size_header->get_size().x,time_header->get_size().x};
             };
             const auto original_pos{viewer->get_pos()}, original_crumb_pos{crumbs->get_pos()};
             const auto original_size{viewer->get_size()};
@@ -466,7 +497,8 @@ int main(int argc, char** argv)
                     // with xdotool does not reliably deliver WM_SIZE under Wine.
                     glfwSetWindowSize(engine.window_get(),static_cast<int>(size.x),static_cast<int>(size.y));
                     wait([&] { return engine.get_window_size().x==size.x && engine.get_window_size().y==size.y; });
-                    check(crumbs->get_pos().x==viewer->get_pos().x && crumbs->get_size().x==viewer->get_size().x,
+                    // The current-folder actions share the breadcrumb row on its right.
+                    check(crumbs->get_pos().x==viewer->get_pos().x && crumbs->get_size().x<viewer->get_size().x,
                           "Breadcrumb and contents widths diverged after resize.");
                     const auto at{viewer->get_pos()};
                     const auto extent{viewer->get_size()};
@@ -488,14 +520,33 @@ int main(int argc, char** argv)
                         viewer->get_pos().x,viewer->get_pos().y,viewer->get_size().x,viewer->get_size().y,
                         original_crumb_pos.x,original_crumb_pos.y,crumbs->get_pos().x,crumbs->get_pos().y)};
             }
-            const auto threshold{engine.get_window_size().x-verify_columns().first+120};
-            for (const auto width : {threshold,threshold-1,threshold+1})
+            // Optional columns hide right to left as the window narrows: first the
+            // time, then the size, each once the filename reaches its 120px minimum.
+            auto columns_at = [&](std::int64_t width)
             {
                 glfwSetWindowSize(engine.window_get(),static_cast<int>(width),600);
                 wait([&] { return engine.get_window_size().x==width; });
-                const auto [name_width,size_width]{verify_columns()};
+                return verify_columns();
+            };
+            const auto time_threshold{engine.get_window_size().x-std::get<0>(verify_columns())+120};
+            for (const auto width : {time_threshold,time_threshold-1,time_threshold+1})
+            {
+                const auto [name_width,size_width,time_width]{columns_at(width)};
+                if (width==time_threshold)
+                    check(name_width==120 && size_width>0 && time_width>0,"Time disappeared before the name reached its minimum.");
+                if (width<time_threshold)
+                    check(time_width==0 && size_width>0,"Time stayed visible, or size hid first, after the filename reached its minimum.");
+                if (width>time_threshold)
+                    check(name_width==121 && time_width>0,"Time did not recover at the column threshold.");
+                input(json::array());
+            }
+            columns_at(time_threshold-1);
+            const auto threshold{engine.get_window_size().x-std::get<0>(verify_columns())+120};
+            for (const auto width : {threshold,threshold-1,threshold+1})
+            {
+                const auto [name_width,size_width,time_width]{columns_at(width)};
                 if (width==threshold)
-                    check(name_width==120 && size_width>0,"Size disappeared before the name reached its minimum.");
+                    check(name_width==120 && size_width>0 && time_width==0,"Size disappeared before the name reached its minimum.");
                 if (width<threshold)
                     check(size_width==0,"Size stayed visible after the filename reached its minimum.");
                 if (width>threshold)
@@ -504,13 +555,31 @@ int main(int argc, char** argv)
             }
             glfwSetWindowSize(engine.window_get(),800,600);
             wait([&] { return engine.get_window_size().x==800; });
-            const auto right{viewer->get_pos().x+viewer->view_size().x};
-            const auto row_y{viewer->get_pos().y+12};
-            input({{"move",right-116,row_y},{"click"}});
+            // Click the first row's (nav-6) actions where they are drawn; the
+            // action set changes over time, so do not assume fixed offsets.
+            auto click_action = [&](const std::string& label)
+            {
+                progress_button_t* button{};
+                viewer->content()->visit_children([&](auto& row)
+                {
+                    std::function<void(lgo::GUI_object_t&)> find = [&](auto& object)
+                    {
+                        if (auto action{dynamic_cast<progress_button_t*>(&object)}; action && !button && action->get_text()==label)
+                            button=action;
+                        object.visit_children(find);
+                    };
+                    find(row);
+                });
+                check(button,"Missing row action.");
+                check(button->get_pos().x+button->get_size().x<=viewer->get_pos().x+viewer->view_size().x,
+                      "Row action is clipped on a narrow window.");
+                input({{"move",button->get_pos().x+button->get_size().x/2,button->get_pos().y+button->get_size().y/2},{"click"}});
+            };
+            click_action("剪下");
             check(persistent.m_clipboard && !persistent.m_clipboard->copy &&
                   persistent.m_clipboard->entity.at("id")=="nav-6",
                   "Cut did not hit the right-hand action on a narrow window.");
-            input({{"move",right-66,row_y},{"click"}});
+            click_action("複製");
             check(persistent.m_clipboard && persistent.m_clipboard->copy &&
                   persistent.m_clipboard->entity.at("id")=="nav-6",
                   "Copy did not hit the right-hand action on a narrow window.");
@@ -538,11 +607,18 @@ int main(int argc, char** argv)
             run("directory-create", "missing-folder", {}, {}, "stale-source", false);
             run("directory-create", "root", {}, {}, "測試資料夾");
             run("directory-create", "root", {}, {}, "測試資料夾");
-            const auto batched{run("directory-copy", "root", entry("batched-0", "batched", true), "root", "batched")};
-            const auto allocations = batched->m_journal->data().at("allocations");
-            check(allocations.at("copied-blobs:0").size() == 100 &&
-                  allocations.at("copied-blobs:100").size() == 1,
-                  "Copy did not durably reserve IDs in bounded batches.");
+            run("directory-copy", "root", entry("batched-0", "batched", true), "root", "batched", true,
+                [&](const auto& batched)
+                {
+                    // Copies reserve per sibling group ("copy:<group>:<offset>"),
+                    // at most 100 IDs each; the 101-page file needs 101 IDs.
+                    std::size_t total{};
+                    bool bounded{true};
+                    for (const auto& [key, ids] : batched->m_journal->data().at("allocations").items())
+                        if (key.starts_with("copy:"))
+                        { total += ids.size(); bounded = bounded && ids.size() <= 100; }
+                    check(bounded && total == 101, "Copy did not durably reserve IDs in bounded batches.");
+                });
             run("directory-copy", "root", entry("file", "file", true), "root", "file");
             run("directory-copy", "root", entry("tree", "tree"), "child", "tree", false);
             run("directory-copy", "root", entry("tree", "tree"), "destination", "tree");
@@ -616,6 +692,8 @@ int main(int argc, char** argv)
         else
         {
             restore_tasks(&loads, [&](const json&) { return session; });
+            // Journals are replayed in the background; the GUI loop adds the task.
+            wait([&] { return !loads.m_task_list.empty(); });
             check(loads.m_task_list.size() == 1, "Missing crash checkpoint.");
             auto task{loads.m_task_list.back()};
             wait([&] { return task->m_result != task_result_t::active; });

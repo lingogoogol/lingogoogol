@@ -28,6 +28,10 @@ if len(sys.argv) > 2 and sys.argv[2] == 'breadcrumbs':
                         time.sleep(.08)
                     time.sleep(.15)
                     if value.get('separators') or value.get('dividers'):
+                        # Hover tooltips may cover the lines: park the pointer
+                        # outside the window (bottom-right of the 1600x1200 screen).
+                        subprocess.run(['xdotool','mousemove','1599','1199'],check=True)
+                        time.sleep(.4)
                         geometry = dict(line.split('=',1) for line in subprocess.check_output(
                             ['xdotool','getwindowgeometry','--shell',window],text=True).splitlines())
                         x,y,width,height=(int(geometry[key]) for key in ('X','Y','WIDTH','HEIGHT'))
@@ -49,6 +53,10 @@ if len(sys.argv) > 2 and sys.argv[2] == 'breadcrumbs':
             app.kill()
             app.wait()
 
+# A real window manager is required: Wine otherwise reports a maximized
+# client while X11 keeps the original surface size and clips the right side.
+window_manager = subprocess.Popen(['openbox'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(.4)
 app = subprocess.Popen(['wine64', sys.argv[1]])
 window = None
 
@@ -71,9 +79,12 @@ def status():
 
 
 def screenshot(name):
-    geometry = dict(line.split('=', 1) for line in run('getwindowgeometry', '--shell', window).stdout.splitlines())
-    x, y, width, height = (int(geometry[key]) for key in ('X', 'Y', 'WIDTH', 'HEIGHT'))
-    result = ImageGrab.grab().crop((x, y, x + width, y + height)).convert('RGB')
+    # Capture the window itself: with window-manager decorations the reported
+    # geometry need not match where the client area is on screen.
+    from io import BytesIO
+    from PIL import Image
+    data = subprocess.run(['import', '-window', window, 'png:-'], check=True, capture_output=True).stdout
+    result = Image.open(BytesIO(data)).convert('RGB')
     result.save('/tmp/storage-directory-' + name + '.png')
     return result
 
@@ -81,10 +92,50 @@ def screenshot(name):
 def click(x, y):
     run('mousemove', '--window', window, x, y, 'click', '1')
     time.sleep(.25)
+# Main-window positions come from gui-ui.json, written by the observed build.
+# Dialogs keep lgo::modal_dialog_t's layout at the initial 1536 x 1024 size.
+def gui():
+    while True:
+        try:
+            return json.loads(Path('gui-ui.json').read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            time.sleep(.02)
+def center(rect):
+    return rect['x'] + rect['w'] // 2, rect['y'] + rect['h'] // 2
+def tool(label):
+    wait_for(lambda: label in gui()['toolbar'], 'Missing toolbar button: ' + label)
+    return gui()['toolbar'][label]
+def row(name, prefix=False):
+    match = lambda value: value['name'].startswith(name) if prefix else value['name'] == name
+    wait_for(lambda: any(match(value) for value in gui()['rows']), 'Missing row: ' + name)
+    return next(value for value in gui()['rows'] if match(value))
+def action(name, label):
+    # Click only once the row stops moving: a refresh after the previous
+    # operation re-lays out the list, and a stale position hits another row.
+    previous, deadline = None, time.monotonic() + 20
+    while (current := row(name)) != previous:
+        if time.monotonic() > deadline:
+            raise RuntimeError('Row did not settle: ' + name)
+        previous = current
+        time.sleep(.3)
+    click(*center(next(value for value in current['actions'] if value['text'] == label)))
+def crumb(label):
+    wait_for(lambda: any(value['text'] == label for value in gui()['crumbs']), 'Missing breadcrumb: ' + label)
+    click(*center(next(value for value in gui()['crumbs'] if value['text'] == label)))
 
 
+def dialog(lines, fields):
+    # lgo::modal_dialog_t layout in the current (maximized) window.
+    wait_for(lambda: gui()['dialog'], 'Dialog did not open.')
+    height = 152 + 28 * lines + 68 * fields
+    return (gui()['window_w'] - 720) // 2, max(0, (gui()['window_h'] - height) // 2), height
+def answer(lines, fields, ok=True):
+    left, top, height = dialog(lines, fields)
+    click(left + (640 if ok else 520), top + height - 32)
+CREATE, CONFIRM = (0, 1), (2, 0)  # New folder; paste/delete confirmations
 def type_name(name):
-    click(500, 490)
+    left, top, _ = dialog(*CREATE)
+    click(left + 200, top + 52 + 44)
     run('key', 'ctrl+a')
     run('type', '--clearmodifiers', name)
 
@@ -115,73 +166,86 @@ try:
     wait_for(find_window, 'Window did not appear.', 30)
     run('windowfocus', '--sync', window)
     time.sleep(1)
+    wait_for(lambda: gui()['rows'] and gui()['crumbs'], 'The space listing did not load.')
+    paste = tool('貼上')
+    paste_left, paste_right, paste_y = paste['x'], paste['x'] + paste['w'] - 1, paste['y'] + 8
     initial = screenshot('initial')
     # Action toolbar buttons retain 96x32 geometry beside the 32px account slot.
     # Empty paste remains
     # gray through hover/press and must not open even an informational dialog.
     for state in ('idle', 'hover', 'press'):
         if state == 'hover':
-            run('mousemove', '--window', window, 816,24)
+            run('mousemove', '--window', window, *center(paste))
         elif state == 'press':
             run('mousedown','1')
         time.sleep(.25)
         image = screenshot('paste-disabled-' + state)
-        for x in (768, 769, 862, 863):
-            assert 80 < image.getpixel((x,16))[0] < 200, 'Disabled paste border is not gray or has the wrong width.'
-        ink = [pixel for pixel in image.crop((790,12,843,36)).getdata() if max(pixel) > 80]
+        for x in (paste_left, paste_left + 1, paste_right - 1, paste_right):
+            assert 80 < image.getpixel((x,paste_y))[0] < 200, 'Disabled paste border is not gray or has the wrong width.'
+        ink = [pixel for pixel in image.crop((paste_left+22,paste['y']+4,paste_left+75,paste['y']+28)).getdata() if max(pixel) > 80]
         assert ink and all(max(pixel) < 210 and max(pixel)-min(pixel) < 3 for pixel in ink), 'Disabled paste text changed color.'
     run('mouseup','1')
     time.sleep(.3)
     image = screenshot('paste-disabled-release')
-    assert image.getpixel((500,490)) == initial.getpixel((500,490)), 'Empty paste opened a dialog.'
+    assert image.getpixel((500,490)) == initial.getpixel((500,490)) and not gui()['dialog'], 'Empty paste opened a dialog.'
     if len(sys.argv) > 2 and sys.argv[2] == 'scroll':
         # A wheel event over the name must reach the containing list; horizontal
         # events subsequently move that name without selecting another row.
-        def thumb_top():
-            image = screenshot('scroll-sync')
-            # The visible interval is the black gap in the original gray track.
-            dark = [image.getpixel((1526,y))[0]<20 for y in range(122,1016)]
-            if all(dark):
-                return None
-            return next((122+i for i in range(len(dark)-1) if dark[i] and dark[i+1] and
-                         (i==0 or not dark[i-1])),None)
-        # Await rendered state rather than assuming that Lavapipe has finished
-        # rebuilding thousands of deferred glyphs after an arbitrary delay.
-        wait_for(lambda: thumb_top() == 122, 'Directory scrollbar did not appear.')
-        run('mousemove', '--window', window, 400, 134)
+        view = lambda: gui()['viewer']
+        # Await the rendered list rather than an arbitrary delay: Lavapipe may
+        # still be rebuilding thousands of deferred glyphs.
+        wait_for(lambda: view() and view()['max'] > 0 and view()['thumb']['h'] > 0, 'Directory scrollbar did not appear.')
+        first = gui()['rows'][0]
+        run('mousemove', '--window', window, first['rect']['x'] + 100, center(first['rect'])[1])
         time.sleep(.3)
         run('click', '--repeat', '3', '--delay', '80', '5')
-        wait_for(lambda: (thumb_top() or 0) >= 160, 'Vertical wheel did not update the viewport.')
-        run('mousemove', '--window', window, 400, 164)
-        before = screenshot('scroll-vertical').crop((290,155,1100,180))
+        wait_for(lambda: view()['offset'] >= 64, 'Vertical wheel did not update the viewport.')
+        wait_for(lambda: not gui()['dialog'], 'Unexpected dialog.')
+        time.sleep(.3)
+        # The first row fully inside the viewport after scrolling.
+        top = view()['rect']['y']
+        rows = gui()['rows']
+        index = next(i for i, value in enumerate(rows) if value['rect']['y'] >= top)
+        target = rows[index]
+        identifier = lambda value: value['name'].split('-long-')[0]
+        name = target['rect']
+        run('mousemove', '--window', window, name['x'] + 100, center(name)[1])
+        crop = (name['x'], name['y'], name['x'] + name['w'], name['y'] + name['h'])
+        before = screenshot('scroll-vertical').crop(crop)
         run('click', '7')
-        wait_for(lambda: screenshot('scroll-horizontal').crop((290,155,1100,180)).tobytes() != before.tobytes(),
+        wait_for(lambda: screenshot('scroll-horizontal').crop(crop).tobytes() != before.tobytes(),
                  'Horizontal name scrolling did not redraw.')
-        click(1504, 164)
+        action(target['name'], '刪除')
         screenshot('scroll-delete-confirm')
-        click(1056, 584)
-        wait_for(lambda: 'folder-03' not in status(), 'Wheel axes selected the wrong directory row.')
-        assert 'folder-02' in status() and 'folder-04' in status()
-        # Replacing 39 long-name rows also rebuilds their deferred glyphs.
-        # Let the mocked refresh finish before beginning the native drag.
-        time.sleep(2)
+        answer(*CONFIRM)
+        wait_for(lambda: identifier(target) not in status(), 'Wheel axes selected the wrong directory row.')
+        assert identifier(rows[index - 1]) in status() and identifier(rows[index + 1]) in status()
+        # Replacing 39 long-name rows takes many frames, and finishing restores
+        # the scroll offset saved when it began: wait for the rebuild to end
+        # (empty directory status) before beginning the native drag.
+        wait_for(lambda: not any(value['name'] == target['name'] for value in gui()['rows']) and
+                 gui()['status'] == '', 'The listing did not finish rebuilding.', 60)
         # Drag the thin vertical thumb down, beyond the list, then release.
-        run('mousemove', '--window', window, 1526, 190)
+        thumb = view()['thumb']
+        bottom = view()['rect']['y'] + view()['rect']['h']
+        run('mousemove', '--window', window, *center(thumb))
         time.sleep(.3)
         run('mousedown', '1')
         time.sleep(2)
         # Cross the viewport while still inside the native window before
         # leaving it; Wine may coalesce the final out-of-window move.
-        run('mousemove', '--window', window, 1526, 1004)
+        run('mousemove', '--window', window, center(thumb)[0], bottom - 4)
         time.sleep(.3)
-        run('mousemove', '--window', window, 1550, 1150)
+        run('mousemove', '--window', window, gui()['window_w'] + 14, gui()['window_h'] + 126)
         time.sleep(.3)
         run('mouseup', '1')
-        wait_for(lambda: (thumb_top() or 0) > 500, 'Dragging did not move the vertical thumb to the bottom.')
+        wait_for(lambda: view()['offset'] == view()['max'], 'Dragging did not move the vertical thumb to the bottom.')
         screenshot('scroll-bottom')
         # Pixel scrolling aligns the content bottom with the viewport bottom.
-        click(1504, 990)
-        click(1056, 584)
+        last = gui()['rows'][-1]
+        assert identifier(last) == 'folder-39' and last['rect']['y'] + last['rect']['h'] <= bottom
+        action(last['name'], '刪除')
+        answer(*CONFIRM)
         wait_for(lambda: 'folder-39' not in status(), 'Dragging did not expose the last directory row.')
         run('key', 'alt+F4')
         app.wait(timeout=10)
@@ -190,59 +254,62 @@ try:
         assert 'finished_all!' in logs and 'uncaught exception:' not in logs
         print('PASS: production directory wheel axes, horizontal names, thin thumb drag, last-row actions and normal close')
         sys.exit(0)
-    click(1128, 24)
+    click(*center(tool('新增資料夾')))
     screenshot('create')
     type_name('declined')
-    click(936, 590)
+    answer(*CREATE, ok=False)
     assert len(status()) == 3, 'Cancelled creation changed Drive.'
-    click(1128, 24)
+    click(*center(tool('新增資料夾')))
     type_name('a/b')
-    click(1056, 590)
+    answer(*CREATE)
     assert len(status()) == 3, 'Invalid name changed Drive.'
     screenshot('invalid-name')
     type_name('created')
-    click(1056, 590)
+    answer(*CREATE)
     wait_for(lambda: len(status()) == 4, 'New folder was not created.')
     time.sleep(.6)
     screenshot('created')
-    # Download | Cut | Copy | Delete use the standard vertical dividers.
+    # Row actions are separated by the standard light-blue vertical dividers.
     image = screenshot('actions')
-    for x in (1378, 1428, 1478):
+    actions = gui()['rows'][0]['actions']
+    for left, right in zip(actions, actions[1:]):
+        x = (left['x'] + left['w'] + right['x']) // 2
+        span = range(left['y'], left['y'] + left['h'])
         assert sum(b > 240 and 150 < r < 220 and abs(r-g) < 3
-                   for r,g,b in (image.getpixel((x,y)) for y in range(122,145))) >= 18, 'Missing light-blue action separator.'
-    click(1404, 134)  # Cut records a selection; it must not mutate Drive.
+                   for r,g,b in (image.getpixel((x,y)) for y in span)) >= len(span) * 3 // 4, 'Missing light-blue action separator.'
+    action('file', '剪下')  # Cut records a selection; it must not mutate Drive.
     image = screenshot('paste-enabled')
-    assert image.getpixel((768,16))[0] > 240, 'Cut did not enable the standard-size paste button.'
+    assert image.getpixel((paste_left,paste_y))[0] > 240, 'Cut did not enable the standard-size paste button.'
     assert json.loads(status()['file']['name'])['parent'] == 'root'
-    click(450, 177)  # Browse the destination folder.
+    click(*center(row('destination')['rect']))  # Browse the destination folder.
     time.sleep(.6)
-    click(840, 24)  # Paste opens a confirmation for the visible folder.
+    click(*center(paste))  # Paste opens a confirmation for the visible folder.
     screenshot('paste-cut')
-    click(936, 584)
+    answer(*CONFIRM, ok=False)
     assert json.loads(status()['file']['name'])['parent'] == 'root', 'Cancelled paste moved the file.'
-    click(840, 24)
-    click(1056, 584)
+    click(*center(paste))
+    answer(*CONFIRM)
     wait_for(lambda: json.loads(status()['file']['name'])['parent'] == 'destination', 'Cut/paste did not use the visible folder.')
     time.sleep(.6)
     image = screenshot('paste-empty-after-cut')
-    assert 80 < image.getpixel((768,16))[0] < 200, 'Cut paste did not disable the empty clipboard.'
-    click(1454, 134)  # Copy the file to the same visible folder.
-    click(840, 24)
+    assert 80 < image.getpixel((paste_left,paste_y))[0] < 200, 'Cut paste did not disable the empty clipboard.'
+    action('file', '複製')  # Copy the file to the same visible folder.
+    click(*center(paste))
     screenshot('paste-copy')
-    click(1056, 584)
+    answer(*CONFIRM)
     wait_for(lambda: len(json.loads(status()['destination']['description'])) == 2, 'Copy/paste did not retain both same-named files.')
     time.sleep(.6)
     screenshot('copy-progress')
     copied = [value['id'] for value in json.loads(status()['destination']['description']) if value['id'] != 'file'][0]
     assert json.loads(status()[copied]['name'])['parent'] == 'destination'
-    click(310, 70)  # Return to root while retaining the copy selection.
+    crumb('測試空間')  # Return to root while retaining the copy selection.
     time.sleep(.6)
-    click(1504, 134)  # Delete the first folder, including both file instances.
+    action('destination', '刪除')  # Delete the folder, including both file instances.
     screenshot('delete')
-    click(936, 584)
+    answer(*CONFIRM, ok=False)
     assert 'destination' in status() and 'file' in status(), 'Cancelled deletion changed Drive.'
-    click(1504, 134)
-    click(1056, 584)
+    action('destination', '刪除')
+    answer(*CONFIRM)
     wait_for(lambda: 'destination' not in status() and 'file' not in status() and copied not in status(), 'Recursive deletion did not finish.')
     glow('glow', 1000, 900)
     run('windowsize', '--sync', window, 800, 600)
@@ -262,3 +329,4 @@ finally:
     if app.poll() is None:
         app.kill()
         app.wait()
+    window_manager.kill()
