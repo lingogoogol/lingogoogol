@@ -433,7 +433,6 @@ namespace lgo {
                     <
                         vk::PhysicalDeviceFeatures2,
                         vk::PhysicalDeviceVulkan11Features,
-                        vk::PhysicalDeviceVulkan12Features,
                         vk::PhysicalDeviceVulkan13Features
                     >()
                 };
@@ -444,7 +443,8 @@ namespace lgo {
                     { return std::string_view{ extension.extensionName.data() } == "VK_KHR_swapchain"; }))
                     reason = "VK_KHR_swapchain is missing";
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters) reason = "shaderDrawParameters is missing";
-                else if (!device_feature.get<vk::PhysicalDeviceVulkan12Features>().runtimeDescriptorArray) reason = "runtimeDescriptorArray is missing";
+                // runtimeDescriptorArray is not required: no shader declares the
+                // RuntimeDescriptorArray capability (texture.slang binds one sampler).
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering) reason = "dynamicRendering is missing";
                 else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2) reason = "synchronization2 is missing";
                 // Only viewport and scissor state is dynamic (core since 1.0). Do not
@@ -552,10 +552,6 @@ namespace lgo {
             vk::PhysicalDeviceVulkan11Features
             {
                 .shaderDrawParameters{ true }
-            },
-            vk::PhysicalDeviceVulkan12Features
-            {
-                .runtimeDescriptorArray{ true }
             },
             vk::PhysicalDeviceVulkan13Features
             {
