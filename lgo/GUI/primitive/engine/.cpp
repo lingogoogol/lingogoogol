@@ -192,32 +192,56 @@ namespace lgo {
         std::uint32_t image_index,
         vk::ImageLayout old_layout,
         vk::ImageLayout new_layout,
-        vk::AccessFlags2 src_access_mask,
-        vk::AccessFlags2 dest_access_mask,
-        vk::PipelineStageFlags2 src_stage_mask,
-        vk::PipelineStageFlags2 dest_stage_mask
+        vk::AccessFlags src_access_mask,
+        vk::AccessFlags dest_access_mask,
+        vk::PipelineStageFlags src_stage_mask,
+        vk::PipelineStageFlags dest_stage_mask
     )
     -> void
     {
+        const vk::ImageSubresourceRange subresource_range
+        {
+            .aspectMask{ vk::ImageAspectFlagBits::eColor },
+            .baseMipLevel{ 0 },
+            .levelCount{ 1 },
+            .baseArrayLayer{ 0 },
+            .layerCount{ 1 }
+        };
+        if (!m_dynamic_rendering)
+        {
+            // Vulkan 1.1 path: synchronization2 is a Vulkan 1.3 feature.
+            const vk::ImageMemoryBarrier barrier
+            {
+                .srcAccessMask{ src_access_mask },
+                .dstAccessMask{ dest_access_mask },
+                .oldLayout{ old_layout },
+                .newLayout{ new_layout },
+                .srcQueueFamilyIndex{ vk::QueueFamilyIgnored },
+                .dstQueueFamilyIndex{ vk::QueueFamilyIgnored },
+                .image{ m_swap_chain_image[image_index] },
+                .subresourceRange{ subresource_range }
+            };
+            m_command_buffer.pipelineBarrier(src_stage_mask, dest_stage_mask, {}, {}, {}, barrier);
+            return;
+        }
+        // The callers pass the common subset of the two APIs: every legacy access
+        // and stage bit keeps the same value in the 64-bit synchronization2 types.
+        const auto access2{ [](vk::AccessFlags flag)
+            { return vk::AccessFlags2{ static_cast<vk::AccessFlags::MaskType>(flag) }; } };
+        const auto stage2{ [](vk::PipelineStageFlags flag)
+            { return vk::PipelineStageFlags2{ static_cast<vk::PipelineStageFlags::MaskType>(flag) }; } };
         vk::ImageMemoryBarrier2 barrier
         {
-            .srcStageMask{ src_stage_mask },
-            .srcAccessMask{ src_access_mask },
-            .dstStageMask{ dest_stage_mask },
-            .dstAccessMask{ dest_access_mask },
+            .srcStageMask{ stage2(src_stage_mask) },
+            .srcAccessMask{ access2(src_access_mask) },
+            .dstStageMask{ stage2(dest_stage_mask) },
+            .dstAccessMask{ access2(dest_access_mask) },
             .oldLayout{ old_layout },
             .newLayout{ new_layout },
             .srcQueueFamilyIndex{ vk::QueueFamilyIgnored },
             .dstQueueFamilyIndex{ vk::QueueFamilyIgnored },
             .image{ m_swap_chain_image[image_index] },
-            .subresourceRange
-            {
-                .aspectMask{ vk::ImageAspectFlagBits::eColor },
-                .baseMipLevel{ 0 },
-                .levelCount{ 1 },
-                .baseArrayLayer{ 0 },
-                .layerCount{ 1 }
-            }
+            .subresourceRange{ subresource_range }
         };
         vk::DependencyInfo dependency_info
         {
@@ -410,6 +434,28 @@ namespace lgo {
         m_surface = vk::raii::SurfaceKHR{ m_instance, surface };
     }
 
+    // Requirements of the Vulkan 1.3 dynamic-rendering path. A GPU without them
+    // still runs on the Vulkan 1.1 render-pass path. The Vulkan 1.2/1.3 feature
+    // structs may only be queried on a device that reports Vulkan 1.2 or newer.
+    static auto vulkan_dynamic_rendering_supported(const vk::raii::PhysicalDevice& device) -> bool
+    {
+        if (device.getProperties().apiVersion < Vulkan_version_encode(0, 1, 3, 0)) return false;
+        const auto feature
+        {
+            device.getFeatures2
+            <
+                vk::PhysicalDeviceFeatures2,
+                vk::PhysicalDeviceVulkan11Features,
+                vk::PhysicalDeviceVulkan13Features
+            >()
+        };
+        // runtimeDescriptorArray is not required: no shader declares the
+        // RuntimeDescriptorArray capability (texture.slang binds one sampler).
+        return feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+            feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+            feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2;
+    }
+
     auto engine_t::create_device() -> void
     {
         //Create a physical device.
@@ -418,22 +464,23 @@ namespace lgo {
         for (vk::raii::PhysicalDevice device : device_available)
         {
             vk::PhysicalDeviceProperties device_property{ device.getProperties() };
-            if (device_property.apiVersion < Vulkan_version_encode(0, 1, 3, 0))
+            if (device_property.apiVersion < Vulkan_version_encode(0, 1, 1, 0))
             {
-                log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": Vulkan 1.3 is required\n");
+                log_file(std::string{ "Skipping Vulkan GPU " } + device_property.deviceName.data() + ": Vulkan 1.1 is required\n");
                 continue;
             }
             try
             {
                 std::vector<vk::QueueFamilyProperties2> device_queue_family{ device.getQueueFamilyProperties2() };
                 std::vector<vk::ExtensionProperties> device_extension{ device.enumerateDeviceExtensionProperties() };
+                // The Vulkan 1.1 struct is valid on every supported version; the
+                // Vulkan 1.3 path requirements only choose the rendering path.
                 auto device_feature
                 {
                     device.getFeatures2
                     <
                         vk::PhysicalDeviceFeatures2,
-                        vk::PhysicalDeviceVulkan11Features,
-                        vk::PhysicalDeviceVulkan13Features
+                        vk::PhysicalDeviceShaderDrawParametersFeatures
                     >()
                 };
                 std::string reason;
@@ -442,11 +489,7 @@ namespace lgo {
                 else if (!std::ranges::any_of(device_extension, [](const auto& extension)
                     { return std::string_view{ extension.extensionName.data() } == "VK_KHR_swapchain"; }))
                     reason = "VK_KHR_swapchain is missing";
-                else if (!device_feature.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters) reason = "shaderDrawParameters is missing";
-                // runtimeDescriptorArray is not required: no shader declares the
-                // RuntimeDescriptorArray capability (texture.slang binds one sampler).
-                else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering) reason = "dynamicRendering is missing";
-                else if (!device_feature.get<vk::PhysicalDeviceVulkan13Features>().synchronization2) reason = "synchronization2 is missing";
+                else if (!device_feature.get<vk::PhysicalDeviceShaderDrawParametersFeatures>().shaderDrawParameters) reason = "shaderDrawParameters is missing";
                 // Only viewport and scissor state is dynamic (core since 1.0). Do not
                 // require VK_EXT_extended_dynamic_state: its feature struct is only
                 // valid with the extension enabled, and many Android Vulkan 1.3
@@ -546,6 +589,9 @@ namespace lgo {
             .queueCount{ 1 },
             .pQueuePriorities{ &queue_priority }
         };
+        m_dynamic_rendering = vulkan_dynamic_rendering_supported(m_device_physical);
+        log_file(std::string{ "Vulkan GPU " } + m_device_physical.getProperties().deviceName.data() +
+            (m_dynamic_rendering ? ": using Vulkan 1.3 dynamic rendering\n" : ": using the Vulkan 1.1 render pass path\n"));
         vk::StructureChain feature
         {
             vk::PhysicalDeviceFeatures2{},
@@ -559,10 +605,24 @@ namespace lgo {
                 .dynamicRendering{ true }
             }
         };
+        // VkPhysicalDeviceVulkan1xFeatures may only be chained on Vulkan 1.2+.
+        vk::StructureChain feature_vulkan11
+        {
+            vk::PhysicalDeviceFeatures2{},
+            vk::PhysicalDeviceShaderDrawParametersFeatures
+            {
+                .shaderDrawParameters{ true }
+            }
+        };
         const std::array<const char*, 1> extension_device_cstr_arr{ "VK_KHR_swapchain" };
         vk::DeviceCreateInfo device_info
         {
-            .pNext{ &feature.get<vk::PhysicalDeviceFeatures2>() },
+            .pNext
+            {
+                m_dynamic_rendering ?
+                    &feature.get<vk::PhysicalDeviceFeatures2>() :
+                    &feature_vulkan11.get<vk::PhysicalDeviceFeatures2>()
+            },
             .queueCreateInfoCount{ 1 },
             .pQueueCreateInfos{ &device_queue },
             .enabledExtensionCount{ static_cast<std::uint32_t>(extension_device_cstr_arr.size()) },
@@ -584,6 +644,7 @@ namespace lgo {
         m_depth_format = vk::Format::eD32Sfloat;
         if (!(m_device_physical.getFormatProperties(m_depth_format).optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment))
             m_depth_format = vk::Format::eD16Unorm;
+        if (!m_dynamic_rendering) create_render_pass();
         //Create a command pool.
         vk::CommandPoolCreateInfo command_pool_info
         {
@@ -618,11 +679,13 @@ namespace lgo {
         m_fence.clear();
         m_semaphore_image.clear();
         m_semaphore_draw.clear();
+        m_swap_chain_framebuffer.clear();
         m_depth_image_view = {};
         m_depth_image.clear();
         m_swap_chain_image_view.clear();
         m_swap_chain_image.clear();
         m_swap_chain.clear();
+        m_render_pass.clear();
         m_pipeline_state = {};
         m_command_pool.clear();
         m_command_queue.clear();
@@ -810,7 +873,9 @@ namespace lgo {
             .oldSwapchain{ *m_swap_chain }
         };
         vk::raii::SwapchainKHR swap_chain{ m_device, swapchain_info };
-        // Views must be released before their images and the retired swapchain.
+        // Views must be released before their images and the retired swapchain;
+        // framebuffers before the views they reference.
+        m_swap_chain_framebuffer.clear();
         m_swap_chain_image_view.clear();
         m_depth_image_view = image_view_t{};
         m_depth_image = image_t{};
@@ -864,6 +929,31 @@ namespace lgo {
             .format{ m_depth_format },
             .aspect{ vk::ImageAspectFlagBits::eDepth }
         });
+        if (!m_dynamic_rendering)
+        {
+            for (std::size_t i{ 0 }; i < m_swap_chain_image_view.size(); ++i)
+            {
+                const std::array<vk::ImageView, 2> attachment
+                {
+                    *m_swap_chain_image_view[i],
+                    m_depth_image_view.interface_get()
+                };
+                m_swap_chain_framebuffer.emplace_back
+                (
+                    m_device,
+                    vk::FramebufferCreateInfo
+                    {
+                        .renderPass{ *m_render_pass },
+                        .attachmentCount{ static_cast<std::uint32_t>(attachment.size()) },
+                        .pAttachments{ attachment.data() },
+                        .width{ m_swap_chain_extent.width },
+                        .height{ m_swap_chain_extent.height },
+                        .layers{ 1 }
+                    }
+                );
+                vulkan_name(m_device, *m_swap_chain_framebuffer.back(), [&] { return m_name + "/swapchain.framebuffer[" + std::to_string(i) + "]"; });
+            }
+        }
 
         for (std::size_t i{ 0 }; i < m_swap_chain_image.size(); ++i)
         {
@@ -1144,50 +1234,80 @@ namespace lgo {
             vk::ImageLayout::eUndefined,
             vk::ImageLayout::eColorAttachmentOptimal,
             {},
-            vk::AccessFlagBits2::eColorAttachmentWrite,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput
+            vk::AccessFlagBits::eColorAttachmentWrite,
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eColorAttachmentOutput
         );
+        // The depth-only layout is Vulkan 1.2 (separate depth/stencil layouts).
+        const auto depth_layout
+        {
+            m_dynamic_rendering ?
+                vk::ImageLayout::eDepthAttachmentOptimal :
+                vk::ImageLayout::eDepthStencilAttachmentOptimal
+        };
         m_depth_image.barrier
         (
             m_command_buffer,
             vk::ImageAspectFlagBits::eDepth,
             vk::ImageLayout::eUndefined,
-            vk::ImageLayout::eDepthAttachmentOptimal,
+            depth_layout,
             vk::AccessFlagBits::eDepthStencilAttachmentWrite,
             vk::AccessFlagBits::eDepthStencilAttachmentWrite,
             vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
             vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests
         );
-        vk::RenderingAttachmentInfo color_attachment_info
+        const vk::ClearColorValue clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+        const vk::ClearDepthStencilValue clear_depth(1.0f, 0);
+        const vk::Rect2D render_area
         {
-            .imageView{ m_swap_chain_image_view[image_index] },
-            .imageLayout{ vk::ImageLayout::eColorAttachmentOptimal },
-            .loadOp{ vk::AttachmentLoadOp::eClear },
-            .storeOp{ vk::AttachmentStoreOp::eStore },
-            .clearValue{ vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f) }
+            .offset{ 0, 0 },
+            .extent{ m_swap_chain_extent }
         };
-        vk::RenderingAttachmentInfo depth_attachment_info
+        if (m_dynamic_rendering)
         {
-            .imageView{ m_depth_image_view.interface_get() },
-            .imageLayout{ vk::ImageLayout::eDepthAttachmentOptimal },
-            .loadOp{ vk::AttachmentLoadOp::eClear },
-            .storeOp{ vk::AttachmentStoreOp::eDontCare },
-            .clearValue{ vk::ClearDepthStencilValue(1.0f, 0) }
-        };
-        vk::RenderingInfo render_info
-        {
-            .renderArea
+            vk::RenderingAttachmentInfo color_attachment_info
             {
-                .offset{ 0, 0 },
-                .extent{ m_swap_chain_extent }
-            },
-            .layerCount{ 1 },
-            .colorAttachmentCount{ 1 },
-            .pColorAttachments{ &color_attachment_info },
-            .pDepthAttachment{ &depth_attachment_info }
-        };
-        m_command_buffer.beginRendering(render_info);
+                .imageView{ m_swap_chain_image_view[image_index] },
+                .imageLayout{ vk::ImageLayout::eColorAttachmentOptimal },
+                .loadOp{ vk::AttachmentLoadOp::eClear },
+                .storeOp{ vk::AttachmentStoreOp::eStore },
+                .clearValue{ clear_color }
+            };
+            vk::RenderingAttachmentInfo depth_attachment_info
+            {
+                .imageView{ m_depth_image_view.interface_get() },
+                .imageLayout{ depth_layout },
+                .loadOp{ vk::AttachmentLoadOp::eClear },
+                .storeOp{ vk::AttachmentStoreOp::eDontCare },
+                .clearValue{ clear_depth }
+            };
+            vk::RenderingInfo render_info
+            {
+                .renderArea{ render_area },
+                .layerCount{ 1 },
+                .colorAttachmentCount{ 1 },
+                .pColorAttachments{ &color_attachment_info },
+                .pDepthAttachment{ &depth_attachment_info }
+            };
+            m_command_buffer.beginRendering(render_info);
+        }
+        else
+        {
+            // Attachment order matches create_render_pass(): color, then depth.
+            const std::array<vk::ClearValue, 2> clear_value{ clear_color, clear_depth };
+            m_command_buffer.beginRenderPass
+            (
+                vk::RenderPassBeginInfo
+                {
+                    .renderPass{ *m_render_pass },
+                    .framebuffer{ *m_swap_chain_framebuffer[image_index] },
+                    .renderArea{ render_area },
+                    .clearValueCount{ static_cast<std::uint32_t>(clear_value.size()) },
+                    .pClearValues{ clear_value.data() }
+                },
+                vk::SubpassContents::eInline
+            );
+        }
         m_command_buffer.setViewport
         (
             0,
@@ -1203,16 +1323,17 @@ namespace lgo {
         );
         rect_primitive_t::render(m_rect_primitive, m_command_buffer,
             m_cursor_highlight && glfwGetWindowAttrib(m_window, GLFW_HOVERED) != GLFW_FALSE);
-        m_command_buffer.endRendering();
+        if (m_dynamic_rendering) m_command_buffer.endRendering();
+        else m_command_buffer.endRenderPass();
         transition_image_layout
         (
             image_index,
             vk::ImageLayout::eColorAttachmentOptimal,
             vk::ImageLayout::ePresentSrcKHR,
-            vk::AccessFlagBits2::eColorAttachmentWrite,
+            vk::AccessFlagBits::eColorAttachmentWrite,
             {},
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            vk::PipelineStageFlagBits2::eBottomOfPipe
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eBottomOfPipe
         );
         m_command_buffer.end();
 
@@ -1316,6 +1437,73 @@ namespace lgo {
     auto engine_t::depth_format_get() const -> vk::Format
     {
         return m_depth_format;
+    }
+
+    auto engine_t::render_pass_get() const -> vk::RenderPass
+    {
+        return m_dynamic_rendering ? vk::RenderPass{} : *m_render_pass;
+    }
+
+    auto engine_t::create_render_pass() -> void
+    {
+        // Vulkan 1.1 equivalent of the dynamic-rendering attachments in draw().
+        // draw() already moves both images into these layouts with explicit
+        // barriers, so the pass keeps them (initial == final layout) and needs no
+        // subpass dependencies beyond the implicit external ones.
+        const std::array<vk::AttachmentDescription, 2> attachment
+        {
+            vk::AttachmentDescription
+            {
+                .format{ m_surface_format.surfaceFormat.format },
+                .samples{ vk::SampleCountFlagBits::e1 },
+                .loadOp{ vk::AttachmentLoadOp::eClear },
+                .storeOp{ vk::AttachmentStoreOp::eStore },
+                .stencilLoadOp{ vk::AttachmentLoadOp::eDontCare },
+                .stencilStoreOp{ vk::AttachmentStoreOp::eDontCare },
+                .initialLayout{ vk::ImageLayout::eColorAttachmentOptimal },
+                .finalLayout{ vk::ImageLayout::eColorAttachmentOptimal }
+            },
+            vk::AttachmentDescription
+            {
+                .format{ m_depth_format },
+                .samples{ vk::SampleCountFlagBits::e1 },
+                .loadOp{ vk::AttachmentLoadOp::eClear },
+                .storeOp{ vk::AttachmentStoreOp::eDontCare },
+                .stencilLoadOp{ vk::AttachmentLoadOp::eDontCare },
+                .stencilStoreOp{ vk::AttachmentStoreOp::eDontCare },
+                .initialLayout{ vk::ImageLayout::eDepthStencilAttachmentOptimal },
+                .finalLayout{ vk::ImageLayout::eDepthStencilAttachmentOptimal }
+            }
+        };
+        const vk::AttachmentReference color_reference
+        {
+            .attachment{ 0 },
+            .layout{ vk::ImageLayout::eColorAttachmentOptimal }
+        };
+        const vk::AttachmentReference depth_reference
+        {
+            .attachment{ 1 },
+            .layout{ vk::ImageLayout::eDepthStencilAttachmentOptimal }
+        };
+        const vk::SubpassDescription subpass
+        {
+            .pipelineBindPoint{ vk::PipelineBindPoint::eGraphics },
+            .colorAttachmentCount{ 1 },
+            .pColorAttachments{ &color_reference },
+            .pDepthStencilAttachment{ &depth_reference }
+        };
+        m_render_pass = vk::raii::RenderPass
+        {
+            m_device,
+            vk::RenderPassCreateInfo
+            {
+                .attachmentCount{ static_cast<std::uint32_t>(attachment.size()) },
+                .pAttachments{ attachment.data() },
+                .subpassCount{ 1 },
+                .pSubpasses{ &subpass }
+            }
+        };
+        vulkan_name(m_device, *m_render_pass, [&] { return m_name + "/frame.render-pass"; });
     }
 
     auto engine_t::set_exit() -> void

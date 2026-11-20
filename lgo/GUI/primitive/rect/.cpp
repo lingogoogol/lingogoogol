@@ -180,7 +180,8 @@ namespace lgo
             .topology{ vk::PrimitiveTopology::eTriangleStrip },
             .surface_format{ m_engine->format_get() },
             .depth_format{ m_engine->depth_format_get() },
-            .push_constant_size{32}
+            .push_constant_size{32},
+            .render_pass{ m_engine->render_pass_get() }
         });
         m_solid_pipeline_state.vertex_binding_add
         (
@@ -243,7 +244,8 @@ namespace lgo
             .descriptor_set_layout{ &m_texture_descriptor_set_layout },
             .topology{ vk::PrimitiveTopology::eTriangleStrip },
             .surface_format{ m_engine->format_get() },
-            .depth_format{ m_engine->depth_format_get() }
+            .depth_format{ m_engine->depth_format_get() },
+            .render_pass{ m_engine->render_pass_get() }
         });
         m_texture_pipeline_state.vertex_binding_add
         (

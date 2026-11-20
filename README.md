@@ -52,7 +52,7 @@
 
 ### 1. 準備執行環境
 
-需要 Windows x64、支援 Vulkan 1.3 且具備必要 features 與圖形／呈現佇列的圖形環境，以及可連線至 Google API 的網路。
+需要 Windows x64、支援 Vulkan 1.1 以上且具備必要 features 與圖形／呈現佇列的圖形環境，以及可連線至 Google API 的網路。
 
 將執行檔與 DLL 集中放在 `bin/`，字型、shader、設定與狀態保留在其上一層的資料目錄：
 
@@ -221,7 +221,7 @@ blob 索引均明確保存跨帳戶路由：file name 的 `parent_account` 指�
 ## 目前限制
 
 - 顯示卡驅動程式重設、移除或 GPU 異常可能造成 Vulkan 裝置遺失（`VK_ERROR_DEVICE_LOST`）。程式會重新選擇可用的 GPU、重建裝置及繪圖資源，保留目前目錄、傳輸工作與進度；重建期間畫面可能暫停更新，傳輸不會因此重新開始。重建失敗時至少間隔一秒再試，同一個 60 秒區間最多嘗試三次，超過後會關閉並寫回未使用的 `blob_queue`。未完成的傳輸會由磁碟檢查點於下次啟動時恢復；復原過程與失敗原因會記錄在 `logfile/`。
-- 啟動會檢查 Vulkan loader、必要的 instance／device extensions、圖形與呈現佇列、必要 features、SDR surface 格式及字型貼圖能力；GPU 不符條件時記錄具體原因，裝置初始化失敗時會嘗試其他合格 GPU。Debug 缺少 validation layer 或 debug-utils 時會略過可選診斷功能。使用 Vulkan 1.3，無須 `VK_KHR_get_surface_capabilities2`。
+- 啟動會檢查 Vulkan loader、必要的 instance／device extensions、圖形與呈現佇列、必要 features、SDR surface 格式及字型貼圖能力；GPU 不符條件時記錄具體原因，裝置初始化失敗時會嘗試其他合格 GPU。Debug 缺少 validation layer 或 debug-utils 時會略過可選診斷功能。支援 Vulkan 1.3 及 `dynamicRendering`、`synchronization2` 的 GPU 使用 dynamic rendering；否則（例如只提供 Vulkan 1.1 驅動程式的 Android 手機）自動改用 Vulkan 1.1 的 render pass 繪製，畫面相同。所選方式記錄在 logfile。無須 `VK_KHR_get_surface_capabilities2`。
 - swapchain 過期或 suboptimal 會重建；surface 遺失會重建 surface 與 GPU 資源，保留傳輸工作，沿用上述重試上限。fence 與影像擷取每次最多等待 50 毫秒，逾時或尚無可用影像時返回事件迴圈。surface 格式變更時重建 pipeline；透明度模式依支援能力選擇，深度格式優先 D32，必要時退回 D16。
 - 不支援的資源尺寸、無適合記憶體類型、損壞的 SPIR-V 標頭及 Vulkan API 失敗會回報原因。無法恢復的錯誤會停止傳輸、保存未使用的佇列並顯示錯誤對話框；程式以非零狀態結束。尚未完成的傳輸會保留跨次啟動續傳的檢查點。validation 訊息只記錄，不會從驅動程式的 C callback 拋出例外。
 - 檔案內容使用 Base64URL 編碼，目前沒有實作檔案內容的端對端加密。

@@ -18,6 +18,9 @@ export namespace lgo
             vk::Format surface_format{};
             vk::Format depth_format{ vk::Format::eD32Sfloat };
             std::uint32_t push_constant_size{};
+            // Null on the Vulkan 1.3 dynamic-rendering path. On the Vulkan 1.1
+            // path, the pipeline is built for this (compatible) render pass.
+            vk::RenderPass render_pass{};
         };
         
         pipeline_state_t() = default;
@@ -54,6 +57,7 @@ export namespace lgo
         vk::Format m_surface_format{};
         vk::Format m_depth_format{ vk::Format::eD32Sfloat };
         std::uint32_t m_push_constant_size{};
+        vk::RenderPass m_render_pass{};
         vk::raii::PipelineLayout m_pipeline_layout{ nullptr };
         vk::raii::Pipeline m_interface{ nullptr };
     };

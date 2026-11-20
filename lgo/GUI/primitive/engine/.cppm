@@ -48,6 +48,12 @@ export namespace lgo
         std::vector<vk::raii::ImageView> m_swap_chain_image_view{};
         image_t m_depth_image{};
         image_view_t m_depth_image_view{};
+        // Chosen per GPU at device creation: Vulkan 1.3 dynamic rendering when the
+        // GPU supports it, otherwise a Vulkan 1.1 render pass with one framebuffer
+        // per swapchain image (many Android drivers only expose Vulkan 1.1).
+        bool m_dynamic_rendering{ true };
+        vk::raii::RenderPass m_render_pass{ nullptr };
+        std::vector<vk::raii::Framebuffer> m_swap_chain_framebuffer{};
         pipeline_state_t m_pipeline_state{};
         vk::raii::CommandPool m_command_pool{ nullptr };
         vk::raii::CommandBuffer m_command_buffer{ nullptr };
@@ -124,12 +130,13 @@ export namespace lgo
             std::uint32_t image_index,
             vk::ImageLayout old_layout,
             vk::ImageLayout new_layout,
-            vk::AccessFlags2 src_access_mask,
-            vk::AccessFlags2 dest_access_mask,
-            vk::PipelineStageFlags2 src_stage_mask,
-            vk::PipelineStageFlags2 dest_stage_mask
+            vk::AccessFlags src_access_mask,
+            vk::AccessFlags dest_access_mask,
+            vk::PipelineStageFlags src_stage_mask,
+            vk::PipelineStageFlags dest_stage_mask
         )
         -> void;
+        auto create_render_pass() -> void;
 
         auto find_eligible_queue_family
         (
@@ -159,6 +166,8 @@ export namespace lgo
 
         auto format_get() const -> vk::Format;
         auto depth_format_get() const -> vk::Format;
+        // Null when the GPU uses Vulkan 1.3 dynamic rendering.
+        auto render_pass_get() const -> vk::RenderPass;
         auto set_exit() -> void;
         auto get_exit() -> bool;
         auto get_window_pos() -> pos_2D;

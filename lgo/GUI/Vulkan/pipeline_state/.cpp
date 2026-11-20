@@ -20,6 +20,7 @@ namespace lgo
         m_surface_format = ctor.surface_format;
         m_depth_format = ctor.depth_format;
         m_push_constant_size = ctor.push_constant_size;
+        m_render_pass = ctor.render_pass;
         return;
     }
 
@@ -192,7 +193,7 @@ namespace lgo
                 .pColorBlendState{ &color_blend },
                 .pDynamicState{ &dynamic_state_info },
                 .layout{ m_pipeline_layout },
-                .renderPass{ nullptr }
+                .renderPass{ m_render_pass }
             },
             {
                 .colorAttachmentCount{ 1 },
@@ -200,6 +201,9 @@ namespace lgo
                 .depthAttachmentFormat{ m_depth_format }
             }
         };
+        // VkPipelineRenderingCreateInfo is only valid for dynamic rendering
+        // (Vulkan 1.3); a render-pass pipeline must not chain it.
+        if (m_render_pass) pipeline_info.unlink<vk::PipelineRenderingCreateInfo>();
         m_interface = vk::raii::Pipeline
         {
             device,

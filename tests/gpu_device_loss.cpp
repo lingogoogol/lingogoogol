@@ -592,7 +592,8 @@ auto test_vulkan_errors(const std::string& mode) -> void
         check(rejected, "GPU allocation failure was swallowed.");
     }
     else if (mode == "depth-fallback" || mode == "no-depth-format" || mode == "no-surface-formats" ||
-        mode == "no-present-modes" || mode == "no-device-features" || mode == "image-memory-properties")
+        mode == "no-present-modes" || mode == "no-device-features" || mode == "vulkan11-fallback" ||
+        mode == "image-memory-properties")
     {
         auto* instance = const_cast<std::remove_const_t<std::remove_pointer_t<
             decltype(engine.device_physical_get().getDispatcher())>>*>(engine.device_physical_get().getDispatcher());
@@ -626,6 +627,20 @@ auto test_vulkan_errors(const std::string& mode) -> void
                 return static_cast<decltype(original_modes(nullptr, {}, nullptr, nullptr))>(0);
             };
         else if (mode == "no-device-features")
+            // shaderDrawParameters is the one feature both rendering paths require.
+            instance->vkGetPhysicalDeviceFeatures2 = [](auto physical, auto* features)
+            {
+                original_features(physical, features);
+                for (auto* chain = reinterpret_cast<vk::BaseOutStructure*>(features->pNext); chain; chain = chain->pNext)
+                    if (chain->sType == vk::StructureType::ePhysicalDeviceVulkan11Features)
+                        reinterpret_cast<vk::PhysicalDeviceVulkan11Features*>(chain)->shaderDrawParameters = vk::False;
+                    else if (chain->sType == vk::StructureType::ePhysicalDeviceShaderDrawParametersFeatures)
+                        reinterpret_cast<vk::PhysicalDeviceShaderDrawParametersFeatures*>(chain)->shaderDrawParameters = vk::False;
+            };
+        else if (mode == "vulkan11-fallback")
+        {
+            check(!engine.render_pass_get(), "A Vulkan 1.3 GPU did not use dynamic rendering.");
+            // A GPU without dynamic rendering must switch to the Vulkan 1.1 render pass path.
             instance->vkGetPhysicalDeviceFeatures2 = [](auto physical, auto* features)
             {
                 original_features(physical, features);
@@ -633,6 +648,7 @@ auto test_vulkan_errors(const std::string& mode) -> void
                     if (chain->sType == vk::StructureType::ePhysicalDeviceVulkan13Features)
                         reinterpret_cast<vk::PhysicalDeviceVulkan13Features*>(chain)->dynamicRendering = vk::False;
             };
+        }
         else
             instance->vkGetPhysicalDeviceMemoryProperties = [](auto physical, auto* properties)
             {
@@ -657,6 +673,8 @@ auto test_vulkan_errors(const std::string& mode) -> void
             check(!engine.message_loop(), "Unsupported capability closed the window before retrying.");
             if (mode == "depth-fallback") check(engine.depth_format_get() == vk::Format::eD16Unorm,
                 "Depth format did not fall back to D16.");
+            else if (mode == "vulkan11-fallback") check(engine.gpu_available() && engine.render_pass_get(),
+                "A GPU without dynamic rendering did not switch to the Vulkan 1.1 render pass.");
             else check(!engine.gpu_available(), "Missing Vulkan capability was treated as a successful rebuild.");
         }
         instance->vkGetPhysicalDeviceFormatProperties = original_properties;
@@ -907,7 +925,7 @@ int main(int argc, char** argv)
             mode == "acquire-outdated" || mode == "surface-lost" || mode == "present-outdated" ||
             mode == "present-surface-lost" || mode == "depth-fallback" || mode == "no-surface-formats" || mode == "out-of-memory" || mode == "device-fallback" ||
             mode == "no-depth-format" || mode == "no-present-modes" || mode == "no-device-features" ||
-            mode == "image-memory-properties" || mode == "acquire-suboptimal" || mode == "present-suboptimal")
+            mode == "vulkan11-fallback" || mode == "image-memory-properties" || mode == "acquire-suboptimal" || mode == "present-suboptimal")
         {
             test_vulkan_errors(mode);
             return 0;
